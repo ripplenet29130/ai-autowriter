@@ -1,8 +1,16 @@
 [[redirects]]
-from = "/*"
-to = "/index.html"
-status = 200
+  from = "/*"
+  to = "/index.html"
+  status = 200
 
 [build]
-command = "npx vite build"
-publish = "dist"
+  command = "npx vite build"
+  publish = "dist"
+
+[functions]
+  node_bundler = "esbuild"
+
+# === scheduler.ts の自動実行設定（テスト用）===
+[[scheduled]]
+  cron = "*/1 * * * *"     # ← 1分ごとに自動実行
+  function = "scheduler"   # ← 実行対象のFunction名（拡張子不要）
