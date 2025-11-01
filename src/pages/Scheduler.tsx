@@ -131,8 +131,33 @@ export default function Scheduler() {
     }
   };
 
-  const handleRunNow = () => {
-    showMessage('success', '今すぐ実行機能は準備中です');
+  const handleRunNow = async (scheduleId: string) => {
+    setLoading(true);
+    try {
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+      const response = await fetch(`${supabaseUrl}/functions/v1/auto-post`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${supabaseAnonKey}`,
+        },
+        body: JSON.stringify({ schedule_id: scheduleId }),
+      });
+
+      if (!response.ok) {
+        throw new Error('投稿に失敗しました');
+      }
+
+      const result = await response.json();
+      showMessage('success', '投稿を実行しました');
+      loadSchedules();
+    } catch (error) {
+      showMessage('error', '投稿の実行に失敗しました');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -323,8 +348,9 @@ export default function Scheduler() {
                       )}
                     </button>
                     <button
-                      onClick={handleRunNow}
-                      className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors text-sm"
+                      onClick={() => handleRunNow(schedule.id)}
+                      disabled={loading}
+                      className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors text-sm disabled:opacity-50"
                     >
                       今すぐ実行
                     </button>
