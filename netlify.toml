@@ -6,6 +6,6 @@
   directory = "netlify/functions"
   node_bundler = "esbuild"
 
-[functions.scheduler]
+[[scheduled]]
   cron = "*/1 * * * *"
   function = "scheduler"
