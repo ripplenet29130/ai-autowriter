@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase, AIConfig } from '../lib/supabase';
-import { Eye, EyeOff, Save, CheckCircle, AlertCircle } from 'lucide-react';
+import { Eye, EyeOff, Save } from 'lucide-react';
+import Toast from '../components/Toast';
 
 export default function AISettings() {
   const [configs, setConfigs] = useState<AIConfig[]>([]);
@@ -87,12 +88,11 @@ export default function AISettings() {
   return (
     <div>
       {message && (
-        <div className={`mb-6 p-4 rounded-lg flex items-center gap-3 ${
-          message.type === 'success' ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-800'
-        }`}>
-          {message.type === 'success' ? <CheckCircle className="w-5 h-5" /> : <AlertCircle className="w-5 h-5" />}
-          <span>{message.text}</span>
-        </div>
+        <Toast
+          type={message.type}
+          message={message.text}
+          onClose={() => setMessage(null)}
+        />
       )}
 
       <div className="mb-8">
