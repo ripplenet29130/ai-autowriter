@@ -8,9 +8,10 @@
   publish = "dist"
 
 [functions]
+  directory = "netlify/functions"
   node_bundler = "esbuild"
 
-# === scheduler.ts の自動実行設定（テスト用）===
+# === scheduler.ts の自動実行設定（テスト用・1分ごと） ===
 [[scheduled]]
-  cron = "*/1 * * * *"     # ← 1分ごとに自動実行
-  function = "scheduler"   # ← 実行対象のFunction名（拡張子不要）
+  cron = "*/1 * * * *"
+  function = "scheduler"
