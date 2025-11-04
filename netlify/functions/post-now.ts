@@ -12,29 +12,19 @@ export const handler: Handler = async (event) => {
 
     if (!schedule_id) throw new Error("schedule_id が指定されていません");
 
-    // 🔹 スケジュール情報を取得
-    const { data: schedule, error: scheduleError } = await supabase
+    // 🔹 スケジュール取得
+    const { data: schedule } = await supabase
       .from("schedule_settings")
       .select("*")
       .eq("id", schedule_id)
       .single();
 
-    if (scheduleError || !schedule) {
-      throw new Error("スケジュール情報が見つかりません");
-    }
-
-    // 🔹 紐づく WordPress設定を取得
-    const { data: wpConfig, error: wpError } = await supabase
+    // 🔹 WordPress設定取得
+    const { data: wpConfig } = await supabase
       .from("wp_configs")
       .select("*")
       .eq("id", schedule.wp_config_id)
       .single();
-
-    if (wpError || !wpConfig) {
-      throw new Error("WordPress設定が見つかりません");
-    }
-
-    console.log("✅ WordPress設定取得成功:", wpConfig.url);
 
     // 🔹 Geminiで記事生成
     const aiResponse = await fetch(
@@ -46,28 +36,31 @@ export const handler: Handler = async (event) => {
       }
     );
 
-    if (!aiResponse.ok) {
-      const text = await aiResponse.text();
-      console.error("❌ Gemini API fetch failed:", text);
-      throw new Error("Gemini proxy fetch failed");
-    }
-
     const article = await aiResponse.json();
 
-    if (!article.content) {
-      throw new Error("Geminiから記事が返されませんでした");
-    }
-
-    console.log("✅ 記事生成成功:", article.title);
-
-    // 🔹 WordPressへ投稿
-    const wpUrl = `${wpConfig.url.replace(/\/$/, "")}/wp-json/wp/v2/posts`;
-
+    // 🔹 WordPress API接続情報
+    const wpUrl = `${wpConfig.url.replace(/\/$/, "")}`;
     const credential = Buffer.from(
       `${wpConfig.username}:${wpConfig.app_password}`
     ).toString("base64");
 
-    const wpRes = await fetch(wpUrl, {
+    // 🔹 カテゴリ slug → ID 変換
+    let categoryId = 1;
+    if (wpConfig.default_category) {
+      const catRes = await fetch(
+        `${wpUrl}/wp-json/wp/v2/categories?slug=${wpConfig.default_category}`,
+        {
+          headers: { Authorization: `Basic ${credential}` },
+        }
+      );
+      const cats = await catRes.json();
+      if (Array.isArray(cats) && cats.length > 0) {
+        categoryId = cats[0].id;
+      }
+    }
+
+    // 🔹 投稿処理
+    const wpRes = await fetch(`${wpUrl}/wp-json/wp/v2/posts`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -77,7 +70,7 @@ export const handler: Handler = async (event) => {
         title: article.title,
         content: article.content,
         status: "publish",
-        categories: [wpConfig.default_category || 1],
+        categories: [categoryId],
       }),
     });
 
