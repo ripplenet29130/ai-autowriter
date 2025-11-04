@@ -1,38 +1,55 @@
 import { useState, useEffect } from 'react';
-import { supabase } from '../lib/supabase';
-import { TrendingUp, Search, Save, Trash2, Sparkles } from 'lucide-react';
+import { supabase, AIConfig } from '../lib/supabase';
+import { TrendingUp, Search, Save, Trash2, Sparkles, Brain, Globe } from 'lucide-react';
 import Toast from '../components/Toast';
 
 interface TrendKeyword {
   id: string;
   keyword: string;
   related_keywords: string[];
+  ai_config_id?: string;
+  trend_score?: any;
+  rising_keywords?: string[];
   source: string;
   created_at: string;
 }
 
+interface GoogleTrendData {
+  timeline: { time: string; value: number }[];
+  rising: string[];
+  trend_score: any;
+}
+
 export default function TrendAnalysis() {
   const [keyword, setKeyword] = useState('');
+  const [aiConfigs, setAiConfigs] = useState<AIConfig[]>([]);
+  const [selectedAiConfigId, setSelectedAiConfigId] = useState('');
+  const [activeTab, setActiveTab] = useState<'ai' | 'google'>('ai');
+
   const [relatedKeywords, setRelatedKeywords] = useState<string[]>([]);
+  const [googleTrendData, setGoogleTrendData] = useState<GoogleTrendData | null>(null);
   const [savedKeywords, setSavedKeywords] = useState<TrendKeyword[]>([]);
+
   const [loading, setLoading] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
-  const [hasApiKey, setHasApiKey] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   useEffect(() => {
-    checkApiKey();
+    loadAiConfigs();
     loadSavedKeywords();
   }, []);
 
-  const checkApiKey = async () => {
+  const loadAiConfigs = async () => {
     const { data, error } = await supabase
       .from('ai_configs')
-      .select('api_key')
-      .eq('provider', 'Gemini')
-      .maybeSingle();
+      .select('*')
+      .order('created_at', { ascending: false });
 
-    setHasApiKey(!error && data && data.api_key);
+    if (!error && data && data.length > 0) {
+      setAiConfigs(data);
+      const activeConfig = data.find(c => c.provider === 'Gemini') || data[0];
+      setSelectedAiConfigId(activeConfig.id);
+    }
   };
 
   const loadSavedKeywords = async () => {
@@ -51,14 +68,14 @@ export default function TrendAnalysis() {
     setTimeout(() => setMessage(null), 3000);
   };
 
-  const handleAnalyze = async () => {
+  const handleAnalyzeAI = async () => {
     if (!keyword.trim()) {
       showMessage('error', 'キーワードを入力してください');
       return;
     }
 
-    if (!hasApiKey) {
-      showMessage('error', 'AI設定でGemini APIキーを登録してください');
+    if (!selectedAiConfigId) {
+      showMessage('error', 'AI設定を選択してください');
       return;
     }
 
@@ -66,16 +83,6 @@ export default function TrendAnalysis() {
     setRelatedKeywords([]);
 
     try {
-      const { data: aiConfig } = await supabase
-        .from('ai_configs')
-        .select('api_key, model')
-        .eq('provider', 'Gemini')
-        .maybeSingle();
-
-      if (!aiConfig) {
-        throw new Error('AI設定が見つかりません');
-      }
-
       const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
       const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
@@ -87,47 +94,108 @@ export default function TrendAnalysis() {
         },
         body: JSON.stringify({
           keyword: keyword.trim(),
-          api_key: aiConfig.api_key,
-          model: aiConfig.model,
+          ai_config_id: selectedAiConfigId,
         }),
       });
 
       if (!response.ok) {
-        throw new Error('トレンド分析に失敗しました');
+        throw new Error('AI分析に失敗しました');
       }
 
       const result = await response.json();
       setRelatedKeywords(result.related_keywords || []);
       showMessage('success', `${result.related_keywords?.length || 0}件のキーワードを抽出しました`);
     } catch (error) {
-      console.error('分析エラー:', error);
-      showMessage('error', 'トレンド分析に失敗しました');
+      console.error('AI分析エラー:', error);
+      showMessage('error', 'AI分析に失敗しました');
     } finally {
       setAnalyzing(false);
     }
   };
 
+  const handleAnalyzeGoogle = async () => {
+    if (!keyword.trim()) {
+      showMessage('error', 'キーワードを入力してください');
+      return;
+    }
+
+    setAnalyzing(true);
+    setGoogleTrendData(null);
+
+    try {
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+      const response = await fetch(`${supabaseUrl}/functions/v1/google-trends`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${supabaseAnonKey}`,
+        },
+        body: JSON.stringify({
+          keyword: keyword.trim(),
+          timeRange: 'now 7-d',
+          geo: 'JP',
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Googleトレンド分析に失敗しました');
+      }
+
+      const result = await response.json();
+      setGoogleTrendData({
+        timeline: result.timeline,
+        rising: result.rising,
+        trend_score: result.trend_score,
+      });
+      showMessage('success', 'Googleトレンドデータを取得しました');
+    } catch (error) {
+      console.error('Googleトレンド分析エラー:', error);
+      showMessage('error', 'Googleトレンド分析に失敗しました');
+    } finally {
+      setAnalyzing(false);
+    }
+  };
+
+  const handleAnalyze = () => {
+    if (activeTab === 'ai') {
+      handleAnalyzeAI();
+    } else {
+      handleAnalyzeGoogle();
+    }
+  };
+
   const handleSave = async () => {
-    if (relatedKeywords.length === 0) {
-      showMessage('error', '保存するキーワードがありません');
+    if (relatedKeywords.length === 0 && !googleTrendData) {
+      showMessage('error', '保存するデータがありません');
       return;
     }
 
     setLoading(true);
     try {
+      const saveData: any = {
+        keyword: keyword.trim(),
+        related_keywords: relatedKeywords,
+        ai_config_id: selectedAiConfigId,
+        source: 'hybrid',
+      };
+
+      if (googleTrendData) {
+        saveData.trend_score = googleTrendData.trend_score;
+        saveData.rising_keywords = googleTrendData.rising;
+      }
+
       const { error } = await supabase
         .from('trend_keywords')
-        .insert({
-          keyword: keyword.trim(),
-          related_keywords: relatedKeywords,
-          source: 'gemini',
-        });
+        .insert(saveData);
 
       if (error) throw error;
 
       showMessage('success', 'キーワードを保存しました');
       setKeyword('');
       setRelatedKeywords([]);
+      setGoogleTrendData(null);
       loadSavedKeywords();
     } catch (error) {
       console.error('保存エラー:', error);
@@ -153,6 +221,8 @@ export default function TrendAnalysis() {
     }
   };
 
+  const selectedAiConfig = aiConfigs.find(c => c.id === selectedAiConfigId);
+
   return (
     <div>
       {message && (
@@ -168,14 +238,14 @@ export default function TrendAnalysis() {
           <TrendingUp className="w-8 h-8 text-blue-600" />
           <h1 className="text-3xl font-bold text-gray-800">トレンド分析</h1>
         </div>
-        <p className="text-gray-600">リアルタイムトレンドデータで記事の話題性を最大化</p>
+        <p className="text-gray-600">AI × Googleトレンドでデータドリブンなキーワード戦略を構築</p>
       </div>
 
-      {!hasApiKey && (
+      {aiConfigs.length === 0 && (
         <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-6 flex items-start gap-3">
           <div className="flex-shrink-0 w-5 h-5 text-yellow-600 mt-0.5">⚠️</div>
           <div>
-            <p className="text-yellow-800 font-medium mb-1">APIキーが未設定です</p>
+            <p className="text-yellow-800 font-medium mb-1">AI設定が未登録です</p>
             <p className="text-yellow-700 text-sm">
               トレンド分析を使用するには、AI設定ページでGemini APIキーを登録してください。
             </p>
@@ -187,6 +257,29 @@ export default function TrendAnalysis() {
         <h2 className="text-xl font-semibold text-gray-800 mb-6">キーワード分析</h2>
 
         <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              AI設定
+            </label>
+            <select
+              value={selectedAiConfigId}
+              onChange={(e) => setSelectedAiConfigId(e.target.value)}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              disabled={aiConfigs.length === 0}
+            >
+              {aiConfigs.map((config) => (
+                <option key={config.id} value={config.id}>
+                  {config.provider} - {config.model}
+                </option>
+              ))}
+            </select>
+            {selectedAiConfig && (
+              <p className="text-xs text-gray-500 mt-1">
+                Temperature: {selectedAiConfig.temperature}, Max Tokens: {selectedAiConfig.max_tokens}
+              </p>
+            )}
+          </div>
+
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
               分析したいキーワード
@@ -203,7 +296,7 @@ export default function TrendAnalysis() {
               />
               <button
                 onClick={handleAnalyze}
-                disabled={analyzing || !hasApiKey}
+                disabled={analyzing || aiConfigs.length === 0}
                 className="px-6 py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
               >
                 <Search className="w-5 h-5" />
@@ -212,8 +305,35 @@ export default function TrendAnalysis() {
             </div>
           </div>
 
-          {relatedKeywords.length > 0 && (
-            <div className="mt-6 pt-6 border-t border-gray-200">
+          <div className="border-b border-gray-200">
+            <div className="flex gap-4">
+              <button
+                onClick={() => setActiveTab('ai')}
+                className={`px-4 py-3 font-medium border-b-2 transition-colors flex items-center gap-2 ${
+                  activeTab === 'ai'
+                    ? 'border-blue-600 text-blue-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                <Brain className="w-5 h-5" />
+                AI分析結果
+              </button>
+              <button
+                onClick={() => setActiveTab('google')}
+                className={`px-4 py-3 font-medium border-b-2 transition-colors flex items-center gap-2 ${
+                  activeTab === 'google'
+                    ? 'border-blue-600 text-blue-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                <Globe className="w-5 h-5" />
+                Googleトレンド
+              </button>
+            </div>
+          </div>
+
+          {activeTab === 'ai' && relatedKeywords.length > 0 && (
+            <div className="mt-6 pt-6">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
                   <Sparkles className="w-5 h-5 text-blue-600" />
@@ -225,7 +345,7 @@ export default function TrendAnalysis() {
                   className="px-4 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition-colors disabled:opacity-50 flex items-center gap-2"
                 >
                   <Save className="w-4 h-4" />
-                  すべて保存
+                  保存
                 </button>
               </div>
 
@@ -233,19 +353,68 @@ export default function TrendAnalysis() {
                 {relatedKeywords.map((kw, index) => (
                   <div
                     key={index}
-                    className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 flex items-center justify-between group hover:bg-blue-100 transition-colors"
+                    className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 flex items-center justify-between"
                   >
                     <span className="text-gray-800 font-medium">{kw}</span>
-                    <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button
-                        className="text-xs px-3 py-1 bg-white border border-gray-300 text-gray-700 rounded hover:bg-gray-50 transition-colors"
-                        title="このキーワードで記事を生成（将来実装）"
-                      >
-                        🧠 AI記事生成
-                      </button>
-                    </div>
                   </div>
                 ))}
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'google' && googleTrendData && (
+            <div className="mt-6 pt-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
+                  <TrendingUp className="w-5 h-5 text-blue-600" />
+                  Googleトレンドデータ
+                </h3>
+                <button
+                  onClick={handleSave}
+                  disabled={loading}
+                  className="px-4 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition-colors disabled:opacity-50 flex items-center gap-2"
+                >
+                  <Save className="w-4 h-4" />
+                  保存
+                </button>
+              </div>
+
+              <div className="space-y-6">
+                <div className="bg-gray-50 rounded-lg p-4">
+                  <h4 className="font-medium text-gray-700 mb-3">人気度推移（過去7日間）</h4>
+                  <div className="space-y-2">
+                    {googleTrendData.timeline.map((item, index) => (
+                      <div key={index} className="flex items-center gap-3">
+                        <span className="text-xs text-gray-500 w-24">{item.time}</span>
+                        <div className="flex-1 bg-gray-200 rounded-full h-6">
+                          <div
+                            className="bg-blue-600 h-6 rounded-full flex items-center justify-end px-2"
+                            style={{ width: `${item.value}%` }}
+                          >
+                            <span className="text-xs text-white font-medium">{item.value}</span>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="text-sm text-gray-600 mt-3">
+                    平均スコア: <span className="font-semibold">{googleTrendData.trend_score.average}</span>
+                  </p>
+                </div>
+
+                <div>
+                  <h4 className="font-medium text-gray-700 mb-3">人気上昇中のキーワード</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                    {googleTrendData.rising.map((kw, index) => (
+                      <div
+                        key={index}
+                        className="bg-green-50 border border-green-200 rounded-lg px-4 py-2 text-gray-800"
+                      >
+                        {kw}
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
             </div>
           )}
@@ -260,10 +429,15 @@ export default function TrendAnalysis() {
             {savedKeywords.map((item) => (
               <div key={item.id} className="border border-gray-200 rounded-lg p-6 hover:border-blue-300 transition-colors">
                 <div className="flex items-start justify-between mb-4">
-                  <div>
-                    <h3 className="text-lg font-semibold text-gray-800 mb-1">{item.keyword}</h3>
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 mb-1">
+                      <h3 className="text-lg font-semibold text-gray-800">{item.keyword}</h3>
+                      <span className="px-2 py-1 bg-blue-100 text-blue-700 text-xs rounded-full">
+                        {item.source}
+                      </span>
+                    </div>
                     <p className="text-xs text-gray-500">
-                      {new Date(item.created_at).toLocaleString('ja-JP')} • {item.source}
+                      {new Date(item.created_at).toLocaleString('ja-JP')}
                     </p>
                   </div>
                   <button
@@ -274,23 +448,44 @@ export default function TrendAnalysis() {
                   </button>
                 </div>
 
-                <div className="flex flex-wrap gap-2">
-                  {item.related_keywords.map((kw, index) => (
-                    <span
-                      key={index}
-                      className="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-sm border border-gray-200"
-                    >
-                      {kw}
-                    </span>
-                  ))}
-                </div>
+                {item.related_keywords.length > 0 && (
+                  <div className="mb-4">
+                    <p className="text-sm font-medium text-gray-700 mb-2">AI提案キーワード</p>
+                    <div className="flex flex-wrap gap-2">
+                      {item.related_keywords.map((kw, index) => (
+                        <span
+                          key={index}
+                          className="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-sm border border-gray-200"
+                        >
+                          {kw}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {item.rising_keywords && item.rising_keywords.length > 0 && (
+                  <div>
+                    <p className="text-sm font-medium text-gray-700 mb-2">上昇トレンド</p>
+                    <div className="flex flex-wrap gap-2">
+                      {item.rising_keywords.slice(0, 5).map((kw, index) => (
+                        <span
+                          key={index}
+                          className="px-3 py-1 bg-green-50 text-green-700 rounded-full text-sm border border-green-200"
+                        >
+                          {kw}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             ))}
           </div>
         </div>
       )}
 
-      {savedKeywords.length === 0 && relatedKeywords.length === 0 && (
+      {savedKeywords.length === 0 && relatedKeywords.length === 0 && !googleTrendData && (
         <div className="bg-gray-50 rounded-lg p-12 text-center">
           <TrendingUp className="w-16 h-16 text-gray-300 mx-auto mb-4" />
           <p className="text-gray-600 mb-2">まだキーワードが登録されていません</p>

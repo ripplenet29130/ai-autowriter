@@ -1,4 +1,5 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import { createClient } from "npm:@supabase/supabase-js@2.57.4";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -8,8 +9,7 @@ const corsHeaders = {
 
 interface RequestBody {
   keyword: string;
-  api_key: string;
-  model?: string;
+  ai_config_id: string;
 }
 
 Deno.serve(async (req: Request) => {
@@ -21,11 +21,11 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
-    const { keyword, api_key, model = "gemini-2.0-flash-lite" }: RequestBody = await req.json();
+    const { keyword, ai_config_id }: RequestBody = await req.json();
 
-    if (!keyword || !api_key) {
+    if (!keyword || !ai_config_id) {
       return new Response(
-        JSON.stringify({ error: "キーワードとAPIキーは必須です" }),
+        JSON.stringify({ error: "キーワードとAI設定IDは必須です" }),
         {
           status: 400,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -33,7 +33,45 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    console.log(`📊 トレンド分析開始: ${keyword}`);
+    console.log(`📊 トレンド分析開始: ${keyword}, AI Config: ${ai_config_id}`);
+
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+
+    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+    const { data: aiConfig, error: configError } = await supabase
+      .from("ai_configs")
+      .select("*")
+      .eq("id", ai_config_id)
+      .single();
+
+    if (configError || !aiConfig) {
+      console.error(`❌ AI設定取得エラー:`, configError);
+      return new Response(
+        JSON.stringify({ error: "AI設定が見つかりません" }),
+        {
+          status: 404,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
+      );
+    }
+
+    if (!aiConfig.api_key) {
+      return new Response(
+        JSON.stringify({ error: "APIキーが設定されていません" }),
+        {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
+      );
+    }
+
+    const api_key = aiConfig.api_key;
+    const model = aiConfig.model || "gemini-2.0-flash-lite";
+    const temperature = aiConfig.temperature || 0.7;
+
+    console.log(`🤖 AI設定: ${aiConfig.provider} - ${model}`);
 
     const prompt = `あなたはSEOライティングに精通したマーケターです。
 指定のキーワードに関連する複合キーワードを10個提案してください。
@@ -53,8 +91,8 @@ Deno.serve(async (req: Request) => {
         body: JSON.stringify({
           contents: [{ role: "user", parts: [{ text: prompt }] }],
           generationConfig: {
-            temperature: 0.7,
-            maxOutputTokens: 500,
+            temperature,
+            maxOutputTokens: aiConfig.max_tokens || 500,
           },
         }),
       }
@@ -88,10 +126,8 @@ Deno.serve(async (req: Request) => {
     const text = result.candidates?.[0]?.content?.parts?.[0]?.text || "";
     console.log(`📝 Gemini出力: ${text}`);
 
-    // JSONを抽出（マークダウンのコードブロックも考慮）
     let relatedKeywords: string[] = [];
     try {
-      // ```json ``` で囲まれている場合を処理
       const jsonMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/) || text.match(/\[([\s\S]*?)\]/);
       if (jsonMatch) {
         const jsonText = jsonMatch[1] || jsonMatch[0];
@@ -101,7 +137,6 @@ Deno.serve(async (req: Request) => {
       }
     } catch (parseError) {
       console.error(`❌ JSON解析エラー:`, parseError);
-      // JSONパースに失敗した場合、改行で分割して配列化
       relatedKeywords = text
         .split('\n')
         .map(line => line.replace(/^[\d\-.\*\s]+/, '').trim())
@@ -112,9 +147,10 @@ Deno.serve(async (req: Request) => {
     console.log(`✅ 関連キーワード抽出成功: ${relatedKeywords.length}個`);
 
     return new Response(
-      JSON.stringify({ 
+      JSON.stringify({
         keyword,
         related_keywords: relatedKeywords,
+        ai_config_id,
         source: "gemini",
       }),
       {
