@@ -347,13 +347,36 @@ export default function Scheduler() {
                         </>
                       )}
                     </button>
-                    <button
-                      onClick={() => handleRunNow(schedule.id)}
-                      disabled={loading}
-                      className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors text-sm disabled:opacity-50"
-                    >
-                      今すぐ実行
-                    </button>
+                    {/* 今すぐ実行ボタン */}
+<button
+  onClick={async () => {
+    try {
+      // ボタンを押したら即時実行
+      const res = await fetch("/.netlify/functions/post-now", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ schedule_id: schedule.id }),
+      });
+
+      const data = await res.json();
+
+      if (res.ok) {
+  showMessage("success", "✅ 投稿が完了しました！");
+} else {
+  showMessage("error", `❌ 投稿エラー: ${data.error || "不明なエラーです"}`);
+}
+
+    } catch (err) {
+      console.error(err);
+      showMessage("error", "⚠️ 実行中にエラーが発生しました。");
+    }
+  }}
+  disabled={loading}
+  className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-green-100 transition-colors"
+>
+  今すぐ実行
+</button>
+
                     <button
                       onClick={() => handleDelete(schedule.id)}
                       className="px-4 py-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
