@@ -34,6 +34,7 @@ export const handler: Handler = async (event) => {
 
     const result = await response.json();
 
+    // ✅ ここを追加（生成結果を返す）
     const article = {
       title: `${keyword}に関する記事`,
       content:
