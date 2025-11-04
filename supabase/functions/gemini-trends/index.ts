@@ -1,0 +1,136 @@
+import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
+};
+
+interface RequestBody {
+  keyword: string;
+  api_key: string;
+  model?: string;
+}
+
+Deno.serve(async (req: Request) => {
+  if (req.method === "OPTIONS") {
+    return new Response(null, {
+      status: 200,
+      headers: corsHeaders,
+    });
+  }
+
+  try {
+    const { keyword, api_key, model = "gemini-2.0-flash-lite" }: RequestBody = await req.json();
+
+    if (!keyword || !api_key) {
+      return new Response(
+        JSON.stringify({ error: "キーワードとAPIキーは必須です" }),
+        {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
+      );
+    }
+
+    console.log(`📊 トレンド分析開始: ${keyword}`);
+
+    const prompt = `あなたはSEOライティングに精通したマーケターです。
+指定のキーワードに関連する複合キーワードを10個提案してください。
+検索意図が異なるグループごとに整理し、重要度の高い順に並べてください。
+
+キーワード: ${keyword}
+
+出力形式はJSONの配列のみで返してください。説明文は不要です。
+例: ["キーワード1","キーワード2","キーワード3"]
+`;
+
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${api_key}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          generationConfig: {
+            temperature: 0.7,
+            maxOutputTokens: 500,
+          },
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`❌ Gemini APIエラー: ${errorText}`);
+      return new Response(
+        JSON.stringify({ error: `Gemini APIエラー: ${response.status}` }),
+        {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
+      );
+    }
+
+    const result = await response.json();
+
+    if (result.error) {
+      console.error(`❌ Geminiエラー: ${result.error.message}`);
+      return new Response(
+        JSON.stringify({ error: result.error.message }),
+        {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
+      );
+    }
+
+    const text = result.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    console.log(`📝 Gemini出力: ${text}`);
+
+    // JSONを抽出（マークダウンのコードブロックも考慮）
+    let relatedKeywords: string[] = [];
+    try {
+      // ```json ``` で囲まれている場合を処理
+      const jsonMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/) || text.match(/\[([\s\S]*?)\]/);
+      if (jsonMatch) {
+        const jsonText = jsonMatch[1] || jsonMatch[0];
+        relatedKeywords = JSON.parse(jsonText.includes('[') ? jsonText : `[${jsonText}]`);
+      } else {
+        relatedKeywords = JSON.parse(text);
+      }
+    } catch (parseError) {
+      console.error(`❌ JSON解析エラー:`, parseError);
+      // JSONパースに失敗した場合、改行で分割して配列化
+      relatedKeywords = text
+        .split('\n')
+        .map(line => line.replace(/^[\d\-.\*\s]+/, '').trim())
+        .filter(line => line.length > 0 && !line.includes('```'))
+        .slice(0, 10);
+    }
+
+    console.log(`✅ 関連キーワード抽出成功: ${relatedKeywords.length}個`);
+
+    return new Response(
+      JSON.stringify({ 
+        keyword,
+        related_keywords: relatedKeywords,
+        source: "gemini",
+      }),
+      {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      }
+    );
+  } catch (err: unknown) {
+    const errorMessage = err instanceof Error ? err.message : String(err);
+    console.error(`❌ 関数エラー:`, errorMessage);
+    return new Response(
+      JSON.stringify({ error: errorMessage }),
+      {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      }
+    );
+  }
+});

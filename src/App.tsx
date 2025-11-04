@@ -4,6 +4,7 @@ import Dashboard from './pages/Dashboard';
 import AISettings from './pages/AISettings';
 import WPSettings from './pages/WPSettings';
 import Scheduler from './pages/Scheduler';
+import TrendAnalysis from './pages/TrendAnalysis';
 
 function App() {
   return (
@@ -14,6 +15,7 @@ function App() {
           <Route path="/ai-settings" element={<AISettings />} />
           <Route path="/wp-settings" element={<WPSettings />} />
           <Route path="/scheduler" element={<Scheduler />} />
+          <Route path="/trend-analysis" element={<TrendAnalysis />} />
         </Routes>
       </Layout>
     </BrowserRouter>

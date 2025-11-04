@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Brain, Globe, Calendar } from 'lucide-react';
+import { LayoutDashboard, Brain, Globe, Calendar, TrendingUp } from 'lucide-react';
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   const location = useLocation();
@@ -9,6 +9,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     { path: '/ai-settings', label: 'AI設定', icon: Brain },
     { path: '/wp-settings', label: 'WordPress設定', icon: Globe },
     { path: '/scheduler', label: 'スケジューラー', icon: Calendar },
+    { path: '/trend-analysis', label: 'トレンド分析', icon: TrendingUp },
   ];
 
   return (

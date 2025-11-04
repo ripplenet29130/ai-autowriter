@@ -55,3 +55,11 @@ export type ScheduleSetting = {
   next_run_at: string | null;
   created_at: string;
 };
+
+export type TrendKeyword = {
+  id: string;
+  keyword: string;
+  related_keywords: string[];
+  source: string;
+  created_at: string;
+};
