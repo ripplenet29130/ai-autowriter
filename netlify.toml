@@ -11,6 +11,5 @@ publish = "dist"
 directory = "netlify/functions"
 node_bundler = "esbuild"
 
-[[scheduled]]
-cron = "*/1 * * * *"
-function = "scheduler-runner"
+[functions."scheduler-runner"]
+schedule = "*/1 * * * *"
