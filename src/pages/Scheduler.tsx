@@ -348,10 +348,13 @@ export default function Scheduler() {
                       )}
                     </button>
                     {/* 今すぐ実行ボタン */}
-<button
+
+                    <button
   onClick={async () => {
+    setLoading(true); // ← 投稿中フラグON
+    showMessage("success", "🕒 投稿を実行中です..."); // ← 即座に表示
+
     try {
-      // ボタンを押したら即時実行
       const res = await fetch("/.netlify/functions/post-now", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -361,20 +364,23 @@ export default function Scheduler() {
       const data = await res.json();
 
       if (res.ok) {
-  showMessage("success", "✅ 投稿が完了しました！");
-} else {
-  showMessage("error", `❌ 投稿エラー: ${data.error || "不明なエラーです"}`);
-}
-
+        showMessage("success", "✅ 投稿が完了しました！");
+      } else {
+        showMessage("error", `❌ 投稿エラー: ${data.error || "不明なエラーです"}`);
+      }
     } catch (err) {
       console.error(err);
       showMessage("error", "⚠️ 実行中にエラーが発生しました。");
+    } finally {
+      setLoading(false); // ← 投稿完了後に解除
     }
   }}
   disabled={loading}
-  className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-green-100 transition-colors"
+  className={`px-4 py-2 border border-gray-300 rounded-lg transition-colors ${
+    loading ? "bg-gray-100 text-gray-400 cursor-not-allowed" : "text-gray-700 hover:bg-green-100"
+  }`}
 >
-  今すぐ実行
+  {loading ? "投稿中..." : "今すぐ実行"}
 </button>
 
                     <button
