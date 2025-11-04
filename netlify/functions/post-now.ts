@@ -10,64 +10,42 @@ export const handler: Handler = async (event) => {
   try {
     const { schedule_id } = JSON.parse(event.body || "{}");
 
-    // スケジュール情報をSupabaseから取得
-    const { data: schedule, error } = await supabase
+    if (!schedule_id) throw new Error("schedule_id が指定されていません");
+
+    // 🔹 スケジュール情報を取得
+    const { data: schedule, error: scheduleError } = await supabase
       .from("schedule_settings")
       .select("*")
       .eq("id", schedule_id)
       .single();
 
-    if (error || !schedule) throw new Error("スケジュール情報が見つかりません");
+    if (scheduleError || !schedule) {
+      throw new Error("スケジュール情報が見つかりません");
+    }
 
-    // Geminiで記事生成
+    // 🔹 紐づく WordPress設定を取得
+    const { data: wpConfig, error: wpError } = await supabase
+      .from("wp_configs")
+      .select("*")
+      .eq("id", schedule.wp_config_id)
+      .single();
+
+    if (wpError || !wpConfig) {
+      throw new Error("WordPress設定が見つかりません");
+    }
+
+    console.log("✅ WordPress設定取得成功:", wpConfig.url);
+
+    // 🔹 Geminiで記事生成
     const aiResponse = await fetch(
-  "https://ai-autowriter.netlify.app/.netlify/functions/gemini-proxy",
-  {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ keyword: schedule.keyword }),
-  }
-);
+      "https://ai-autowriter.netlify.app/.netlify/functions/gemini-proxy",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ keyword: schedule.keyword || "テスト記事" }),
+      }
+    );
 
-if (!aiResponse.ok) {
-  const text = await aiResponse.text();
-  console.error("❌ Gemini API fetch failed:", text);
-  throw new Error("Gemini proxy fetch failed");
-}
-
-    const article = await aiResponse.json();
-
-    // WordPressへ投稿
-    const wpUrl = `${schedule.wp_url}/wp-json/wp/v2/posts`;
-    const credential = Buffer.from(
-      `${schedule.wp_user}:${schedule.wp_app_password}`
-    ).toString("base64");
-
-    const wpRes = await fetch(wpUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Basic ${credential}`,
-      },
-      body: JSON.stringify({
-        title: article.title,
-        content: article.content,
-        status: "publish",
-        categories: [schedule.category_id],
-      }),
-    });
-
-    if (!wpRes.ok) throw new Error("WordPress投稿に失敗しました");
-
-    return {
-      statusCode: 200,
-      body: JSON.stringify({ message: "✅ 投稿完了しました" }),
-    };
-  } catch (err: any) {
-    console.error(err);
-    return {
-      statusCode: 500,
-      body: JSON.stringify({ error: err.message }),
-    };
-  }
-};
+    if (!aiResponse.ok) {
+      const text = await aiResponse.text();
+      console.error("❌ Gemini API fetch failed:", text);
