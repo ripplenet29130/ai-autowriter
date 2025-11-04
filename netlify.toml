@@ -13,4 +13,4 @@ node_bundler = "esbuild"
 
 [[scheduled]]
 cron = "*/1 * * * *"
-function = "scheduler"
+function = "scheduler-runner"
