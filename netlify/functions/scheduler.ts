@@ -3,104 +3,79 @@ import type { Handler } from "@netlify/functions";
 import { createClient } from "@supabase/supabase-js";
 
 const supabase = createClient(
-  process.env.SUPABASE_URL!,        // ✅ NetlifyではVITE_なし
-  process.env.SUPABASE_SERVICE_KEY! // 投稿実行にはService Key推奨
+  process.env.SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_KEY!
 );
 
-// --- Geminiで記事生成 ---
-async function generateArticle(keyword: string, aiConfig: any) {
-  const prompt = `
-  あなたはプロのSEOライターです。
-  次のキーワードで日本語の記事を800文字程度生成してください。
-  キーワード: ${keyword}
-  `;
-
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${aiConfig.model}:generateContent?key=${aiConfig.api_key}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ role: "user", parts: [{ text: prompt }] }],
-        generationConfig: {
-          temperature: aiConfig.temperature ?? 0.7,
-          maxOutputTokens: aiConfig.max_tokens ?? 1200,
-        },
-      }),
-    }
-  );
-
-  const result = await res.json();
-  if (result.error) throw new Error(`Geminiエラー: ${result.error.message}`);
-
-  const text =
-    result.candidates?.[0]?.content?.parts?.[0]?.text || "（AI出力なし）";
-
-  return {
-    title: `${keyword} に関する最新情報`,
-    content: text,
-  };
-}
-
-// --- WordPressへ投稿 ---
-async function postToWordPress(wpConfig: any, article: any) {
-  const payload = {
-    title: article.title,
-    content: article.content,
-    status: "publish",
-  };
-
-  const res = await fetch(`${wpConfig.url}/wp-json/wp/v2/posts`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization:
-        "Basic " + btoa(`${wpConfig.username}:${wpConfig.app_password}`),
-    },
-    body: JSON.stringify(payload),
-  });
-
-  if (!res.ok) throw new Error(`WordPress投稿エラー: ${res.status}`);
-  return await res.json();
-}
-
-// --- メイン処理 ---
 export const handler: Handler = async () => {
-  console.log("🕒 スケジュール投稿関数 起動");
+  console.log("🕒 スケジューラー起動");
 
-  // スケジュール一覧を取得
+  // 現在時刻をJSTで取得
+  const now = new Date();
+  const hour = now.getHours().toString().padStart(2, "0");
+  const minute = now.getMinutes().toString().padStart(2, "0");
+  const currentTime = `${hour}:${minute}`;
+  const dayOfWeek = now.getDay(); // 0:日曜, 1:月曜, ...
+
+  // スケジュール取得
   const { data: schedules, error } = await supabase
     .from("schedule_settings")
     .select("*")
-    .eq("status", true)
-    .limit(1);
+    .eq("status", true);
 
   if (error || !schedules?.length) {
     console.error("❌ スケジュールが見つかりません");
     return { statusCode: 404, body: "スケジュールなし" };
   }
 
-  const schedule = schedules[0];
+  // 投稿対象を絞り込み
+  const targets = schedules.filter((s: any) => {
+    if (s.time !== currentTime) return false;
 
-  // 紐づくAI/WP設定を個別取得
-  const [{ data: aiData }, { data: wpData }] = await Promise.all([
-    supabase.from("ai_configs").select("*").eq("id", schedule.ai_config_id).single(),
-    supabase.from("wp_configs").select("*").eq("id", schedule.wp_config_id).single(),
-  ]);
+    switch (s.frequency) {
+      case "毎日": return true;
+      case "週1": return dayOfWeek === 1;
+      case "週3": return [1, 3, 5].includes(dayOfWeek);
+      case "週5": return [1, 2, 3, 4, 5].includes(dayOfWeek);
+      default: return false;
+    }
+  });
 
-  const keyword = "テスト投稿";
+  console.log("🎯 対象スケジュール:", targets.length);
 
-  try {
-    const article = await generateArticle(keyword, aiData);
-    const post = await postToWordPress(wpData, article);
+  for (const schedule of targets) {
+    try {
+      console.log(`🚀 投稿開始: ${schedule.id}`);
 
-    console.log("✅ 投稿成功:", post.link);
-    return {
-      statusCode: 200,
-      body: `✅ 投稿完了: ${post.link}`,
-    };
-  } catch (err: any) {
-    console.error("❌ エラー:", err.message);
-    return { statusCode: 500, body: err.message };
+      // post-now 関数を呼び出す
+      const response = await fetch(
+        "https://ai-autowriter.netlify.app/.netlify/functions/post-now",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ schedule_id: schedule.id }),
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`投稿関数エラー: ${response.status}`);
+      }
+
+      const result = await response.json();
+      console.log("✅ 投稿完了:", result.message);
+
+      // 実行日時を保存
+      await supabase
+        .from("schedule_settings")
+        .update({ last_run_at: new Date().toISOString() })
+        .eq("id", schedule.id);
+    } catch (err: any) {
+      console.error("❌ 投稿エラー:", err.message);
+    }
   }
+
+  return {
+    statusCode: 200,
+    body: "Scheduler run complete",
+  };
 };
