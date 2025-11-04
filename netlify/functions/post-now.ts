@@ -20,11 +20,17 @@ export const handler: Handler = async (event) => {
     if (error || !schedule) throw new Error("スケジュール情報が見つかりません");
 
     // Geminiで記事生成
-    const aiResponse = await fetch(`${process.env.URL}/.netlify/functions/gemini-proxy`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ keyword: schedule.keyword }),
-    });
+    const aiResponse = await fetch(`/.netlify/functions/gemini-proxy`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ keyword: schedule.keyword }),
+});
+if (!aiResponse.ok) {
+  const text = await aiResponse.text();
+  console.error("❌ Gemini API fetch failed:", text);
+  throw new Error("Gemini proxy fetch failed");
+}
+
     const article = await aiResponse.json();
 
     // WordPressへ投稿
