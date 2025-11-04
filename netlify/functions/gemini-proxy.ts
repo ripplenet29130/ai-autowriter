@@ -16,9 +16,9 @@ export const handler: Handler = async (event) => {
 キーワード: ${keyword}
 `;
 
-    // ✅ 正しいエンドポイント（v1beta版）
+    // ✅ 最新モデル（2025年11月時点で確実に利用可）
     const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=${GEMINI_API_KEY}`,
+      `https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash-lite:generateContent?key=${GEMINI_API_KEY}`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
