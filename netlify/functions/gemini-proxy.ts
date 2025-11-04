@@ -3,7 +3,8 @@ import { Handler } from "@netlify/functions";
 export const handler: Handler = async (event) => {
   try {
     const { keyword } = JSON.parse(event.body || "{}");
-    const GEMINI_API_KEY = process.env.VITE_GEMINI_API_KEY;
+    const GEMINI_API_KEY =
+      process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY;
 
     if (!GEMINI_API_KEY) {
       throw new Error("Gemini APIキーが設定されていません");
@@ -15,9 +16,9 @@ export const handler: Handler = async (event) => {
 キーワード: ${keyword}
 `;
 
-    // ✅ 修正ポイント：余計な :generateContent を削除
+    // ✅ 正しいエンドポイント（v1beta版）
     const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash-latest:generateContent?key=${GEMINI_API_KEY}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=${GEMINI_API_KEY}`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
