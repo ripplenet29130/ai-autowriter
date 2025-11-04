@@ -11,11 +11,13 @@ export const handler: Handler = async () => {
   console.log("🕒 スケジューラー起動");
 
   // 現在時刻をJSTで取得
-  const now = new Date();
-  const hour = now.getHours().toString().padStart(2, "0");
-  const minute = now.getMinutes().toString().padStart(2, "0");
-  const currentTime = `${hour}:${minute}`;
-  const dayOfWeek = now.getDay(); // 0:日曜, 1:月曜, ...
+
+　const now = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Tokyo" }));
+　const hour = now.getHours().toString().padStart(2, "0");
+　const minute = now.getMinutes().toString().padStart(2, "0");
+　const currentTime = `${hour}:${minute}`;
+　const dayOfWeek = now.getDay(); // 0:日曜, 1:月曜, ...
+
 
   // スケジュール取得
   const { data: schedules, error } = await supabase
