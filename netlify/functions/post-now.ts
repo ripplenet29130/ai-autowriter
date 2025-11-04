@@ -49,3 +49,55 @@ export const handler: Handler = async (event) => {
     if (!aiResponse.ok) {
       const text = await aiResponse.text();
       console.error("❌ Gemini API fetch failed:", text);
+      throw new Error("Gemini proxy fetch failed");
+    }
+
+    const article = await aiResponse.json();
+
+    if (!article.content) {
+      throw new Error("Geminiから記事が返されませんでした");
+    }
+
+    console.log("✅ 記事生成成功:", article.title);
+
+    // 🔹 WordPressへ投稿
+    const wpUrl = `${wpConfig.url.replace(/\/$/, "")}/wp-json/wp/v2/posts`;
+
+    const credential = Buffer.from(
+      `${wpConfig.username}:${wpConfig.app_password}`
+    ).toString("base64");
+
+    const wpRes = await fetch(wpUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Basic ${credential}`,
+      },
+      body: JSON.stringify({
+        title: article.title,
+        content: article.content,
+        status: "publish",
+        categories: [wpConfig.default_category || 1],
+      }),
+    });
+
+    if (!wpRes.ok) {
+      const text = await wpRes.text();
+      console.error("❌ WordPress投稿エラー:", text);
+      throw new Error("WordPress投稿に失敗しました");
+    }
+
+    console.log("✅ WordPress投稿成功");
+
+    return {
+      statusCode: 200,
+      body: JSON.stringify({ message: "✅ 投稿完了しました" }),
+    };
+  } catch (err: any) {
+    console.error("❌ エラー:", err);
+    return {
+      statusCode: 500,
+      body: JSON.stringify({ error: err.message }),
+    };
+  }
+};
