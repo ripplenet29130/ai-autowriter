@@ -11,5 +11,5 @@ publish = "dist"
 directory = "netlify/functions"
 node_bundler = "esbuild"
 
-[functions."scheduler-runner"]
+[functions."scheduler"]
 schedule = "*/1 * * * *"
