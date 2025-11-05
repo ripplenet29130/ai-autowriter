@@ -5,8 +5,8 @@ import { createClient } from "@supabase/supabase-js";
 
 // ✅ Netlify環境変数名に変更（VITE_を削除）
 const supabase = createClient(
-  process.SUPABASE_URL!,
-  process.SUPABASE_SERVICE_KEY!
+  process.env.SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_KEY!
 );
 
 export const handler: Handler = async (event) => {
