@@ -15,4 +15,4 @@ node_bundler = "esbuild"
 schedule = "*/15 * * * *"
 
 [build.environment]
-  NODE_VERSION = "16.20.2"
+  NODE_VERSION = "20"
