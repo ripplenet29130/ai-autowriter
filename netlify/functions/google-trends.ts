@@ -1,12 +1,9 @@
-// netlify/functions/google-trends.ts
 import type { Handler } from "@netlify/functions";
-import googleTrends from "google-trends-api";
 import { createClient } from "@supabase/supabase-js";
 
-// ✅ Netlify環境変数名に変更（VITE_を削除）
 const supabase = createClient(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_KEY!
+  process.env.VITE_SUPABASE_URL!,
+  process.env.VITE_SUPABASE_SERVICE_KEY!
 );
 
 export const handler: Handler = async (event) => {
@@ -19,58 +16,69 @@ export const handler: Handler = async (event) => {
       };
     }
 
-    // === Googleトレンド人気度データ取得 ===
-    const timelineResults = await googleTrends.interestOverTime({
-      keyword,
-      geo: "JP",
-      timeframe: "today 3-m",
-    });
+    console.log("📊 Googleトレンド取得開始:", keyword);
 
-    const parsedTimeline = JSON.parse(timelineResults);
-    const timeline = parsedTimeline.default.timelineData.map((item: any) => ({
+    // Googleトレンド非公式JSONエンドポイント（公開URL）
+    const url = `https://trends.google.com/trends/api/explore?hl=ja&tz=-540&req=${encodeURIComponent(
+      JSON.stringify({
+        comparisonItem: [{ keyword, geo: "JP", time: "today 3-m" }],
+        category: 0,
+        property: "",
+      })
+    )}`;
+
+    const res = await fetch(url);
+    const text = await res.text();
+
+    // HTMLではなくJSONが返ってくるように調整
+    const jsonText = text.replace(/^[^{]+/, ""); // XSSI防止プレフィックスを削除
+    const data = JSON.parse(jsonText);
+
+    // 人気度データ用のリクエストを生成
+    const widget = data.widgets.find((w: any) => w.id === "TIMESERIES");
+
+    const timelineRes = await fetch(
+      `https://trends.google.com/trends/api/widgetdata/multiline?hl=ja&tz=-540&req=${encodeURIComponent(
+        JSON.stringify(widget.request)
+      )}&token=${widget.token}`
+    );
+    const timelineText = await timelineRes.text();
+    const timelineJson = JSON.parse(timelineText.replace(/^[^{]+/, ""));
+    const timeline = timelineJson.default.timelineData.map((item: any) => ({
       time: new Date(Number(item.time) * 1000).toLocaleDateString("ja-JP"),
       value: item.value[0],
     }));
 
     const trendScore = {
       average: Math.round(
-        timeline.reduce((acc: number, t: any) => acc + t.value, 0) / timeline.length
+        timeline.reduce((acc: number, t: any) => acc + t.value, 0) /
+          timeline.length
       ),
       timeline,
     };
 
-    // === 上昇関連キーワード取得 ===
-    const relatedResults = await googleTrends.relatedQueries({
-      keyword,
-      geo: "JP",
-    });
-
-    const parsedRelated = JSON.parse(relatedResults);
-    const risingKeywords =
-      parsedRelated.default?.rankedList[1]?.rankedKeyword?.map((r: any) => r.query) || [];
-
-    // === Supabaseへ保存 ===
+    // === Supabaseに保存 ===
     const { error } = await supabase
       .from("trend_keywords")
       .update({
         trend_score: trendScore,
-        rising_keywords: risingKeywords,
         source: "hybrid",
       })
       .eq("keyword", keyword);
 
     if (error) throw error;
 
+    console.log("✅ Googleトレンド分析完了:", keyword);
+
     return {
       statusCode: 200,
       body: JSON.stringify({
-        message: "Googleトレンド分析完了",
         keyword,
-        rising_keywords: risingKeywords,
+        trend_score: trendScore,
       }),
     };
   } catch (error: any) {
-    console.error("Googleトレンドエラー:", error);
+    console.error("❌ Googleトレンド取得エラー:", error);
     return {
       statusCode: 500,
       body: JSON.stringify({ error: error.message || "不明なエラー" }),
