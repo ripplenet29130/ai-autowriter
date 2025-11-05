@@ -1,51 +1,75 @@
-// netlify/functions/google-trends.ts
 import type { Handler } from "@netlify/functions";
 import googleTrends from "google-trends-api";
+import { createClient } from "@supabase/supabase-js";
 
-const handler: Handler = async (event) => {
+// Supabase初期化
+const supabase = createClient(
+  process.env.VITE_SUPABASE_URL!,
+  process.env.VITE_SUPABASE_SERVICE_KEY!
+);
+
+export const handler: Handler = async (event) => {
   try {
-    const { keyword, timeRange = "now 7-d", geo = "JP" } = JSON.parse(event.body || "{}");
-
+    const { keyword } = JSON.parse(event.body || "{}");
     if (!keyword) {
-      return new Response(JSON.stringify({ error: "Keyword is required" }), { status: 400 });
+      return { statusCode: 400, body: JSON.stringify({ error: "keywordが指定されていません" }) };
     }
 
-    // ---- 人気度の時系列データを取得 ----
-    const timelineData = await googleTrends.interestOverTime({
+    // === Googleトレンド人気度データ取得 ===
+    const timelineResults = await googleTrends.interestOverTime({
       keyword,
-      geo,
-      timeframe: timeRange,
+      geo: "JP",
+      timeframe: "today 3-m", // 過去3か月間
     });
 
-    const parsedTimeline = JSON.parse(timelineData);
+    const parsedTimeline = JSON.parse(timelineResults);
     const timeline = parsedTimeline.default.timelineData.map((item: any) => ({
-      time: new Date(item.time * 1000).toLocaleDateString("ja-JP"),
+      time: new Date(Number(item.time) * 1000).toLocaleDateString("ja-JP"),
       value: item.value[0],
     }));
 
-    // ---- 上昇キーワードを取得 ----
-    const risingData = await googleTrends.relatedQueries({ keyword, geo });
-    const parsedRising = JSON.parse(risingData);
-    const rising = parsedRising.default.rankedList?.[1]?.rankedKeyword?.map((k: any) => k.query) || [];
+    const trendScore = {
+      average: Math.round(
+        timeline.reduce((acc: number, t: any) => acc + t.value, 0) / timeline.length
+      ),
+      timeline,
+    };
 
-    // ---- 平均スコア算出 ----
-    const average = Math.round(
-      timeline.reduce((sum: number, item: any) => sum + item.value, 0) / timeline.length
-    );
+    // === 上昇関連キーワード取得 ===
+    const relatedResults = await googleTrends.relatedQueries({
+      keyword,
+      geo: "JP",
+    });
 
-    return new Response(
-      JSON.stringify({
+    const parsedRelated = JSON.parse(relatedResults);
+    const risingKeywords =
+      parsedRelated.default?.rankedList[1]?.rankedKeyword?.map((r: any) => r.query) || [];
+
+    // === Supabaseへ保存 ===
+    const { error } = await supabase
+      .from("trend_keywords")
+      .update({
+        trend_score: trendScore,
+        rising_keywords: risingKeywords,
+        source: "hybrid",
+      })
+      .eq("keyword", keyword);
+
+    if (error) throw error;
+
+    return {
+      statusCode: 200,
+      body: JSON.stringify({
+        message: "Googleトレンド分析完了",
         keyword,
-        timeline,
-        rising,
-        trend_score: { average },
+        rising_keywords: risingKeywords,
       }),
-      { status: 200, headers: { "Content-Type": "application/json" } }
-    );
+    };
   } catch (error: any) {
-    console.error("Google Trends Error:", error);
-    return new Response(JSON.stringify({ error: "Failed to fetch Google Trends" }), { status: 500 });
+    console.error("Googleトレンドエラー:", error);
+    return {
+      statusCode: 500,
+      body: JSON.stringify({ error: error.message || "不明なエラー" }),
+    };
   }
 };
-
-export { handler };
