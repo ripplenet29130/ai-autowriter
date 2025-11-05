@@ -148,39 +148,50 @@ export default function TrendAnalysis() {
   const handleAnalyze = () => (activeTab === 'ai' ? handleAnalyzeAI() : handleAnalyzeGoogle());
 
   /** 🔹 保存 */
-  const handleSave = async () => {
-    if (relatedKeywords.length === 0 && !googleTrendData)
-      return showMessage('error', '保存するデータがありません');
+  // ===== 既存 handleSave の中身をこの実装に差し替え =====
+const handleSave = async () => {
+  if (relatedKeywords.length === 0 && !googleTrendData) {
+    showMessage('error', '保存するデータがありません');
+    return;
+  }
 
-    setLoading(true);
-    try {
-      const saveData: any = {
-        keyword: keyword.trim(),
-        related_keywords: relatedKeywords,
-        ai_config_id: selectedAiConfigId,
-        source: activeTab,
-      };
+  setLoading(true);
+  try {
+    const kw = keyword.trim();        // ← 呼び出し用に退避
+    const saveData: any = {
+      keyword: kw,
+      related_keywords: relatedKeywords,
+      ai_config_id: selectedAiConfigId,
+      source: 'ai',                   // まずはAIの保存として登録
+    };
 
-      if (googleTrendData) {
-        saveData.trend_score = googleTrendData.trend_score;
-        saveData.rising_keywords = googleTrendData.rising;
-      }
-
-      const { error } = await supabase.from('trend_keywords').insert(saveData);
-      if (error) throw error;
-
-      showMessage('success', 'キーワードを保存しました');
-      setKeyword('');
-      setRelatedKeywords([]);
-      setGoogleTrendData(null);
-      loadSavedKeywords();
-    } catch (error) {
-      console.error('保存エラー:', error);
-      showMessage('error', 'キーワードの保存に失敗しました');
-    } finally {
-      setLoading(false);
+    if (googleTrendData) {
+      saveData.trend_score = googleTrendData.trend_score;
+      saveData.rising_keywords = googleTrendData.rising;
+      saveData.source = 'hybrid';     // 既にGoogleも表示中ならhybridで保存
     }
-  };
+
+    const { error } = await supabase.from('trend_keywords').insert(saveData);
+    if (error) throw error;
+
+    showMessage('success', 'キーワードを保存しました');
+
+    // → 保存直後に Google トレンドも自動分析＆追記更新
+    await handleAnalyzeGoogleAfterSave(kw);
+
+    // 入力フォームはクリア
+    setKeyword('');
+    setRelatedKeywords([]);
+    setGoogleTrendData(null);
+  } catch (error) {
+    console.error('保存エラー:', error);
+    showMessage('error', 'キーワードの保存に失敗しました');
+  } finally {
+    setLoading(false);
+  }
+};
+// ===== 差し替えここまで =====
+
 
   /** 🔹 削除 */
   const handleDelete = async (id: string) => {
@@ -489,3 +500,58 @@ export default function TrendAnalysis() {
     </div>
   );
 }
+
+// ===== 追加ここから（TrendAnalysis.tsx に追記） =====
+const handleAnalyzeGoogleAfterSave = async (kw: string) => {
+  try {
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+    const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+    const response = await fetch(`${supabaseUrl}/functions/v1/google-trends`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${supabaseAnonKey}`,
+      },
+      body: JSON.stringify({
+        keyword: kw,
+        timeRange: 'now 7-d', // 直近7日間
+        geo: 'JP',
+      }),
+    });
+
+    if (!response.ok) throw new Error('Googleトレンド分析に失敗しました');
+
+    const result = await response.json();
+
+    // trend_keywords にトレンド情報を追記更新（keyword で対象行を特定）
+    const { error } = await supabase
+      .from('trend_keywords')
+      .update({
+        trend_score: result.trend_score,
+        rising_keywords: result.rising,
+        source: 'hybrid', // AI保存+Google追記の意
+      })
+      .eq('keyword', kw);
+
+    if (error) throw error;
+
+    // 画面にも即反映
+    await loadSavedKeywords();
+    setGoogleTrendData({
+      timeline: result.timeline,
+      rising: result.rising,
+      trend_score: result.trend_score,
+    });
+
+    // 自動で「Googleトレンド」タブに切り替えたい場合は下行をON
+    setActiveTab('google');
+
+    showMessage('success', 'Googleトレンドを自動分析して保存しました');
+  } catch (err) {
+    console.error('Googleトレンド自動分析エラー:', err);
+    showMessage('error', 'Googleトレンドの自動分析に失敗しました');
+  }
+};
+// ===== 追加ここまで =====
+
