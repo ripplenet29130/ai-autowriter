@@ -1,75 +1,50 @@
+// netlify/functions/google-trends.ts
 import type { Handler } from "@netlify/functions";
 import googleTrends from "google-trends-api";
-import { createClient } from "@supabase/supabase-js";
-
-// Supabase初期化
-const supabase = createClient(
-  process.env.VITE_SUPABASE_URL!,
-  process.env.VITE_SUPABASE_SERVICE_KEY!
-);
 
 export const handler: Handler = async (event) => {
   try {
-    const { keyword } = JSON.parse(event.body || "{}");
-    if (!keyword) {
-      return { statusCode: 400, body: JSON.stringify({ error: "keywordが指定されていません" }) };
-    }
+    const { keyword, timeRange = "now 7-d", geo = "JP" } = JSON.parse(event.body || "{}");
 
-    // === Googleトレンド人気度データ取得 ===
-    const timelineResults = await googleTrends.interestOverTime({
+    // ✅ トレンドデータ取得
+    const timeline = await googleTrends.interestOverTime({
       keyword,
-      geo: "JP",
-      timeframe: "today 3-m", // 過去3か月間
+      geo,
+      timeframe: timeRange,
+    });
+    const rising = await googleTrends.relatedQueries({
+      keyword,
+      geo,
     });
 
-    const parsedTimeline = JSON.parse(timelineResults);
-    const timeline = parsedTimeline.default.timelineData.map((item: any) => ({
-      time: new Date(Number(item.time) * 1000).toLocaleDateString("ja-JP"),
-      value: item.value[0],
+    // ✅ データを整形
+    const timelineData = JSON.parse(timeline).default.timelineData.map((d: any) => ({
+      time: d.formattedTime,
+      value: d.value[0],
     }));
 
-    const trendScore = {
-      average: Math.round(
-        timeline.reduce((acc: number, t: any) => acc + t.value, 0) / timeline.length
-      ),
-      timeline,
-    };
+    const risingData =
+      JSON.parse(rising).default.rankedList?.[1]?.rankedKeyword?.map((k: any) => k.query) || [];
 
-    // === 上昇関連キーワード取得 ===
-    const relatedResults = await googleTrends.relatedQueries({
-      keyword,
-      geo: "JP",
-    });
+    const average =
+      timelineData.reduce((sum: number, item: any) => sum + item.value, 0) /
+      timelineData.length;
 
-    const parsedRelated = JSON.parse(relatedResults);
-    const risingKeywords =
-      parsedRelated.default?.rankedList[1]?.rankedKeyword?.map((r: any) => r.query) || [];
+    const trend_score = { average, timeline: timelineData };
 
-    // === Supabaseへ保存 ===
-    const { error } = await supabase
-      .from("trend_keywords")
-      .update({
-        trend_score: trendScore,
-        rising_keywords: risingKeywords,
-        source: "hybrid",
-      })
-      .eq("keyword", keyword);
-
-    if (error) throw error;
-
+    // ✅ 成功レスポンス
     return {
       statusCode: 200,
       body: JSON.stringify({
-        message: "Googleトレンド分析完了",
-        keyword,
-        rising_keywords: risingKeywords,
+        trend_score,
+        rising: risingData,
       }),
     };
-  } catch (error: any) {
-    console.error("Googleトレンドエラー:", error);
+  } catch (error) {
+    console.error("Googleトレンド取得エラー:", error);
     return {
       statusCode: 500,
-      body: JSON.stringify({ error: error.message || "不明なエラー" }),
+      body: JSON.stringify({ error: "Googleトレンドデータ取得失敗" }),
     };
   }
 };
