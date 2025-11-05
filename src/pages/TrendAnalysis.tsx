@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { supabase, AIConfig } from "../lib/supabase";
+import { supabase, AIConfig } from "../lib/supabase";せ
 import {
   TrendingUp,
   Search,
@@ -194,7 +194,10 @@ export default function TrendAnalysis() {
 
       // 保存後Googleトレンド呼び出し
       handleAnalyzeGoogleAfterSave(keywordTrimmed);
-
+      
+      // ✅ 保存直後にリスト更新
+      await loadSavedKeywords();
+      
       setKeyword("");
       setRelatedKeywords([]);
     } catch (e) {
