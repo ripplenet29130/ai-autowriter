@@ -81,7 +81,7 @@ export default function TrendAnalysis() {
       const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
       // ✅ 修正版：Netlify Functionsを直接呼ぶ
-      const response = await fetch("/.netlify/functions/gemini-trends", {
+      const response = await fetch("/.netlify/functions/ai-suggestions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
