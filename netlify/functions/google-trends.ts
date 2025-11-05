@@ -1,10 +1,15 @@
 import type { Handler } from "@netlify/functions";
 import { createClient } from "@supabase/supabase-js";
 
-const supabase = createClient(
-  process.env.VITE_SUPABASE_URL!,
-  process.env.VITE_SUPABASE_SERVICE_KEY!
-);
+const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL!;
+const supabaseKey = process.env.SUPABASE_SERVICE_KEY || process.env.VITE_SUPABASE_SERVICE_KEY!;
+
+if (!supabaseUrl || !supabaseKey) {
+  console.error("❌ Supabase環境変数が見つかりません。Netlify環境変数を確認してください。");
+}
+
+const supabase = createClient(supabaseUrl, supabaseKey);
+
 
 export const handler: Handler = async (event) => {
   try {
