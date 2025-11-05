@@ -10,7 +10,7 @@ export default function AISettings() {
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   const [formData, setFormData] = useState({
-    name: '', 
+    name: '',
     provider: 'Gemini',
     api_key: '',
     model: 'gemini-2.5-flash',
@@ -36,6 +36,7 @@ export default function AISettings() {
       if (data && data.length > 0) {
         const latest = data[0];
         setFormData({
+          ...formData,
           provider: latest.provider,
           api_key: latest.api_key,
           model: latest.model,
@@ -54,29 +55,27 @@ export default function AISettings() {
 
   const handleSave = async () => {
     if (!formData.api_key) {
-  setMessage({ type: 'error', text: 'APIキーを入力してください。' });
-  setLoading(false);
-  return;
-}
+      setMessage({ type: 'error', text: 'APIキーを入力してください。' });
+      setLoading(false);
+      return;
+    }
 
-if (!formData.name.trim()) {
-  setFormData({ ...formData, name: `${formData.provider} - ${formData.model}` });
-}
-
+    if (!formData.name.trim()) {
+      setFormData({ ...formData, name: `${formData.provider} - ${formData.model}` });
+    }
 
     setLoading(true);
     const { error } = await supabase.from('ai_configs').insert([
-  {
-    name: formData.name || `${formData.provider} - ${formData.model}`, // ← 追加
-    provider: formData.provider,
-    api_key: formData.api_key,
-    model: formData.model,
-    temperature: formData.temperature,
-    max_tokens: formData.max_tokens,
-    enable_image: formData.enable_image,
-  },
-]);
-
+      {
+        name: formData.name || `${formData.provider} - ${formData.model}`,
+        provider: formData.provider,
+        api_key: formData.api_key,
+        model: formData.model,
+        temperature: formData.temperature,
+        max_tokens: formData.max_tokens,
+        enable_image: formData.enable_image,
+      },
+    ]);
 
     if (error) {
       showMessage('error', '設定の保存に失敗しました');
@@ -113,36 +112,48 @@ if (!formData.name.trim()) {
 
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-gray-800 mb-2">AI設定</h1>
-        <p className="text-gray-600">記事生成に使用するAIプロバイダーの設定を管理します</p>
+        <p className="text-gray-600">
+          記事生成に使用するAIプロバイダーの設定を管理します
+        </p>
       </div>
 
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-8">
-        <h2 className="text-xl font-semibold text-gray-800 mb-6">新しいAI設定</h2>
+        <h2 className="text-xl font-semibold text-gray-800 mb-6">
+          新しいAI設定
+        </h2>
 
         <div className="space-y-6">
-          <div className="space-y-4">
-
+          {/* 設定名 */}
           <div>
-            <label className="block text-sm font-medium text-gray-700">設定名</label>
-              <input
+            <label className="block text-sm font-medium text-gray-700">
+              設定名
+            </label>
+            <input
               type="text"
               value={formData.name}
-              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+              onChange={(e) =>
+                setFormData({ ...formData, name: e.target.value })
+              }
               placeholder="例：記事生成用 / トレンド分析用"
               className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
-              />
+            />
           </div>
+
+          {/* AIプロバイダー */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
               AIプロバイダー
             </label>
             <select
               value={formData.provider}
-              onChange={(e) => setFormData({
-                ...formData,
-                provider: e.target.value,
-                model: modelOptions[e.target.value as keyof typeof modelOptions][0]
-              })}
+              onChange={(e) =>
+                setFormData({
+                  ...formData,
+                  provider: e.target.value,
+                  model:
+                    modelOptions[e.target.value as keyof typeof modelOptions][0],
+                })
+              }
               className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             >
               <option value="Gemini">Google Gemini</option>
@@ -151,6 +162,7 @@ if (!formData.name.trim()) {
             </select>
           </div>
 
+          {/* APIキー */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
               APIキー
@@ -159,7 +171,9 @@ if (!formData.name.trim()) {
               <input
                 type={showApiKey ? 'text' : 'password'}
                 value={formData.api_key}
-                onChange={(e) => setFormData({ ...formData, api_key: e.target.value })}
+                onChange={(e) =>
+                  setFormData({ ...formData, api_key: e.target.value })
+                }
                 placeholder=""
                 className="w-full px-4 py-3 pr-12 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               />
@@ -167,22 +181,33 @@ if (!formData.name.trim()) {
                 onClick={() => setShowApiKey(!showApiKey)}
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
               >
-                {showApiKey ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                {showApiKey ? (
+                  <EyeOff className="w-5 h-5" />
+                ) : (
+                  <Eye className="w-5 h-5" />
+                )}
               </button>
             </div>
           </div>
 
+          {/* モデル */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
               モデル
             </label>
             <select
               value={formData.model}
-              onChange={(e) => setFormData({ ...formData, model: e.target.value })}
+              onChange={(e) =>
+                setFormData({ ...formData, model: e.target.value })
+              }
               className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             >
-              {modelOptions[formData.provider as keyof typeof modelOptions].map((model) => (
-                <option key={model} value={model}>{model}</option>
+              {modelOptions[
+                formData.provider as keyof typeof modelOptions
+              ].map((model) => (
+                <option key={model} value={model}>
+                  {model}
+                </option>
               ))}
             </select>
             {formData.provider === 'Gemini' && (
@@ -192,6 +217,7 @@ if (!formData.name.trim()) {
             )}
           </div>
 
+          {/* Temperature */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
               Temperature: {formData.temperature}
@@ -202,7 +228,12 @@ if (!formData.name.trim()) {
               max="1"
               step="0.1"
               value={formData.temperature}
-              onChange={(e) => setFormData({ ...formData, temperature: parseFloat(e.target.value) })}
+              onChange={(e) =>
+                setFormData({
+                  ...formData,
+                  temperature: parseFloat(e.target.value),
+                })
+              }
               className="w-full"
             />
             <div className="flex justify-between text-xs text-gray-500 mt-1">
@@ -211,6 +242,7 @@ if (!formData.name.trim()) {
             </div>
           </div>
 
+          {/* Max Tokens */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
               Max Tokens
@@ -218,24 +250,36 @@ if (!formData.name.trim()) {
             <input
               type="number"
               value={formData.max_tokens}
-              onChange={(e) => setFormData({ ...formData, max_tokens: parseInt(e.target.value) })}
+              onChange={(e) =>
+                setFormData({
+                  ...formData,
+                  max_tokens: parseInt(e.target.value),
+                })
+              }
               className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             />
           </div>
 
+          {/* 画像生成 */}
           <div className="flex items-center gap-3">
             <input
               type="checkbox"
               id="enable_image"
               checked={formData.enable_image}
-              onChange={(e) => setFormData({ ...formData, enable_image: e.target.checked })}
+              onChange={(e) =>
+                setFormData({ ...formData, enable_image: e.target.checked })
+              }
               className="w-5 h-5 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
             />
-            <label htmlFor="enable_image" className="text-sm font-medium text-gray-700">
+            <label
+              htmlFor="enable_image"
+              className="text-sm font-medium text-gray-700"
+            >
               画像生成を有効化
             </label>
           </div>
 
+          {/* ボタン */}
           <div className="flex gap-4 pt-4">
             <button
               onClick={handleTest}
@@ -255,25 +299,37 @@ if (!formData.name.trim()) {
         </div>
       </div>
 
+      {/* 保存済み設定一覧 */}
       {configs.length > 0 && (
         <div className="mt-8">
-          <h2 className="text-xl font-semibold text-gray-800 mb-4">保存済みの設定</h2>
+          <h2 className="text-xl font-semibold text-gray-800 mb-4">
+            保存済みの設定
+          </h2>
           <div className="space-y-4">
             {configs.map((config) => (
-              <div key={config.id} className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+              <div
+                key={config.id}
+                className="bg-white rounded-lg shadow-sm border border-gray-200 p-6"
+              >
                 <div className="flex items-start justify-between">
                   <div className="flex-1">
                     <div className="flex items-center gap-3 mb-2">
-                      <h3 className="text-lg font-semibold text-gray-800">{config.provider}</h3>
+                      <h3 className="text-lg font-semibold text-gray-800">
+                        {config.name || config.provider}
+                      </h3>
                       <span className="px-3 py-1 bg-blue-100 text-blue-700 text-sm rounded-full">
                         {config.model}
                       </span>
                     </div>
                     <div className="text-sm text-gray-600 space-y-1">
-                      <p>Temperature: {config.temperature} | Max Tokens: {config.max_tokens}</p>
+                      <p>
+                        Temperature: {config.temperature} | Max Tokens:{' '}
+                        {config.max_tokens}
+                      </p>
                       <p>画像生成: {config.enable_image ? '有効' : '無効'}</p>
                       <p className="text-xs text-gray-400 mt-2">
-                        作成日時: {new Date(config.created_at).toLocaleString('ja-JP')}
+                        作成日時:{' '}
+                        {new Date(config.created_at).toLocaleString('ja-JP')}
                       </p>
                     </div>
                   </div>
