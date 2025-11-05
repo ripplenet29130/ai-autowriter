@@ -39,6 +39,7 @@ export default function TrendAnalysis() {
     loadSavedKeywords();
   }, []);
 
+  /** 🔹 AI設定一覧を読み込み */
   const loadAiConfigs = async () => {
     const { data, error } = await supabase
       .from('ai_configs')
@@ -47,20 +48,19 @@ export default function TrendAnalysis() {
 
     if (!error && data && data.length > 0) {
       setAiConfigs(data);
-      const activeConfig = data.find(c => c.provider === 'Gemini') || data[0];
+      const activeConfig = data.find((c) => c.provider === 'Gemini') || data[0];
       setSelectedAiConfigId(activeConfig.id);
     }
   };
 
+  /** 🔹 保存済みキーワードを読み込み */
   const loadSavedKeywords = async () => {
     const { data, error } = await supabase
       .from('trend_keywords')
       .select('*')
       .order('created_at', { ascending: false });
 
-    if (!error && data) {
-      setSavedKeywords(data);
-    }
+    if (!error && data) setSavedKeywords(data);
   };
 
   const showMessage = (type: 'success' | 'error', text: string) => {
@@ -68,16 +68,10 @@ export default function TrendAnalysis() {
     setTimeout(() => setMessage(null), 3000);
   };
 
+  /** 🔹 AI分析 */
   const handleAnalyzeAI = async () => {
-    if (!keyword.trim()) {
-      showMessage('error', 'キーワードを入力してください');
-      return;
-    }
-
-    if (!selectedAiConfigId) {
-      showMessage('error', 'AI設定を選択してください');
-      return;
-    }
+    if (!keyword.trim()) return showMessage('error', 'キーワードを入力してください');
+    if (!selectedAiConfigId) return showMessage('error', 'AI設定を選択してください');
 
     setAnalyzing(true);
     setRelatedKeywords([]);
@@ -90,7 +84,7 @@ export default function TrendAnalysis() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${supabaseAnonKey}`,
+          Authorization: `Bearer ${supabaseAnonKey}`,
         },
         body: JSON.stringify({
           keyword: keyword.trim(),
@@ -98,9 +92,7 @@ export default function TrendAnalysis() {
         }),
       });
 
-      if (!response.ok) {
-        throw new Error('AI分析に失敗しました');
-      }
+      if (!response.ok) throw new Error('AI分析に失敗しました');
 
       const result = await response.json();
       setRelatedKeywords(result.related_keywords || []);
@@ -113,11 +105,9 @@ export default function TrendAnalysis() {
     }
   };
 
+  /** 🔹 Googleトレンド分析 */
   const handleAnalyzeGoogle = async () => {
-    if (!keyword.trim()) {
-      showMessage('error', 'キーワードを入力してください');
-      return;
-    }
+    if (!keyword.trim()) return showMessage('error', 'キーワードを入力してください');
 
     setAnalyzing(true);
     setGoogleTrendData(null);
@@ -130,7 +120,7 @@ export default function TrendAnalysis() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${supabaseAnonKey}`,
+          Authorization: `Bearer ${supabaseAnonKey}`,
         },
         body: JSON.stringify({
           keyword: keyword.trim(),
@@ -139,9 +129,7 @@ export default function TrendAnalysis() {
         }),
       });
 
-      if (!response.ok) {
-        throw new Error('Googleトレンド分析に失敗しました');
-      }
+      if (!response.ok) throw new Error('Googleトレンド分析に失敗しました');
 
       const result = await response.json();
       setGoogleTrendData({
@@ -158,19 +146,13 @@ export default function TrendAnalysis() {
     }
   };
 
-  const handleAnalyze = () => {
-    if (activeTab === 'ai') {
-      handleAnalyzeAI();
-    } else {
-      handleAnalyzeGoogle();
-    }
-  };
+  /** 🔹 タブ切り替え */
+  const handleAnalyze = () => (activeTab === 'ai' ? handleAnalyzeAI() : handleAnalyzeGoogle());
 
+  /** 🔹 保存 */
   const handleSave = async () => {
-    if (relatedKeywords.length === 0 && !googleTrendData) {
-      showMessage('error', '保存するデータがありません');
-      return;
-    }
+    if (relatedKeywords.length === 0 && !googleTrendData)
+      return showMessage('error', '保存するデータがありません');
 
     setLoading(true);
     try {
@@ -178,7 +160,7 @@ export default function TrendAnalysis() {
         keyword: keyword.trim(),
         related_keywords: relatedKeywords,
         ai_config_id: selectedAiConfigId,
-        source: 'hybrid',
+        source: activeTab,
       };
 
       if (googleTrendData) {
@@ -186,10 +168,7 @@ export default function TrendAnalysis() {
         saveData.rising_keywords = googleTrendData.rising;
       }
 
-      const { error } = await supabase
-        .from('trend_keywords')
-        .insert(saveData);
-
+      const { error } = await supabase.from('trend_keywords').insert(saveData);
       if (error) throw error;
 
       showMessage('success', 'キーワードを保存しました');
@@ -205,32 +184,23 @@ export default function TrendAnalysis() {
     }
   };
 
+  /** 🔹 削除 */
   const handleDelete = async (id: string) => {
     if (!confirm('このキーワードを削除してもよろしいですか？')) return;
 
-    const { error } = await supabase
-      .from('trend_keywords')
-      .delete()
-      .eq('id', id);
+    const { error } = await supabase.from('trend_keywords').delete().eq('id', id);
+    if (error) return showMessage('error', '削除に失敗しました');
 
-    if (error) {
-      showMessage('error', '削除に失敗しました');
-    } else {
-      showMessage('success', 'キーワードを削除しました');
-      loadSavedKeywords();
-    }
+    showMessage('success', 'キーワードを削除しました');
+    loadSavedKeywords();
   };
 
-  const selectedAiConfig = aiConfigs.find(c => c.id === selectedAiConfigId);
+  const selectedAiConfig = aiConfigs.find((c) => c.id === selectedAiConfigId);
 
   return (
     <div>
       {message && (
-        <Toast
-          type={message.type}
-          message={message.text}
-          onClose={() => setMessage(null)}
-        />
+        <Toast type={message.type} message={message.text} onClose={() => setMessage(null)} />
       )}
 
       <div className="mb-8">
@@ -238,12 +208,14 @@ export default function TrendAnalysis() {
           <TrendingUp className="w-8 h-8 text-blue-600" />
           <h1 className="text-3xl font-bold text-gray-800">トレンド分析</h1>
         </div>
-        <p className="text-gray-600">AI × Googleトレンドでデータドリブンなキーワード戦略を構築</p>
+        <p className="text-gray-600">
+          AI × Googleトレンドでデータドリブンなキーワード戦略を構築
+        </p>
       </div>
 
       {aiConfigs.length === 0 && (
         <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-6 flex items-start gap-3">
-          <div className="flex-shrink-0 w-5 h-5 text-yellow-600 mt-0.5">⚠️</div>
+          <div className="flex-shrink-0 text-yellow-600 mt-0.5">⚠️</div>
           <div>
             <p className="text-yellow-800 font-medium mb-1">AI設定が未登録です</p>
             <p className="text-yellow-700 text-sm">
@@ -256,11 +228,10 @@ export default function TrendAnalysis() {
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-8 mb-8">
         <h2 className="text-xl font-semibold text-gray-800 mb-6">キーワード分析</h2>
 
-        <div className="space-y-4">
+        <div className="space-y-6">
+          {/* 🔸 AI設定セレクト */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              AI設定
-            </label>
+            <label className="block text-sm font-medium text-gray-700 mb-2">AI設定</label>
             <select
               value={selectedAiConfigId}
               onChange={(e) => setSelectedAiConfigId(e.target.value)}
@@ -269,17 +240,19 @@ export default function TrendAnalysis() {
             >
               {aiConfigs.map((config) => (
                 <option key={config.id} value={config.id}>
-                  {config.provider} - {config.model}
+                  {config.name || `${config.provider} - ${config.model}`}
                 </option>
               ))}
             </select>
             {selectedAiConfig && (
               <p className="text-xs text-gray-500 mt-1">
-                Temperature: {selectedAiConfig.temperature}, Max Tokens: {selectedAiConfig.max_tokens}
+                Temperature: {selectedAiConfig.temperature}, Max Tokens:{' '}
+                {selectedAiConfig.max_tokens}
               </p>
             )}
           </div>
 
+          {/* 🔸 キーワード入力 */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
               分析したいキーワード
@@ -297,7 +270,7 @@ export default function TrendAnalysis() {
               <button
                 onClick={handleAnalyze}
                 disabled={analyzing || aiConfigs.length === 0}
-                className="px-6 py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                className="px-6 py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center gap-2"
               >
                 <Search className="w-5 h-5" />
                 {analyzing ? '分析中...' : '分析開始'}
@@ -305,6 +278,7 @@ export default function TrendAnalysis() {
             </div>
           </div>
 
+          {/* 🔸 タブ */}
           <div className="border-b border-gray-200">
             <div className="flex gap-4">
               <button
@@ -332,6 +306,7 @@ export default function TrendAnalysis() {
             </div>
           </div>
 
+          {/* 🔸 AI結果 */}
           {activeTab === 'ai' && relatedKeywords.length > 0 && (
             <div className="mt-6 pt-6">
               <div className="flex items-center justify-between mb-4">
@@ -362,6 +337,7 @@ export default function TrendAnalysis() {
             </div>
           )}
 
+          {/* 🔸 Google結果 */}
           {activeTab === 'google' && googleTrendData && (
             <div className="mt-6 pt-6">
               <div className="flex items-center justify-between mb-4">
@@ -381,29 +357,40 @@ export default function TrendAnalysis() {
 
               <div className="space-y-6">
                 <div className="bg-gray-50 rounded-lg p-4">
-                  <h4 className="font-medium text-gray-700 mb-3">人気度推移（過去7日間）</h4>
+                  <h4 className="font-medium text-gray-700 mb-3">
+                    人気度推移（過去7日間）
+                  </h4>
                   <div className="space-y-2">
                     {googleTrendData.timeline.map((item, index) => (
                       <div key={index} className="flex items-center gap-3">
-                        <span className="text-xs text-gray-500 w-24">{item.time}</span>
+                        <span className="text-xs text-gray-500 w-24">
+                          {item.time}
+                        </span>
                         <div className="flex-1 bg-gray-200 rounded-full h-6">
                           <div
                             className="bg-blue-600 h-6 rounded-full flex items-center justify-end px-2"
                             style={{ width: `${item.value}%` }}
                           >
-                            <span className="text-xs text-white font-medium">{item.value}</span>
+                            <span className="text-xs text-white font-medium">
+                              {item.value}
+                            </span>
                           </div>
                         </div>
                       </div>
                     ))}
                   </div>
                   <p className="text-sm text-gray-600 mt-3">
-                    平均スコア: <span className="font-semibold">{googleTrendData.trend_score.average}</span>
+                    平均スコア:{' '}
+                    <span className="font-semibold">
+                      {googleTrendData.trend_score.average}
+                    </span>
                   </p>
                 </div>
 
                 <div>
-                  <h4 className="font-medium text-gray-700 mb-3">人気上昇中のキーワード</h4>
+                  <h4 className="font-medium text-gray-700 mb-3">
+                    人気上昇中のキーワード
+                  </h4>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                     {googleTrendData.rising.map((kw, index) => (
                       <div
@@ -421,13 +408,17 @@ export default function TrendAnalysis() {
         </div>
       </div>
 
+      {/* 🔸 保存済みキーワード一覧 */}
       {savedKeywords.length > 0 && (
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-8">
           <h2 className="text-xl font-semibold text-gray-800 mb-6">保存済みキーワード</h2>
 
           <div className="space-y-4">
             {savedKeywords.map((item) => (
-              <div key={item.id} className="border border-gray-200 rounded-lg p-6 hover:border-blue-300 transition-colors">
+              <div
+                key={item.id}
+                className="border border-gray-200 rounded-lg p-6 hover:border-blue-300 transition-colors"
+              >
                 <div className="flex items-start justify-between mb-4">
                   <div className="flex-1">
                     <div className="flex items-center gap-2 mb-1">
@@ -448,7 +439,7 @@ export default function TrendAnalysis() {
                   </button>
                 </div>
 
-                {item.related_keywords.length > 0 && (
+                {item.related_keywords?.length > 0 && (
                   <div className="mb-4">
                     <p className="text-sm font-medium text-gray-700 mb-2">AI提案キーワード</p>
                     <div className="flex flex-wrap gap-2">
@@ -485,13 +476,18 @@ export default function TrendAnalysis() {
         </div>
       )}
 
-      {savedKeywords.length === 0 && relatedKeywords.length === 0 && !googleTrendData && (
-        <div className="bg-gray-50 rounded-lg p-12 text-center">
-          <TrendingUp className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-          <p className="text-gray-600 mb-2">まだキーワードが登録されていません</p>
-          <p className="text-sm text-gray-500">上のフォームからキーワードを入力して分析を開始してください</p>
-        </div>
-      )}
+      {/* 🔸 初期表示メッセージ */}
+      {savedKeywords.length === 0 &&
+        relatedKeywords.length === 0 &&
+        !googleTrendData && (
+          <div className="bg-gray-50 rounded-lg p-12 text-center">
+            <TrendingUp className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+            <p className="text-gray-600 mb-2">まだキーワードが登録されていません</p>
+            <p className="text-sm text-gray-500">
+              上のフォームからキーワードを入力して分析を開始してください
+            </p>
+          </div>
+        )}
     </div>
   );
 }
