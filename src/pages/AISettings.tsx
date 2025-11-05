@@ -133,7 +133,7 @@ export default function AISettings() {
                 type={showApiKey ? 'text' : 'password'}
                 value={formData.api_key}
                 onChange={(e) => setFormData({ ...formData, api_key: e.target.value })}
-                placeholder="sk-..."
+                placeholder=""
                 className="w-full px-4 py-3 pr-12 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               />
               <button
