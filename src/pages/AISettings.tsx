@@ -10,6 +10,7 @@ export default function AISettings() {
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   const [formData, setFormData] = useState({
+    name: '', 
     provider: 'Gemini',
     api_key: '',
     model: 'gemini-2.5-flash',
