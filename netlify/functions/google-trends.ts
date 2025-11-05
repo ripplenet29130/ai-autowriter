@@ -21,7 +21,7 @@ export const handler: Handler = async (event) => {
     // Googleトレンド非公式JSONエンドポイント（公開URL）
     const url = `https://trends.google.com/trends/api/explore?hl=ja&tz=-540&req=${encodeURIComponent(
       JSON.stringify({
-        comparisonItem: [{ keyword, geo: "JP", time: "today 3-m" }],
+        comparisonItem: [{ keyword, time: "today 3-m" }],
         category: 0,
         property: "",
       })
