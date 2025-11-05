@@ -105,6 +105,18 @@ export default function AISettings() {
         <h2 className="text-xl font-semibold text-gray-800 mb-6">新しいAI設定</h2>
 
         <div className="space-y-6">
+          <div className="space-y-4">
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700">設定名</label>
+              <input
+              type="text"
+              value={formData.name}
+              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+              placeholder="例：高速記事生成用 / トレンド分析用"
+              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+              />
+          </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
               AIプロバイダー
