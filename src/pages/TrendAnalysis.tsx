@@ -149,49 +149,66 @@ export default function TrendAnalysis() {
   /** 🔹 保存 */
 
 const handleSave = async () => {
-  if (relatedKeywords.length === 0 && !googleTrendData) {
-    showMessage('error', '保存するデータがありません');
+  if (relatedKeywords.length === 0) {
+    showMessage("error", "保存するデータがありません");
     return;
   }
 
   setLoading(true);
-  try {
-    const kw = keyword.trim();
-    const saveData: any = {
-      keyword: kw,
-      related_keywords: relatedKeywords,
-      ai_config_id: selectedAiConfigId,
-      source: 'ai',
-    };
 
-    if (googleTrendData) {
-      saveData.trend_score = googleTrendData.trend_score;
-      saveData.rising_keywords = googleTrendData.rising;
-      saveData.source = 'hybrid';
+  try {
+    const keywordTrimmed = keyword.trim();
+    if (!keywordTrimmed) {
+      showMessage("error", "キーワードを入力してください");
+      setLoading(false);
+      return;
     }
 
-    const { data, error } = await supabase.from('trend_keywords').insert(saveData).select();
+    const saveData = {
+      keyword: keywordTrimmed,
+      related_keywords: relatedKeywords,
+      ai_config_id: selectedAiConfigId,
+      source: "ai",
+      created_at: new Date().toISOString(),
+    };
 
-    // ✅ error がない場合は成功として扱う（dataが空でもOK）
-    if (error) throw error;
+    const { data, error } = await supabase
+      .from("trend_keywords")
+      .insert(saveData)
+      .select();
 
-    showMessage('success', 'キーワードを保存しました');
+    // ✅ Supabaseでは「errorがnull」なら成功扱いでOK
+    if (error) {
+      console.error("Supabase保存エラー:", error.message);
+      showMessage("error", "キーワードの保存に失敗しました");
+      return;
+    }
 
-    // 保存直後にGoogleトレンド分析を呼ぶ
-    await handleAnalyzeGoogleAfterSave(kw);
+    // ✅ dataが空でも成功（returning: minimalの場合あり）
+    showMessage("success", "キーワードを保存しました 🎉");
 
-    // 入力をクリア
-    setKeyword('');
+    // 保存後にGoogleトレンド分析を非同期で実行
+    fetch(`${import.meta.env.VITE_NETLIFY_BASE_URL}/.netlify/functions/google-trends`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ keyword: keywordTrimmed }),
+    }).catch((err) => {
+      console.warn("Googleトレンド分析呼び出しエラー（非致命）:", err);
+    });
+
+    // 入力と状態をリセット
+    setKeyword("");
     setRelatedKeywords([]);
     setGoogleTrendData(null);
-  } catch (error) {
-    console.error('保存エラー:', error);
-    // ✅ ネットワークエラー等のみをエラー表示にする
-    showMessage('error', '保存処理中に一部エラーが発生しました');
+  } catch (e) {
+    console.error("保存処理中に例外発生:", e);
+    // ❌ ここは“実際の例外”のみを捕捉
+    showMessage("error", "保存中に予期せぬエラーが発生しました");
   } finally {
     setLoading(false);
   }
 };
+
 
 
   /** 🔹 削除 */
