@@ -493,23 +493,25 @@ export default function TrendAnalysis() {
 /** ✅ Googleトレンド自動保存後更新 */
 async function handleAnalyzeGoogleAfterSave(kw: string) {
   try {
-    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-    const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-
-    const response = await fetch(`${supabaseUrl}/functions/v1/google-trends`, {
+    // ✅ Netlify Functions経由に変更
+    const response = await fetch("/.netlify/functions/google-trends", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${supabaseAnonKey}`,
       },
-      body: JSON.stringify({ keyword: kw, timeRange: "now 7-d", geo: "JP" }),
+      body: JSON.stringify({
+        keyword: kw,
+        timeRange: "now 7-d", // 過去7日
+        geo: "JP", // 日本
+      }),
     });
 
     if (!response.ok) throw new Error("Googleトレンド分析に失敗しました");
 
     const result = await response.json();
 
-    await supabase
+    // ✅ Supabaseに保存
+    const { error } = await supabase
       .from("trend_keywords")
       .update({
         trend_score: result.trend_score,
@@ -518,8 +520,10 @@ async function handleAnalyzeGoogleAfterSave(kw: string) {
       })
       .eq("keyword", kw);
 
-    console.log("Googleトレンド更新完了:", kw);
+    if (error) throw error;
+
+    console.log("✅ Googleトレンド更新完了:", kw);
   } catch (err) {
-    console.error("Googleトレンド自動分析エラー:", err);
+    console.error("❌ Googleトレンド自動分析エラー:", err);
   }
 }
