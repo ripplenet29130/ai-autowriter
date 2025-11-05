@@ -54,14 +54,29 @@ export default function AISettings() {
 
   const handleSave = async () => {
     if (!formData.api_key) {
-      showMessage('error', 'APIキーを入力してください');
-      return;
-    }
+  setMessage({ type: 'error', text: 'APIキーを入力してください。' });
+  setLoading(false);
+  return;
+}
+
+if (!formData.name.trim()) {
+  setFormData({ ...formData, name: `${formData.provider} - ${formData.model}` });
+}
+
 
     setLoading(true);
-    const { error } = await supabase
-      .from('ai_configs')
-      .insert([formData]);
+    const { error } = await supabase.from('ai_configs').insert([
+  {
+    name: formData.name || `${formData.provider} - ${formData.model}`, // ← 追加
+    provider: formData.provider,
+    api_key: formData.api_key,
+    model: formData.model,
+    temperature: formData.temperature,
+    max_tokens: formData.max_tokens,
+    enable_image: formData.enable_image,
+  },
+]);
+
 
     if (error) {
       showMessage('error', '設定の保存に失敗しました');
@@ -113,7 +128,7 @@ export default function AISettings() {
               type="text"
               value={formData.name}
               onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-              placeholder="例：高速記事生成用 / トレンド分析用"
+              placeholder="例：記事生成用 / トレンド分析用"
               className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
               />
           </div>
