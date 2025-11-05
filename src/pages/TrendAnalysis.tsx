@@ -8,7 +8,6 @@ interface TrendKeyword {
   keyword: string;
   related_keywords: string[];
   ai_config_id?: string;
-  trend_score?: any;
   rising_keywords?: string[];
   source: string;
   created_at: string;
@@ -148,7 +147,7 @@ export default function TrendAnalysis() {
   const handleAnalyze = () => (activeTab === 'ai' ? handleAnalyzeAI() : handleAnalyzeGoogle());
 
   /** 🔹 保存 */
-  // ===== 既存 handleSave の中身をこの実装に差し替え =====
+
 const handleSave = async () => {
   if (relatedKeywords.length === 0 && !googleTrendData) {
     showMessage('error', '保存するデータがありません');
@@ -157,40 +156,42 @@ const handleSave = async () => {
 
   setLoading(true);
   try {
-    const kw = keyword.trim();        // ← 呼び出し用に退避
+    const kw = keyword.trim();
     const saveData: any = {
       keyword: kw,
       related_keywords: relatedKeywords,
       ai_config_id: selectedAiConfigId,
-      source: 'ai',                   // まずはAIの保存として登録
+      source: 'ai',
     };
 
     if (googleTrendData) {
       saveData.trend_score = googleTrendData.trend_score;
       saveData.rising_keywords = googleTrendData.rising;
-      saveData.source = 'hybrid';     // 既にGoogleも表示中ならhybridで保存
+      saveData.source = 'hybrid';
     }
 
-    const { error } = await supabase.from('trend_keywords').insert(saveData);
+    const { data, error } = await supabase.from('trend_keywords').insert(saveData).select();
+
+    // ✅ error がない場合は成功として扱う（dataが空でもOK）
     if (error) throw error;
 
     showMessage('success', 'キーワードを保存しました');
 
-    // → 保存直後に Google トレンドも自動分析＆追記更新
+    // 保存直後にGoogleトレンド分析を呼ぶ
     await handleAnalyzeGoogleAfterSave(kw);
 
-    // 入力フォームはクリア
+    // 入力をクリア
     setKeyword('');
     setRelatedKeywords([]);
     setGoogleTrendData(null);
   } catch (error) {
     console.error('保存エラー:', error);
-    showMessage('error', 'キーワードの保存に失敗しました');
+    // ✅ ネットワークエラー等のみをエラー表示にする
+    showMessage('error', '保存処理中に一部エラーが発生しました');
   } finally {
     setLoading(false);
   }
 };
-// ===== 差し替えここまで =====
 
 
   /** 🔹 削除 */
