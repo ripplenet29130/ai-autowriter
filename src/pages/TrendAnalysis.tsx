@@ -496,7 +496,7 @@ const handleSave = async () => {
                       </div>
       </div>
     )
-  )}
+  )
 </div>
 
 {/* 🔸 保存済みキーワード一覧 */}
