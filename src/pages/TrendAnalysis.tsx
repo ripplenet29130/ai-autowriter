@@ -80,17 +80,15 @@ export default function TrendAnalysis() {
       const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
       const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-      const response = await fetch(`${supabaseUrl}/functions/v1/gemini-trends`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${supabaseAnonKey}`,
-        },
-        body: JSON.stringify({
-          keyword: keyword.trim(),
-          ai_config_id: selectedAiConfigId,
-        }),
-      });
+      // ✅ 修正版：Netlify Functionsを直接呼ぶ
+      const response = await fetch("/.netlify/functions/gemini-trends", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+      keyword: keyword.trim(),
+      ai_config_id: selectedAiConfigId,
+      }),
+    });
 
       if (!response.ok) throw new Error('AI分析に失敗しました');
 
