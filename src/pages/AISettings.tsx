@@ -125,16 +125,18 @@ export default function AISettings() {
         <div className="space-y-6">
           {/* 設定名 */}
           <div>
-            <label className="block text-sm font-medium text-gray-700">
-              設定名
-            </label>
-            <input
-  type="text"
-  value={formData.name}
-  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-  placeholder="例：記事生成用 / トレンド分析用"
-  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-/>
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+          設定名
+          </label>
+          <input
+          type="text"
+          value={formData.name}
+          onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+          placeholder="例：記事生成用 / トレンド分析用"
+          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+  />
+          </div>
+
 
 
           {/* AIプロバイダー */}
