@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { supabase, AIConfig } from "../lib/supabase";せ
+import { supabase, AIConfig } from "../lib/supabase";
 import {
   TrendingUp,
   Search,
