@@ -1,65 +1,51 @@
 // netlify/functions/google-trends.ts
+import type { Handler } from "@netlify/functions";
 import googleTrends from "google-trends-api";
 
-export const handler = async (event: any) => {
-  if (event.httpMethod !== "POST") {
-    return {
-      statusCode: 405,
-      body: JSON.stringify({ error: "Method Not Allowed" }),
-    };
-  }
-
+const handler: Handler = async (event) => {
   try {
-    const { keyword, geo = "JP", timeRange = "now 7-d" } = JSON.parse(event.body || "{}");
+    const { keyword, timeRange = "now 7-d", geo = "JP" } = JSON.parse(event.body || "{}");
 
     if (!keyword) {
-      return {
-        statusCode: 400,
-        body: JSON.stringify({ error: "keyword is required" }),
-      };
+      return new Response(JSON.stringify({ error: "Keyword is required" }), { status: 400 });
     }
 
-    // --- Googleトレンドからデータ取得 ---
-    const [timelineRes, relatedRes] = await Promise.all([
-      googleTrends.interestOverTime({ keyword, geo, timeframe: timeRange }),
-      googleTrends.relatedQueries({ keyword, geo, timeframe: timeRange }),
-    ]);
+    // ---- 人気度の時系列データを取得 ----
+    const timelineData = await googleTrends.interestOverTime({
+      keyword,
+      geo,
+      timeframe: timeRange,
+    });
 
-    const timelineJson = JSON.parse(timelineRes);
-    const relatedJson = JSON.parse(relatedRes);
-
-    // --- タイムライン整形 ---
-    const timeline = timelineJson.default.timelineData.map((d: any) => ({
-      time: d.formattedTime,
-      value: d.value[0],
+    const parsedTimeline = JSON.parse(timelineData);
+    const timeline = parsedTimeline.default.timelineData.map((item: any) => ({
+      time: new Date(item.time * 1000).toLocaleDateString("ja-JP"),
+      value: item.value[0],
     }));
 
-    // --- 人気上昇中のキーワード抽出 ---
-    const rising =
-      relatedJson.default.rankedList[1]?.rankedKeyword?.map((r: any) => r.query) || [];
+    // ---- 上昇キーワードを取得 ----
+    const risingData = await googleTrends.relatedQueries({ keyword, geo });
+    const parsedRising = JSON.parse(risingData);
+    const rising = parsedRising.default.rankedList?.[1]?.rankedKeyword?.map((k: any) => k.query) || [];
 
-    // --- スコア算出 ---
-    const avg = timeline.reduce((a: number, b: any) => a + b.value, 0) / timeline.length;
-    const max = Math.max(...timeline.map((d: any) => d.value));
-    const min = Math.min(...timeline.map((d: any) => d.value));
+    // ---- 平均スコア算出 ----
+    const average = Math.round(
+      timeline.reduce((sum: number, item: any) => sum + item.value, 0) / timeline.length
+    );
 
-    // --- レスポンス ---
-    return {
-      statusCode: 200,
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+    return new Response(
+      JSON.stringify({
         keyword,
         timeline,
         rising,
-        trend_score: { average: avg, max, min },
+        trend_score: { average },
       }),
-    };
-  } catch (error) {
-    console.error("Googleトレンド取得エラー:", error);
-    return {
-      statusCode: 500,
-      body: JSON.stringify({ error: "トレンドデータ取得に失敗しました" }),
-    };
+      { status: 200, headers: { "Content-Type": "application/json" } }
+    );
+  } catch (error: any) {
+    console.error("Google Trends Error:", error);
+    return new Response(JSON.stringify({ error: "Failed to fetch Google Trends" }), { status: 500 });
   }
 };
 
+export { handler };
