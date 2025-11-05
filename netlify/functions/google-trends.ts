@@ -31,14 +31,21 @@ export const handler: Handler = async (event) => {
         property: "",
       })
     )}`;
-
+    
+console.log("📡 Fetching:", url);
+    
     const res = await fetch(url);
     const text = await res.text();
+
+    // ✅ ここを追加：最初の200文字だけログに出す
+    console.log("🔍 Googleレスポンス（先頭200文字）:", text.slice(0, 200));
 
     // HTMLではなくJSONが返ってくるように調整
     const jsonText = text.replace(/^[^{]+/, ""); // XSSI防止プレフィックスを削除
     const data = JSON.parse(jsonText);
 
+    console.log("✅ JSON解析成功");
+    
     // 人気度データ用のリクエストを生成
     const widget = data.widgets.find((w: any) => w.id === "TIMESERIES");
 
