@@ -28,6 +28,8 @@ export default function TrendAnalysis() {
   const [relatedKeywords, setRelatedKeywords] = useState<string[]>([]);
   const [googleTrendData, setGoogleTrendData] = useState<GoogleTrendData | null>(null);
   const [savedKeywords, setSavedKeywords] = useState<TrendKeyword[]>([]);
+  
+  const [googleTrends, setGoogleTrends] = useState<any[]>([]);
 
   const [loading, setLoading] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
@@ -37,6 +39,26 @@ export default function TrendAnalysis() {
     loadAiConfigs();
     loadSavedKeywords();
   }, []);
+
+  // ✅ Supabaseからトレンドデータを取得
+useEffect(() => {
+  const loadTrends = async () => {
+    const { data, error } = await supabase
+      .from("trend_keywords")
+      .select("keyword, trend_score, rising_keywords, created_at")
+      .order("created_at", { ascending: false })
+      .limit(5);
+
+    if (!error && data) {
+      setGoogleTrends(data);
+    } else {
+      console.error("トレンドデータ取得エラー:", error?.message);
+    }
+  };
+
+  loadTrends();
+}, []);
+
 
   /** 🔹 AI設定一覧を読み込み */
   const loadAiConfigs = async () => {
@@ -333,6 +355,7 @@ const handleSave = async () => {
             </div>
           </div>
 
+
           {/* 🔸 AI結果 */}
           {activeTab === 'ai' && relatedKeywords.length > 0 && (
             <div className="mt-6 pt-6">
@@ -365,23 +388,64 @@ const handleSave = async () => {
           )}
 
           {/* 🔸 Google結果 */}
-          {activeTab === 'google' && googleTrendData && (
-            <div className="mt-6 pt-6">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
-                  <TrendingUp className="w-5 h-5 text-blue-600" />
-                  Googleトレンドデータ
-                </h3>
-                <button
-                  onClick={handleSave}
-                  disabled={loading}
-                  className="px-4 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition-colors disabled:opacity-50 flex items-center gap-2"
-                >
-                  <Save className="w-4 h-4" />
-                  保存
-                </button>
-              </div>
+          {activeTab === 'google' && (
+  <div className="mt-6 pt-6">
+    {googleTrends.length === 0 ? (
+      <p className="text-gray-500">まだトレンドデータがありません。</p>
+    ) : (
+      googleTrends.map((trend, index) => (
+        <div
+          key={index}
+          className="bg-white border border-gray-200 rounded-lg p-6 mb-6 shadow-sm"
+        >
+          <h3 className="text-lg font-semibold text-gray-800 mb-2">
+            {trend.keyword}
+          </h3>
 
+          {trend.trend_score?.timeline && (
+            <div className="mb-4">
+              <p className="text-sm text-gray-600 mb-2">人気度推移</p>
+              <div className="space-y-2">
+                {trend.trend_score.timeline.map((item: any, i: number) => (
+                  <div key={i} className="flex items-center gap-3">
+                    <span className="text-xs text-gray-500 w-20">{item.time}</span>
+                    <div className="flex-1 bg-gray-200 rounded-full h-4">
+                      <div
+                        className="bg-blue-600 h-4 rounded-full"
+                        style={{ width: `${item.value}%` }}
+                      ></div>
+                    </div>
+                    <span className="text-xs text-gray-700">{item.value}</span>
+                  </div>
+                ))}
+              </div>
+              <p className="text-xs text-gray-500 mt-2">
+                平均スコア: {trend.trend_score.average}
+              </p>
+            </div>
+          )}
+
+          {trend.rising_keywords?.length > 0 && (
+            <div>
+              <p className="text-sm text-gray-600 mb-2">上昇キーワード</p>
+              <div className="flex flex-wrap gap-2">
+                {trend.rising_keywords.slice(0, 10).map((kw: string, i: number) => (
+                  <span
+                    key={i}
+                    className="px-3 py-1 bg-green-50 border border-green-200 rounded-full text-sm text-green-800"
+                  >
+                    {kw}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      ))
+    )}
+  </div>
+)}
+              
               <div className="space-y-6">
                 <div className="bg-gray-50 rounded-lg p-4">
                   <h4 className="font-medium text-gray-700 mb-3">
