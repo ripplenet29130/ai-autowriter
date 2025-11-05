@@ -445,61 +445,7 @@ const handleSave = async () => {
     )}
   </div>
 )}
-              
-              <div className="space-y-6">
-                <div className="bg-gray-50 rounded-lg p-4">
-                  <h4 className="font-medium text-gray-700 mb-3">
-                    人気度推移（過去7日間）
-                  </h4>
-                  <div className="space-y-2">
-                    {googleTrendData.timeline.map((item, index) => (
-                      <div key={index} className="flex items-center gap-3">
-                        <span className="text-xs text-gray-500 w-24">
-                          {item.time}
-                        </span>
-                        <div className="flex-1 bg-gray-200 rounded-full h-6">
-                          <div
-                            className="bg-blue-600 h-6 rounded-full flex items-center justify-end px-2"
-                            style={{ width: `${item.value}%` }}
-                          >
-                            <span className="text-xs text-white font-medium">
-                              {item.value}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                  <p className="text-sm text-gray-600 mt-3">
-                    平均スコア:{' '}
-                    <span className="font-semibold">
-                      {googleTrendData.trend_score.average}
-                    </span>
-                  </p>
-                </div>
-
-                <div>
-                  <h4 className="font-medium text-gray-700 mb-3">
-                    人気上昇中のキーワード
-                  </h4>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                    {googleTrendData.rising.map((kw, index) => (
-                      <div
-                        key={index}
-                        className="bg-green-50 border border-green-200 rounded-lg px-4 py-2 text-gray-800"
-                      >
-                        {kw}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                      </div>
-      </div>
-    )
-  )
-</div>
-
-{/* 🔸 保存済みキーワード一覧 */}
+            
 
 
       {/* 🔸 保存済みキーワード一覧 */}
@@ -638,5 +584,4 @@ const handleAnalyzeGoogleAfterSave = async (kw: string) => {
     showMessage('error', 'Googleトレンドの自動分析に失敗しました');
   }
 };
-// ===== 追加ここまで =====
 
