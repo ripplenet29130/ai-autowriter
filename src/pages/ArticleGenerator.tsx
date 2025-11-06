@@ -80,11 +80,20 @@ export default function ArticleGenerator() {
     const selectedKeyword = trendKeywords.find(k => k.id === selectedKeywordId);
     if (!selectedKeyword) throw new Error('キーワードが見つかりません');
 
-    // ✅ Supabase Edge Function 呼び出し
+    // 🎯 関連キーワードからランダムに1つ選ぶ
+    const relatedList = selectedKeyword.related_keywords || [];
+    const randomKeyword =
+      relatedList.length > 0
+        ? relatedList[Math.floor(Math.random() * relatedList.length)]
+        : selectedKeyword.keyword;
+
+    console.log("🎲 使用キーワード:", randomKeyword);
+
+    // ✅ Supabase Edge Function呼び出し
     const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
     const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-    const response = await fetch(`/.netlify/functions/generate-article`, {
+    const response = await fetch(`${supabaseUrl}/functions/v1/generate-article`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -92,8 +101,8 @@ export default function ArticleGenerator() {
       },
       body: JSON.stringify({
         ai_config_id: selectedAiConfigId,
-        keyword: selectedKeyword.keyword,
-        related_keywords: selectedKeyword.related_keywords,
+        keyword: randomKeyword, // ← ランダムに選んだキーワードを使用
+        related_keywords: relatedList,
       }),
     });
 
@@ -103,14 +112,13 @@ export default function ArticleGenerator() {
     }
 
     const result = await response.json();
-
     setGeneratedArticle({
       title: result.title,
       content: result.content,
-      keyword: selectedKeyword.keyword,
+      keyword: randomKeyword,
     });
 
-    showMessage('success', 'AIによる記事を生成しました');
+    showMessage('success', '記事を生成しました');
   } catch (error) {
     console.error('記事生成エラー:', error);
     showMessage('error', error instanceof Error ? error.message : '記事生成に失敗しました');
@@ -118,6 +126,7 @@ export default function ArticleGenerator() {
     setGenerating(false);
   }
 };
+
 
 
   /**
