@@ -43,7 +43,8 @@ export const handler: Handler = async (event) => {
 
     // === AIプロバイダごとに分岐 ===
     switch ((aiConfig.provider || "").toLowerCase()) {
-      // ---------- Google Gemini ----------
+      // --- Gemini対応（"Gemini" または "Google Gemini" どちらでもOK）---
+      case "gemini":
       case "google gemini": {
         const geminiKey = aiConfig.api_key || process.env.VITE_GEMINI_API_KEY;
         const model = aiConfig.model || "gemini-2.5-flash";
