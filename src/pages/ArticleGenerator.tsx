@@ -12,7 +12,7 @@ interface TrendKeyword {
 
 interface GeneratedArticle {
   title: string;
-  content: string;f
+  content: string;
   keyword: string;
 }
 
@@ -113,11 +113,11 @@ export default function ArticleGenerator() {
     }
 
     const result = await response.json();
-
+    // ✅ 生成結果にランダムキーワードを保持
     setGeneratedArticle({
       title: result.title,
       content: result.content,
-      keyword: selectedKeyword.keyword,
+      keyword: randomKeyword,
     });
 
     showMessage('success', 'AIによる記事を生成しました');
