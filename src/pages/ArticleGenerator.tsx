@@ -29,6 +29,7 @@ export default function ArticleGenerator() {
   const [generating, setGenerating] = useState(false);
   const [posting, setPosting] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [postedUrl, setPostedUrl] = useState<string | null>(null);
 
   useEffect(() => {
     loadConfigs();
@@ -185,7 +186,8 @@ if (wpConfig.default_category) {
 
     if (saveError) console.error('記事履歴の保存エラー:', saveError);
 
-    showMessage('success', `WordPressに投稿しました: ${postedUrl}`);
+    showMessage('success', `WordPressに投稿しました`);
+    setPostedUrl(postedUrl);
     setGeneratedArticle(null);
   } catch (error) {
     console.error('WordPress投稿エラー:', error);
@@ -359,6 +361,21 @@ if (wpConfig.default_category) {
         </div>
       </div>
     </div>
+
+    {/* ✅ 投稿完了時の確認リンク表示 */}
+{postedUrl && (
+  <div className="mt-6 border-t pt-4">
+    <p className="text-sm text-gray-600 mb-2">✅ 投稿が完了しました。WordPressで確認できます：</p>
+    <a
+      href={postedUrl}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="text-blue-600 underline hover:text-blue-800 break-all"
+    >
+      {postedUrl}
+    </a>
+  </div>
+)}
 
     {generatedArticle && (
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-8 mb-8">
