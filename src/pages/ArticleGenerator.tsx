@@ -303,23 +303,19 @@ if (wpConfig.default_category) {
             ))}
           </select>
 
-          {selectedKeyword && selectedKeyword.related_keywords.length > 0 && (
-            <div className="mt-2 flex flex-wrap gap-2">
-              {selectedKeyword.related_keywords.slice(0, 5).map((kw, index) => (
-                <span
-                  key={index}
-                  className="px-2 py-1 bg-blue-50 text-blue-700 text-xs rounded-full"
-                >
-                  {kw}
-                </span>
-              ))}
-              {selectedKeyword.related_keywords.length > 5 && (
-                <span className="px-2 py-1 bg-gray-100 text-gray-600 text-xs rounded-full">
-                  +{selectedKeyword.related_keywords.length - 5}件
-                </span>
-              )}
-            </div>
-          )}
+         {selectedKeyword && selectedKeyword.related_keywords.length > 0 && (
+  <div className="mt-2 flex flex-wrap gap-2">
+    {selectedKeyword.related_keywords.map((kw, index) => (
+      <span
+        key={index}
+        className="px-2 py-1 bg-blue-50 text-blue-700 text-xs rounded-full"
+      >
+        {kw}
+      </span>
+    ))}
+  </div>
+)}
+
         </div>
 
         {selectedAiConfig && (
