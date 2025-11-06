@@ -197,7 +197,7 @@ export default function Scheduler() {
               >
                 {aiConfigs.map((config) => (
                   <option key={config.id} value={config.id}>
-                    {config.provider} - {config.model}
+                    {config.name || `${config.provider} - ${config.model}`}
                   </option>
                 ))}
               </select>
@@ -300,7 +300,7 @@ export default function Scheduler() {
                     <div className="grid grid-cols-2 gap-4 text-sm text-gray-600">
                       <div>
                         <p className="font-medium text-gray-700 mb-1">AI設定</p>
-                        <p>{schedule.ai_config?.provider} - {schedule.ai_config?.model}</p>
+                        <p>{schedule.ai_config?.name || `${schedule.ai_config?.provider} - ${schedule.ai_config?.model}`}</p>
                       </div>
                       <div>
                         <p className="font-medium text-gray-700 mb-1">WordPress</p>
