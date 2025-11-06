@@ -118,44 +118,77 @@ export default function ArticleGenerator() {
    * 現状ではAI出力をそのまま投稿できます。
    */
   const handlePostToWordPress = async () => {
-    if (!generatedArticle || !selectedWpConfigId) {
-      showMessage('error', '記事とWordPress設定を確認してください');
-      return;
+  if (!generatedArticle || !selectedWpConfigId) {
+    showMessage('error', '記事とWordPress設定を確認してください');
+    return;
+  }
+
+  setPosting(true);
+
+  try {
+    const wpConfig = wpConfigs.find((w) => w.id === selectedWpConfigId);
+    if (!wpConfig) throw new Error('WordPress設定が見つかりません');
+
+    // ✅ URL整形
+    const wpUrl = wpConfig.url.replace(/\/$/, '');
+
+    // ✅ Basic認証
+    const authHeader = 'Basic ' + btoa(`${wpConfig.username}:${wpConfig.app_password}`);
+
+    // ✅ Gutenberg対応：content.renderedではなく「content」キーにHTML文字列を直接渡す
+    const payload = {
+      title: generatedArticle.title,
+      content: generatedArticle.content || "", // HTML文字列
+      status: 'publish',
+    };
+
+    // ✅ default_category がある場合だけ追加
+    if (wpConfig.default_category) {
+      payload['categories'] = [parseInt(wpConfig.default_category)];
     }
 
-    setPosting(true);
+    const response = await fetch(`${wpUrl}/wp-json/wp/v2/posts`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json; charset=utf-8',
+        Authorization: authHeader,
+      },
+      body: JSON.stringify(payload),
+    });
 
-    try {
-      const wpConfig = wpConfigs.find(w => w.id === selectedWpConfigId);
-      if (!wpConfig) throw new Error('WordPress設定が見つかりません');
-
-      const authHeader = 'Basic ' + btoa(`${wpConfig.username}:${wpConfig.app_password}`);
-
-      const response = await fetch(`${wpConfig.url}/wp-json/wp/v2/posts`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: authHeader,
-        },
-        body: JSON.stringify({
-          title: generatedArticle.title,
-          content: generatedArticle.content,
-          status: 'publish',
-          categories: wpConfig.default_category ? [parseInt(wpConfig.default_category)] : [],
-        }),
-      });
-
-      if (!response.ok) throw new Error('WordPressへの投稿に失敗しました');
-
-      showMessage('success', 'WordPressに投稿しました');
-      setGeneratedArticle(null);
-    } catch (error) {
-      console.error('WordPress投稿エラー:', error);
-      showMessage('error', error instanceof Error ? error.message : 'WordPressへの投稿に失敗しました');
-    } finally {
-      setPosting(false);
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('WordPress投稿エラー詳細:', errorText);
+      throw new Error('WordPressへの投稿に失敗しました');
     }
-  };
+
+    const postData = await response.json();
+    const postedUrl = postData.link || `${wpUrl}/?p=${postData.id}`;
+
+    // ✅ Supabaseへ保存
+    const { error: saveError } = await supabase.from('articles').insert({
+      ai_config_id: selectedAiConfigId,
+      wp_config_id: selectedWpConfigId,
+      keyword: generatedArticle.keyword,
+      title: generatedArticle.title,
+      content: generatedArticle.content,
+      wp_url: postedUrl,
+    });
+
+    if (saveError) console.error('記事履歴の保存エラー:', saveError);
+
+    showMessage('success', `WordPressに投稿しました: ${postedUrl}`);
+    setGeneratedArticle(null);
+  } catch (error) {
+    console.error('WordPress投稿エラー:', error);
+    showMessage(
+      'error',
+      error instanceof Error ? error.message : 'WordPress投稿に失敗しました'
+    );
+  } finally {
+    setPosting(false);
+  }
+};
 
   const selectedAiConfig = aiConfigs.find(c => c.id === selectedAiConfigId);
   const selectedKeyword = trendKeywords.find(k => k.id === selectedKeywordId);
