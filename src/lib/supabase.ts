@@ -66,3 +66,14 @@ export type TrendKeyword = {
   source: string;
   created_at: string;
 };
+
+export type Article = {
+  id: string;
+  ai_config_id: string | null;
+  wp_config_id: string | null;
+  keyword: string;
+  title: string;
+  content: string;
+  wp_url: string | null;
+  created_at: string;
+};
