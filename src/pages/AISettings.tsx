@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase, AIConfig } from '../lib/supabase';
-import { Eye, EyeOff, Save } from 'lucide-react';
+import { Eye, EyeOff, Save, Trash2 } from 'lucide-react';
 import Toast from '../components/Toast';
 
 export default function AISettings() {
@@ -17,6 +17,9 @@ export default function AISettings() {
     temperature: 0.7,
     max_tokens: 4000,
     enable_image: false,
+    tone: 'ビジネス',
+    article_length: '中（1000〜1500字）',
+    style: 'SEO重視',
   });
 
   useEffect(() => {
@@ -43,6 +46,9 @@ export default function AISettings() {
           temperature: latest.temperature,
           max_tokens: latest.max_tokens,
           enable_image: latest.enable_image,
+          tone: latest.tone || 'ビジネス',
+          article_length: latest.article_length || '中（1000〜1500字）',
+          style: latest.style || 'SEO重視',
         });
       }
     }
@@ -74,6 +80,9 @@ export default function AISettings() {
         temperature: formData.temperature,
         max_tokens: formData.max_tokens,
         enable_image: formData.enable_image,
+        tone: formData.tone,
+        article_length: formData.article_length,
+        style: formData.style,
       },
     ]);
 
@@ -92,6 +101,22 @@ export default function AISettings() {
 
   const handleTest = () => {
     showMessage('success', '接続テスト機能は準備中です');
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!confirm('この設定を削除してもよろしいですか？')) return;
+
+    const { error } = await supabase
+      .from('ai_configs')
+      .delete()
+      .eq('id', id);
+
+    if (error) {
+      showMessage('error', '削除に失敗しました');
+    } else {
+      showMessage('success', '設定を削除しました');
+      loadConfigs();
+    }
   };
 
   const modelOptions = {
@@ -279,6 +304,63 @@ export default function AISettings() {
             </label>
           </div>
 
+          {/* 文章トーン */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              文章トーン
+            </label>
+            <select
+              value={formData.tone}
+              onChange={(e) =>
+                setFormData({ ...formData, tone: e.target.value })
+              }
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            >
+              <option value="ビジネス">ビジネス</option>
+              <option value="カジュアル">カジュアル</option>
+              <option value="フレンドリー">フレンドリー</option>
+              <option value="感情的">感情的</option>
+              <option value="フォーマル">フォーマル</option>
+            </select>
+          </div>
+
+          {/* 記事ボリューム */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              記事ボリューム
+            </label>
+            <select
+              value={formData.article_length}
+              onChange={(e) =>
+                setFormData({ ...formData, article_length: e.target.value })
+              }
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            >
+              <option value="短文（500〜800字）">短文（500〜800字）</option>
+              <option value="中（1000〜1500字）">中（1000〜1500字）</option>
+              <option value="長文（2000字〜）">長文（2000字〜）</option>
+            </select>
+          </div>
+
+          {/* 出力スタイル */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              出力スタイル
+            </label>
+            <select
+              value={formData.style}
+              onChange={(e) =>
+                setFormData({ ...formData, style: e.target.value })
+              }
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            >
+              <option value="SEO重視">SEO重視</option>
+              <option value="体験談風">体験談風</option>
+              <option value="Q&A形式">Q&A形式</option>
+              <option value="リスト形式">リスト形式</option>
+            </select>
+          </div>
+
           {/* ボタン */}
           <div className="flex gap-4 pt-4">
             <button
@@ -323,6 +405,9 @@ export default function AISettings() {
                     </div>
                     <div className="text-sm text-gray-600 space-y-1">
                       <p>
+                        トーン: {config.tone} | スタイル: {config.style} | ボリューム: {config.article_length}
+                      </p>
+                      <p>
                         Temperature: {config.temperature} | Max Tokens:{' '}
                         {config.max_tokens}
                       </p>
@@ -333,6 +418,13 @@ export default function AISettings() {
                       </p>
                     </div>
                   </div>
+                  <button
+                    onClick={() => handleDelete(config.id)}
+                    className="ml-4 p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                    title="削除"
+                  >
+                    <Trash2 className="w-5 h-5" />
+                  </button>
                 </div>
               </div>
             ))}

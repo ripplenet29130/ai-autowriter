@@ -30,6 +30,9 @@ export type AIConfig = {
   temperature: number;
   max_tokens: number;
   enable_image: boolean;
+  tone: string;
+  article_length: string;
+  style: string;
   created_at: string;
 };
 
