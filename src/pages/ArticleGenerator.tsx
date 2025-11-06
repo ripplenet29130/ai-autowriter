@@ -89,7 +89,9 @@ export default function ArticleGenerator() {
 
     console.log("🎲 使用キーワード:", randomKeyword);
 
-    
+    // ✅ Supabase Edge Function 呼び出し
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+    const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
      
     // ✅ Netlify Functions の呼び出し
     const response = await fetch(`/.netlify/functions/generate-article`, {
