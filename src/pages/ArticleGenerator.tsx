@@ -135,17 +135,25 @@ export default function ArticleGenerator() {
     // ✅ Basic認証
     const authHeader = 'Basic ' + btoa(`${wpConfig.username}:${wpConfig.app_password}`);
 
-    // ✅ Gutenberg対応：content.renderedではなく「content」キーにHTML文字列を直接渡す
-    const payload = {
-      title: generatedArticle.title,
-      content: generatedArticle.content || "", // HTML文字列
-      status: 'publish',
-    };
+    // ✅ Gutenberg対応＋カテゴリ型安全
+const payload: any = {
+  title: generatedArticle.title,
+  content: {
+    raw: generatedArticle.content,
+  },
+  status: 'publish',
+};
 
-    // ✅ default_category がある場合だけ追加
-    if (wpConfig.default_category) {
-      payload['categories'] = [parseInt(wpConfig.default_category)];
-    }
+// ✅ カテゴリ処理の修正版（確実に整数化）
+if (wpConfig.default_category) {
+  const catId = Number(wpConfig.default_category);
+  if (!isNaN(catId)) {
+    payload.categories = [catId];
+  } else {
+    console.warn('⚠ default_category が整数ではありません:', wpConfig.default_category);
+  }
+}
+
 
     const response = await fetch(`${wpUrl}/wp-json/wp/v2/posts`, {
       method: 'POST',
