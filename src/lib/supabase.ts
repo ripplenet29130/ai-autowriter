@@ -24,6 +24,7 @@ export const supabase = createClient(supabaseUrl, supabaseKey, {
 
 export type AIConfig = {
   id: string;
+  name: string;
   provider: string;
   api_key: string;
   model: string;

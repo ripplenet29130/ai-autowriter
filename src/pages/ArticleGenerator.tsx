@@ -227,7 +227,7 @@ export default function ArticleGenerator() {
             >
               {aiConfigs.map((config) => (
                 <option key={config.id} value={config.id}>
-                  {config.provider} - {config.model}
+                  {config.name || `${config.provider} - ${config.model}`}
                 </option>
               ))}
             </select>
