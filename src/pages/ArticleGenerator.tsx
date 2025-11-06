@@ -66,53 +66,59 @@ export default function ArticleGenerator() {
 
   /**
    * ✅ 記事生成ボタン押下時の処理
-   * 現時点ではAI接続を行わず、サンプル記事を生成して表示します。
    */
-  const handleGenerateArticle = async () => {
-    if (!selectedAiConfigId || !selectedKeywordId) {
-      showMessage('error', 'AI設定とキーワードを選択してください');
-      return;
+ const handleGenerateArticle = async () => {
+  if (!selectedAiConfigId || !selectedKeywordId) {
+    showMessage('error', 'AI設定とキーワードを選択してください');
+    return;
+  }
+
+  setGenerating(true);
+  setGeneratedArticle(null);
+
+  try {
+    const selectedKeyword = trendKeywords.find(k => k.id === selectedKeywordId);
+    if (!selectedKeyword) throw new Error('キーワードが見つかりません');
+
+    // ✅ Supabase Edge Function 呼び出し
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+    const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+    const response = await fetch(`${supabaseUrl}/functions/v1/generate-article`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${supabaseAnonKey}`,
+      },
+      body: JSON.stringify({
+        ai_config_id: selectedAiConfigId,
+        keyword: selectedKeyword.keyword,
+        related_keywords: selectedKeyword.related_keywords,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || '記事生成に失敗しました');
     }
 
-    setGenerating(true);
-    setGeneratedArticle(null);
+    const result = await response.json();
 
-    try {
-      // 選択キーワードを取得
-      const selectedKeyword = trendKeywords.find(k => k.id === selectedKeywordId);
+    setGeneratedArticle({
+      title: result.title,
+      content: result.content,
+      keyword: selectedKeyword.keyword,
+    });
 
-      // 仮のサンプル記事を生成
-      const sampleTitle = selectedKeyword
-        ? `${selectedKeyword.keyword} の最新トレンドを徹底解説`
-        : 'サンプル記事タイトル';
+    showMessage('success', 'AIによる記事を生成しました');
+  } catch (error) {
+    console.error('記事生成エラー:', error);
+    showMessage('error', error instanceof Error ? error.message : '記事生成に失敗しました');
+  } finally {
+    setGenerating(false);
+  }
+};
 
-      const sampleBody = `
-<h2>導入：${selectedKeyword?.keyword} の注目度が高まる理由</h2>
-<p>近年、${selectedKeyword?.keyword} に関する検索が急増しています。この記事では、その背景と最新の動向をわかりやすく解説します。</p>
-
-<h2>主要な関連トピック</h2>
-<p>${selectedKeyword?.related_keywords?.slice(0, 3).join('、') || '関連キーワード'} に注目が集まっています。これらのテーマがどのように影響し合うのかを整理してみましょう。</p>
-
-<h2>まとめ：次の一歩を踏み出すために</h2>
-<p>${selectedKeyword?.keyword} の情報は日々進化しています。最新情報をキャッチし、自分に合ったアクションを取ることが大切です。</p>
-`;
-
-      const sampleArticle: GeneratedArticle = {
-        title: sampleTitle,
-        content: sampleBody,
-        keyword: selectedKeyword?.keyword || 'サンプルキーワード',
-      };
-
-      // 記事を画面に反映
-      setGeneratedArticle(sampleArticle);
-      showMessage('success', 'サンプル記事を生成しました');
-    } catch (error) {
-      console.error('サンプル生成エラー:', error);
-      showMessage('error', '記事生成に失敗しました');
-    } finally {
-      setGenerating(false);
-    }
-  };
 
   /**
    * ✅ WordPress投稿処理（そのまま）
