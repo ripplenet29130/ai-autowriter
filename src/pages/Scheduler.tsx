@@ -21,7 +21,7 @@ useEffect(() => {
 const fetchMainKeywords = async () => {
   const { data, error } = await supabase
     .from("trend_keywords")
-    .select("id, main_keyword, related_keywords");
+    .select("id, keyword, related_keywords");
   if (!error) setMainKeywords(data || []);
 };
 
@@ -246,7 +246,7 @@ const fetchMainKeywords = async () => {
               </select>
             </div>
 
-          {/* メインキーワード選択 */}
+         {/* メインキーワード選択 */}
 <div className="mt-4">
   <label className="block text-sm font-medium text-gray-700">キーワード設定</label>
   <select
@@ -255,14 +255,15 @@ const fetchMainKeywords = async () => {
     onChange={(e) => {
       const selected = e.target.value;
       setSelectedMainKeyword(selected);
-      const found = mainKeywords.find((k) => k.main_keyword === selected);
+      const found = mainKeywords.find((k) => k.keyword === selected);
+      // JSONB 配列を直接使える
       setRelatedKeywords(found?.related_keywords || []);
     }}
   >
-    <option hidden value="">キーワードを選択</option> {/* ← 表示されない */}
+    <option hidden value="">キーワードを選択</option> {/* ← 初期値 */}
     {mainKeywords.map((k) => (
-      <option key={k.id} value={k.main_keyword}>
-        {k.main_keyword}（{k.related_keywords?.length || 0}件の関連ワード）
+      <option key={k.id} value={k.keyword}>
+        {k.keyword}（{k.related_keywords?.length || 0}件の関連ワード）
       </option>
     ))}
   </select>
@@ -273,7 +274,7 @@ const fetchMainKeywords = async () => {
   <div className="mt-3">
     <p className="text-sm text-gray-600 mb-1">関連ワード</p>
     <div className="flex flex-wrap gap-2">
-      {relatedKeywords.map((word, index) => (
+      {relatedKeywords.map((word: string, index: number) => (
         <span
           key={index}
           className="bg-blue-100 text-blue-800 text-sm px-3 py-1 rounded-full"
