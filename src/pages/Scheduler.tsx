@@ -9,6 +9,22 @@ export default function Scheduler() {
   const [wpConfigs, setWpConfigs] = useState<WPConfig[]>([]);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  
+  const [trendKeywords, setTrendKeywords] = useState<any[]>([]);
+  const [selectedKeywordId, setSelectedKeywordId] = useState<string | null>(null);
+  
+  // useEffectでキーワード取得
+useEffect(() => {
+  fetchTrendKeywords();
+}, []);
+
+const fetchTrendKeywords = async () => {
+  const { data, error } = await supabase
+    .from('trend_keywords')
+    .select('*')
+    .order('created_at', { ascending: false });
+  if (!error) setTrendKeywords(data || []);
+};
 
   const [formData, setFormData] = useState({
     ai_config_id: '',
@@ -219,6 +235,22 @@ export default function Scheduler() {
                 ))}
               </select>
             </div>
+
+            <div>
+  <label className="block text-sm font-medium text-gray-700">キーワード設定</label>
+  <select
+    className="mt-1 block w-full border border-gray-300 rounded-md p-2"
+    value={selectedKeywordId || ''}
+    onChange={(e) => setSelectedKeywordId(e.target.value)}
+  >
+    <option value="">キーワードを選択</option>
+    {trendKeywords.map(k => (
+      <option key={k.id} value={k.id}>
+        {k.keyword}
+      </option>
+    ))}
+  </select>
+</div>
 
             <div className="grid grid-cols-2 gap-6">
               <div>
