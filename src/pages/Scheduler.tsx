@@ -537,80 +537,83 @@ const fetchMainKeywords = async () => {
                     )}
                   </div>
 
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => toggleStatus(schedule.id, schedule.status)}
-                      className={`px-4 py-2 rounded-lg transition-colors flex items-center gap-2 ${
-                        schedule.status
-                          ? 'bg-yellow-50 text-yellow-700 hover:bg-yellow-100'
-                          : 'bg-green-50 text-green-700 hover:bg-green-100'
-                      }`}
-                    >
-                      {schedule.status ? (
-                        <>
-                          <Pause className="w-4 h-4" />
-                          停止
-                        </>
-                      ) : (
-                        <>
-                          <Play className="w-4 h-4" />
-                          再開
-                        </>
-                      )}
-                    </button>
-                    {/* 今すぐ実行ボタン */}
+                 {/* 右側ボタン群 */}
+<div className="flex flex-col gap-2 items-stretch">
+  {/* 停止／再開 */}
+  <button
+    onClick={() => toggleStatus(schedule.id, schedule.status)}
+    className={`px-4 py-2 rounded-lg transition-colors flex items-center justify-center gap-2 ${
+      schedule.status
+        ? "bg-yellow-50 text-yellow-700 hover:bg-yellow-100"
+        : "bg-green-50 text-green-700 hover:bg-green-100"
+    }`}
+  >
+    {schedule.status ? (
+      <>
+        <Pause className="w-4 h-4" />
+        停止
+      </>
+    ) : (
+      <>
+        <Play className="w-4 h-4" />
+        再開
+      </>
+    )}
+  </button>
 
-                    <button
-  onClick={async () => {
-    setLoading(true); 
-    showMessage("success", "🕒 投稿を実行中です..."); 
+  {/* 今すぐ実行 */}
+  <button
+    onClick={async () => {
+      setLoading(true);
+      showMessage("success", "🕒 投稿を実行中です...");
 
-    try {
-      const res = await fetch("/.netlify/functions/post-now", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ schedule_id: schedule.id }),
-      });
+      try {
+        const res = await fetch("/.netlify/functions/post-now", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ schedule_id: schedule.id }),
+        });
 
-      const data = await res.json();
+        const data = await res.json();
 
-      if (res.ok) {
-        showMessage("success", "✅ 投稿が完了しました！");
-      } else {
-        showMessage("error", `❌ 投稿エラー: ${data.error || "不明なエラーです"}`);
+        if (res.ok) {
+          showMessage("success", "✅ 投稿が完了しました！");
+        } else {
+          showMessage("error", `❌ 投稿エラー: ${data.error || "不明なエラーです"}`);
+        }
+      } catch (err) {
+        console.error(err);
+        showMessage("error", "⚠️ 実行中にエラーが発生しました。");
+      } finally {
+        setLoading(false);
       }
-    } catch (err) {
-      console.error(err);
-      showMessage("error", "⚠️ 実行中にエラーが発生しました。");
-    } finally {
-      setLoading(false); // ← 投稿完了後に解除
-    }
-  }}
-  disabled={loading}
-  className={`px-4 py-2 border border-gray-300 rounded-lg transition-colors ${
-    loading ? "bg-gray-100 text-gray-400 cursor-not-allowed" : "text-gray-700 hover:bg-green-100"
-  }`}
->
-  {loading ? "投稿中..." : "今すぐ実行"}
-</button>
+    }}
+    disabled={loading}
+    className={`px-4 py-2 border border-gray-300 rounded-lg transition-colors text-center ${
+      loading
+        ? "bg-gray-100 text-gray-400 cursor-not-allowed"
+        : "text-gray-700 hover:bg-green-100"
+    }`}
+  >
+    {loading ? "投稿中..." : "今すぐ実行"}
+  </button>
 
-                    <button
-                      onClick={() => handleDelete(schedule.id)}
-                      className="px-4 py-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                    >
-                      <Trash2 className="w-5 h-5" />
-                    </button>
-                  </div>
+  {/* 削除 */}
+  <button
+    onClick={() => handleDelete(schedule.id)}
+    className="px-4 py-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors text-center"
+  >
+    <Trash2 className="w-5 h-5 inline-block" />
+  </button>
 
-{/* ✏️ 編集ボタン */}
-<div className="mt-2">
+  {/* ✏️ 編集 */}
   {!schedule.isEditing ? (
     <button
       onClick={() => {
         schedule.isEditing = true;
-        setSchedules([...schedules]); // 再レンダー
+        setSchedules([...schedules]);
       }}
-      className="w-full px-4 py-2 border border-blue-300 text-blue-700 rounded-lg hover:bg-blue-50 transition-colors"
+      className="px-4 py-2 border border-blue-300 text-blue-700 rounded-lg hover:bg-blue-50 transition-colors text-center"
     >
       ✏️ 編集
     </button>
