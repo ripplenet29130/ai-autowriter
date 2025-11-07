@@ -387,222 +387,247 @@ const fetchMainKeywords = async () => {
         <div>
           <h2 className="text-xl font-semibold text-gray-800 mb-4">登録済みのスケジュール</h2>
           <div className="space-y-4">
-            {schedules.map((schedule) => (
-              <div key={schedule.id} className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-                <div className="flex items-start justify-between">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-3 mb-3">
-                      <h3 className="text-lg font-semibold text-gray-800">
-                        {schedule.wp_config?.name || 'WordPress設定'}
-                      </h3>
-                      <span className={`px-3 py-1 text-sm rounded-full ${
-                        schedule.status
-                          ? 'bg-green-100 text-green-700'
-                          : 'bg-gray-100 text-gray-600'
-                      }`}>
-                        {schedule.status ? '有効' : '停止中'}
-                      </span>
-                    </div>
 
-                    <div className="grid grid-cols-2 gap-4 text-sm text-gray-600">
-  <div>
-    <p className="font-medium text-gray-700 mb-1">AI設定</p>
-    <p>{schedule.ai_config?.name || `${schedule.ai_config?.provider} - ${schedule.ai_config?.model}`}</p>
-  </div>
+{ schedules.map((schedule) => {
+  const [isEditing, setIsEditing] = useState(false); // ← 追加（カードごと）
 
-  <div>
-    <p className="font-medium text-gray-700 mb-1">WordPress</p>
-    <p>{schedule.wp_config?.url}</p>
-  </div>
+  return (
+    <div key={schedule.id} className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+      <div className="flex items-start justify-between">
+        <div className="flex-1">
+          {/* === 通常モード === */}
+          {!isEditing ? (
+            <>
+              <div className="flex items-center gap-3 mb-3">
+                <h3 className="text-lg font-semibold text-gray-800">
+                  {schedule.wp_config?.name || "WordPress設定"}
+                </h3>
+                <span
+                  className={`px-3 py-1 text-sm rounded-full ${
+                    schedule.status
+                      ? "bg-green-100 text-green-700"
+                      : "bg-gray-100 text-gray-600"
+                  }`}
+                >
+                  {schedule.status ? "有効" : "停止中"}
+                </span>
+              </div>
 
-  {/* ✅ キーワード表示 */}
-  <div className="col-span-2">
-    <p className="font-medium text-gray-700 mb-1">メインキーワード</p>
-    <p>{schedule.keyword || "未設定"}</p>
-  </div>
+              <div className="grid grid-cols-2 gap-4 text-sm text-gray-600">
+                <div>
+                  <p className="font-medium text-gray-700 mb-1">AI設定</p>
+                  <p>{schedule.ai_config?.name || `${schedule.ai_config?.provider}`}</p>
+                </div>
+                <div>
+                  <p className="font-medium text-gray-700 mb-1">WordPress</p>
+                  <p>{schedule.wp_config?.url}</p>
+                </div>
 
-  {/* ✅ 関連ワード表示 */}
-  {schedule.related_keywords?.length > 0 && (
-    <div className="col-span-2">
-      <p className="font-medium text-gray-700 mb-1">関連ワード</p>
-      <div className="flex flex-wrap gap-2">
-        {schedule.related_keywords.slice(0, 5).map((word: string, i: number) => (
-          <span key={i} className="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full">
-            {word}
-          </span>
-        ))}
-        {schedule.related_keywords.length > 5 && (
-          <span className="text-gray-400 text-xs">+{schedule.related_keywords.length - 5}件</span>
-        )}
-      </div>
-    </div>
-  )}
+                <div className="col-span-2">
+                  <p className="font-medium text-gray-700 mb-1">メインキーワード</p>
+                  <p>{schedule.keyword || "未設定"}</p>
+                </div>
 
-  {/* ✅ 投稿時刻と頻度 */}
-  <div>
-    <p className="font-medium text-gray-700 mb-1">投稿時刻</p>
-    <p className="flex items-center gap-1">
-      <Clock className="w-4 h-4" />
-      {schedule.post_time}
-    </p>
-  </div>
-
-  <div>
-    <p className="font-medium text-gray-700 mb-1">頻度</p>
-    <p>{schedule.frequency}</p>
-  </div>
-
-  {/* ✅ サイクル期間 */}
-  <div className="col-span-2">
-    <p className="font-medium text-gray-700 mb-1">サイクル期間</p>
-    <p>
-      {schedule.start_date
-        ? `${schedule.start_date} ～ ${schedule.end_date || "未設定"}`
-        : "未設定"}
-    </p>
-  </div>
-
-        {/* ✅ 次回投稿予定 */}
-<div className="col-span-2">
-  <p className="font-medium text-gray-700 mb-1">次回投稿予定</p>
-  <p>
-    {(() => {
-      try {
-        // 必要情報がない場合
-        if (!schedule.status) return "停止中";
-        if (!schedule.post_time || !schedule.frequency) return "未設定";
-
-        const now = new Date();
-        const today = new Date();
-        const [hour, minute] = schedule.post_time.split(":").map(Number);
-        today.setHours(hour, minute, 0, 0);
-
-        let nextDate = new Date(today);
-
-        // === 頻度ごとの加算ロジック ===
-        switch (schedule.frequency) {
-          case "毎日":
-            if (now >= today) {
-              // 今日の時間を過ぎていたら翌日に
-              nextDate.setDate(nextDate.getDate() + 1);
-            }
-            break;
-
-          case "毎週":
-            // 今日の時間を過ぎていたら翌週の同じ曜日
-            nextDate.setDate(nextDate.getDate() + 7);
-            break;
-
-          case "隔週":
-            nextDate.setDate(nextDate.getDate() + 14);
-            break;
-
-          case "月一":
-            nextDate.setMonth(nextDate.getMonth() + 1);
-            break;
-
-          default:
-            return "未設定";
-        }
-
-        // サイクル終了日チェック
-        if (schedule.end_date && new Date(schedule.end_date) < nextDate) {
-          return "期間終了";
-        }
-
-        // フォーマット
-        const dateStr = nextDate.toLocaleDateString("ja-JP", {
-          year: "numeric",
-          month: "2-digit",
-          day: "2-digit",
-        });
-        return `${dateStr} ${schedule.post_time}`;
-      } catch (e) {
-        console.error("次回投稿予定の計算エラー:", e);
-        return "未設定";
-      }
-    })()}
-  </p>
-</div>
-
-                      
-</div>
-
-
-                    {schedule.last_run_at && (
-                      <p className="text-xs text-gray-400 mt-3">
-                        最終実行: {new Date(schedule.last_run_at).toLocaleString('ja-JP')}
-                      </p>
-                    )}
-                  </div>
-
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => toggleStatus(schedule.id, schedule.status)}
-                      className={`px-4 py-2 rounded-lg transition-colors flex items-center gap-2 ${
-                        schedule.status
-                          ? 'bg-yellow-50 text-yellow-700 hover:bg-yellow-100'
-                          : 'bg-green-50 text-green-700 hover:bg-green-100'
-                      }`}
-                    >
-                      {schedule.status ? (
-                        <>
-                          <Pause className="w-4 h-4" />
-                          停止
-                        </>
-                      ) : (
-                        <>
-                          <Play className="w-4 h-4" />
-                          再開
-                        </>
+                {schedule.related_keywords?.length > 0 && (
+                  <div className="col-span-2">
+                    <p className="font-medium text-gray-700 mb-1">関連ワード</p>
+                    <div className="flex flex-wrap gap-2">
+                      {schedule.related_keywords.slice(0, 5).map((w, i) => (
+                        <span key={i} className="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full">
+                          {w}
+                        </span>
+                      ))}
+                      {schedule.related_keywords.length > 5 && (
+                        <span className="text-gray-400 text-xs">
+                          +{schedule.related_keywords.length - 5}件
+                        </span>
                       )}
-                    </button>
-                    {/* 今すぐ実行ボタン */}
-
-                    <button
-  onClick={async () => {
-    setLoading(true); // ← 投稿中フラグON
-    showMessage("success", "🕒 投稿を実行中です..."); // ← 即座に表示
-
-    try {
-      const res = await fetch("/.netlify/functions/post-now", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ schedule_id: schedule.id }),
-      });
-
-      const data = await res.json();
-
-      if (res.ok) {
-        showMessage("success", "✅ 投稿が完了しました！");
-      } else {
-        showMessage("error", `❌ 投稿エラー: ${data.error || "不明なエラーです"}`);
-      }
-    } catch (err) {
-      console.error(err);
-      showMessage("error", "⚠️ 実行中にエラーが発生しました。");
-    } finally {
-      setLoading(false); // ← 投稿完了後に解除
-    }
-  }}
-  disabled={loading}
-  className={`px-4 py-2 border border-gray-300 rounded-lg transition-colors ${
-    loading ? "bg-gray-100 text-gray-400 cursor-not-allowed" : "text-gray-700 hover:bg-green-100"
-  }`}
->
-  {loading ? "投稿中..." : "今すぐ実行"}
-</button>
-
-                    <button
-                      onClick={() => handleDelete(schedule.id)}
-                      className="px-4 py-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                    >
-                      <Trash2 className="w-5 h-5" />
-                    </button>
+                    </div>
                   </div>
+                )}
+
+                <div>
+                  <p className="font-medium text-gray-700 mb-1">投稿時刻</p>
+                  <p className="flex items-center gap-1">
+                    🕒 {schedule.post_time}
+                  </p>
+                </div>
+
+                <div>
+                  <p className="font-medium text-gray-700 mb-1">頻度</p>
+                  <p>{schedule.frequency}</p>
+                </div>
+
+                <div className="col-span-2">
+                  <p className="font-medium text-gray-700 mb-1">サイクル期間</p>
+                  <p>
+                    {schedule.start_date
+                      ? `${schedule.start_date} ～ ${schedule.end_date || "未設定"}`
+                      : "未設定"}
+                  </p>
                 </div>
               </div>
-            ))}
+
+              {/* 編集ボタンの位置 */}
+              <div className="flex gap-2 mt-4">
+                <button
+                  onClick={() => setIsEditing(true)}
+                  className="px-4 py-2 border border-blue-300 text-blue-700 rounded-lg hover:bg-blue-50 transition-colors"
+                >
+                  ✏️ 編集
+                </button>
+              </div>
+            </>
+          ) : (
+            /* === 編集モード === */
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">AI設定</label>
+                <input
+                  type="text"
+                  defaultValue={schedule.ai_config_id}
+                  onChange={(e) => (schedule.ai_config_id = e.target.value)}
+                  className="border rounded w-full p-2 text-sm"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">WordPress設定</label>
+                <input
+                  type="text"
+                  defaultValue={schedule.wp_config_id}
+                  onChange={(e) => (schedule.wp_config_id = e.target.value)}
+                  className="border rounded w-full p-2 text-sm"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">メインキーワード</label>
+                <input
+                  type="text"
+                  defaultValue={schedule.keyword}
+                  onChange={(e) => (schedule.keyword = e.target.value)}
+                  className="border rounded w-full p-2 text-sm"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">投稿時刻</label>
+                <input
+                  type="time"
+                  defaultValue={schedule.post_time}
+                  onChange={(e) => (schedule.post_time = e.target.value)}
+                  className="border rounded w-full p-2 text-sm"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">頻度</label>
+                <select
+                  defaultValue={schedule.frequency}
+                  onChange={(e) => (schedule.frequency = e.target.value)}
+                  className="border rounded w-full p-2 text-sm"
+                >
+                  <option value="毎日">毎日</option>
+                  <option value="毎週">毎週</option>
+                  <option value="隔週">隔週</option>
+                  <option value="月一">月一</option>
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">開始日</label>
+                  <input
+                    type="date"
+                    defaultValue={schedule.start_date || ""}
+                    onChange={(e) => (schedule.start_date = e.target.value)}
+                    className="border rounded w-full p-2 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">終了日</label>
+                  <input
+                    type="date"
+                    defaultValue={schedule.end_date || ""}
+                    onChange={(e) => (schedule.end_date = e.target.value)}
+                    className="border rounded w-full p-2 text-sm"
+                  />
+                </div>
+              </div>
+
+              <div className="flex gap-2 mt-2">
+                <button
+                  onClick={async () => {
+                    const { error } = await supabase
+                      .from("schedule_settings")
+                      .update({
+                        ai_config_id: schedule.ai_config_id,
+                        wp_config_id: schedule.wp_config_id,
+                        keyword: schedule.keyword,
+                        post_time: schedule.post_time,
+                        frequency: schedule.frequency,
+                        start_date: schedule.start_date,
+                        end_date: schedule.end_date,
+                      })
+                      .eq("id", schedule.id);
+                    if (error) {
+                      showMessage("error", "更新に失敗しました");
+                    } else {
+                      showMessage("success", "スケジュールを更新しました");
+                      loadSchedules();
+                      setIsEditing(false);
+                    }
+                  }}
+                  className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+                >
+                  保存
+                </button>
+
+                <button
+                  onClick={() => setIsEditing(false)}
+                  className="px-4 py-2 border border-gray-300 rounded hover:bg-gray-100"
+                >
+                  キャンセル
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* 右側ボタン群 */}
+        <div className="flex flex-col gap-2">
+          <button
+            onClick={() => toggleStatus(schedule.id, schedule.status)}
+            className={`px-4 py-2 rounded-lg transition-colors flex items-center gap-2 ${
+              schedule.status
+                ? "bg-yellow-50 text-yellow-700 hover:bg-yellow-100"
+                : "bg-green-50 text-green-700 hover:bg-green-100"
+            }`}
+          >
+            {schedule.status ? "停止" : "再開"}
+          </button>
+
+          <button
+            onClick={() => handleRunNow(schedule.id)}
+            className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-green-100"
+          >
+            今すぐ実行
+          </button>
+
+          <button
+            onClick={() => handleDelete(schedule.id)}
+            className="px-4 py-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+          >
+            <Trash2 className="w-5 h-5" />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+})}
+
+            
           </div>
         </div>
       )}
