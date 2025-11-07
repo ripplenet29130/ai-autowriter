@@ -405,26 +405,64 @@ const fetchMainKeywords = async () => {
                     </div>
 
                     <div className="grid grid-cols-2 gap-4 text-sm text-gray-600">
-                      <div>
-                        <p className="font-medium text-gray-700 mb-1">AI設定</p>
-                        <p>{schedule.ai_config?.name || `${schedule.ai_config?.provider} - ${schedule.ai_config?.model}`}</p>
-                      </div>
-                      <div>
-                        <p className="font-medium text-gray-700 mb-1">WordPress</p>
-                        <p>{schedule.wp_config?.url}</p>
-                      </div>
-                      <div>
-                        <p className="font-medium text-gray-700 mb-1">投稿時刻</p>
-                        <p className="flex items-center gap-1">
-                          <Clock className="w-4 h-4" />
-                          {schedule.time}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="font-medium text-gray-700 mb-1">頻度</p>
-                        <p>{schedule.frequency}</p>
-                      </div>
-                    </div>
+  <div>
+    <p className="font-medium text-gray-700 mb-1">AI設定</p>
+    <p>{schedule.ai_config?.name || `${schedule.ai_config?.provider} - ${schedule.ai_config?.model}`}</p>
+  </div>
+
+  <div>
+    <p className="font-medium text-gray-700 mb-1">WordPress</p>
+    <p>{schedule.wp_config?.url}</p>
+  </div>
+
+  {/* ✅ キーワード表示 */}
+  <div className="col-span-2">
+    <p className="font-medium text-gray-700 mb-1">メインキーワード</p>
+    <p>{schedule.keyword || "未設定"}</p>
+  </div>
+
+  {/* ✅ 関連ワード表示 */}
+  {schedule.related_keywords?.length > 0 && (
+    <div className="col-span-2">
+      <p className="font-medium text-gray-700 mb-1">関連ワード</p>
+      <div className="flex flex-wrap gap-2">
+        {schedule.related_keywords.slice(0, 5).map((word: string, i: number) => (
+          <span key={i} className="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full">
+            {word}
+          </span>
+        ))}
+        {schedule.related_keywords.length > 5 && (
+          <span className="text-gray-400 text-xs">+{schedule.related_keywords.length - 5}件</span>
+        )}
+      </div>
+    </div>
+  )}
+
+  {/* ✅ 投稿時刻と頻度 */}
+  <div>
+    <p className="font-medium text-gray-700 mb-1">投稿時刻</p>
+    <p className="flex items-center gap-1">
+      <Clock className="w-4 h-4" />
+      {schedule.time}
+    </p>
+  </div>
+
+  <div>
+    <p className="font-medium text-gray-700 mb-1">頻度</p>
+    <p>{schedule.frequency}</p>
+  </div>
+
+  {/* ✅ サイクル期間 */}
+  <div className="col-span-2">
+    <p className="font-medium text-gray-700 mb-1">サイクル期間</p>
+    <p>
+      {schedule.start_date
+        ? `${schedule.start_date} ～ ${schedule.end_date || "未設定"}`
+        : "未設定"}
+    </p>
+  </div>
+</div>
+
 
                     {schedule.last_run_at && (
                       <p className="text-xs text-gray-400 mt-3">
