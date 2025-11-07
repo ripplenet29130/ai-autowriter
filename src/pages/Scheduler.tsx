@@ -17,6 +17,8 @@ export default function Scheduler() {
     wp_config_id: '',
     time: '17:00',
     frequency: '毎日',
+    start_date: '',   // ← 開始日
+    end_date: '',     // ← 終了日
     status: true,
   });
 
@@ -307,20 +309,21 @@ const fetchMainKeywords = async () => {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  投稿頻度
-                </label>
-                <select
-                  value={formData.frequency}
-                  onChange={(e) => setFormData({ ...formData, frequency: e.target.value })}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                >
-                  <option value="毎日">毎日</option>
-                  <option value="週1">週1回</option>
-                  <option value="週3">週3回</option>
-                  <option value="週5">週5回</option>
-                </select>
-              </div>
+  <label className="block text-sm font-medium text-gray-700 mb-2">
+    投稿頻度
+  </label>
+  <select
+    value={formData.frequency}
+    onChange={(e) => setFormData({ ...formData, frequency: e.target.value })}
+    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+  >
+    <option value="毎日">毎日</option>
+    <option value="毎週">毎週</option>
+    <option value="隔週">隔週</option>
+    <option value="月一">月一</option>
+  </select>
+</div>
+
             </div>
 
             <div className="flex items-center gap-3">
