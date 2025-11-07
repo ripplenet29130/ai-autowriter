@@ -12,7 +12,7 @@ directory = "netlify/functions"
 node_bundler = "esbuild"
 
 [functions."scheduler"]
-schedule = "*/1 * * * *"
+schedule = "*/15 * * * *"
 
 [build.environment]
   NODE_VERSION = "20"
