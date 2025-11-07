@@ -422,21 +422,22 @@ const fetchMainKeywords = async () => {
   </div>
 
   {/* ✅ 関連ワード表示 */}
-  {schedule.related_keywords?.length > 0 && (
-    <div className="col-span-2">
-      <p className="font-medium text-gray-700 mb-1">関連ワード</p>
-      <div className="flex flex-wrap gap-2">
-        {schedule.related_keywords.slice(0, 5).map((word: string, i: number) => (
-          <span key={i} className="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full">
-            {word}
-          </span>
-        ))}
-        {schedule.related_keywords.length > 5 && (
-          <span className="text-gray-400 text-xs">+{schedule.related_keywords.length - 5}件</span>
-        )}
-      </div>
+ {schedule.related_keywords?.length > 0 && (
+  <div className="col-span-2">
+    <p className="font-medium text-gray-700 mb-1">関連ワード</p>
+    <div className="flex flex-wrap gap-2">
+      {schedule.related_keywords.map((word: string, i: number) => (
+        <span
+          key={i}
+          className="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full"
+        >
+          {word}
+        </span>
+      ))}
     </div>
-  )}
+  </div>
+)}
+
 
   {/* ✅ 投稿時刻と頻度 */}
   <div>
