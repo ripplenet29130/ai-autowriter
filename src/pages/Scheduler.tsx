@@ -9,10 +9,51 @@ export default function Scheduler() {
   const [wpConfigs, setWpConfigs] = useState<WPConfig[]>([]);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
-  
   const [mainKeywords, setMainKeywords] = useState<any[]>([]);
   const [selectedMainKeyword, setSelectedMainKeyword] = useState<string | null>(null);
   const [relatedKeywords, setRelatedKeywords] = useState<string[]>([]);
+  const [formData, setFormData] = useState({
+    ai_config_id: '',
+    wp_config_id: '',
+    time: '17:00',
+    frequency: '毎日',
+    status: true,
+  });
+
+  // 👇 ココに置く（Scheduler関数の中に定義されていることを確認）
+  const handleSave = async () => {
+    if (
+      !formData.ai_config_id ||
+      !formData.wp_config_id ||
+      !selectedMainKeyword
+    ) {
+      showMessage('error', 'AI設定・WordPress設定・キーワードを選択してください');
+      return;
+    }
+
+    setLoading(true);
+
+    const { error } = await supabase.from('schedule_settings').insert([
+      {
+        ai_config_id: formData.ai_config_id,
+        wp_config_id: formData.wp_config_id,
+        keyword: selectedMainKeyword, // ← 選択中のメインキーワード
+        post_time: formData.time,
+        frequency: formData.frequency,
+        enabled: formData.status,
+      },
+    ]);
+
+    setLoading(false);
+
+    if (error) {
+      showMessage('error', 'スケジュールの追加に失敗しました');
+    } else {
+      showMessage('success', 'スケジュールを追加しました');
+      loadSchedules();
+    }
+  };
+
 
 useEffect(() => {
   fetchMainKeywords();
@@ -97,40 +138,7 @@ const fetchMainKeywords = async () => {
     setTimeout(() => setMessage(null), 3000);
   };
 
- const handleSave = async () => {
-  if (
-    !formData.ai_config_id ||
-    !formData.wp_config_id ||
-    !selectedMainKeyword
-  ) {
-    showMessage('error', 'AI設定・WordPress設定・キーワードを選択してください');
-    return;
-  }
-
-  setLoading(true);
-
-  const { error } = await supabase.from('schedule_settings').insert([
-    {
-      ai_config_id: formData.ai_config_id,
-      wp_config_id: formData.wp_config_id,
-      keyword: selectedMainKeyword,  // ← 選択中のメインキーワード
-      post_time: formData.time,
-      frequency: formData.frequency,
-      enabled: formData.status,
-    },
-  ]);
-
-  setLoading(false);
-
-  if (error) {
-    showMessage('error', 'スケジュールの追加に失敗しました');
-  } else {
-    showMessage('success', 'スケジュールを追加しました');
-    loadSchedules();
-  }
-};
-
-
+ 
 
   const handleDelete = async (id: string) => {
     if (!confirm('このスケジュールを削除してもよろしいですか？')) return;
