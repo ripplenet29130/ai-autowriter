@@ -72,23 +72,51 @@ export const handler: Handler = async () => {
 
   // 投稿対象を絞り込み
   const targets = schedules.filter((s: any) => {
-    if (s.time !== currentTime) return false;
+  if (s.time !== currentTime) return false;
 
-    switch (s.frequency) {
-      case "毎日":
-        return true;
-      case "週1":
-        return dayOfWeek === 1;
-      case "週3":
-        return [1, 3, 5].includes(dayOfWeek);
-      case "週5":
-        return [1, 2, 3, 4, 5].includes(dayOfWeek);
-      default:
-        return false;
+  // 開始・終了日の判定（どちらか欠けていればスキップ）
+  const today = now.toISOString().split("T")[0]; // "2025-11-07" の形式
+  if (s.start_date && today < s.start_date) return false; // まだ開始前
+  if (s.end_date && today > s.end_date) return false;     // 期間終了後
+
+  // 投稿頻度別のロジック
+  switch (s.frequency) {
+    case "毎日":
+      return true;
+
+    case "毎週": {
+      // 開始日を基準に1週間ごと
+      if (!s.start_date) return false;
+      const start = new Date(s.start_date);
+      const diffDays = Math.floor((now.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
+      return diffDays % 7 === 0; // 7日ごと
     }
-  });
 
-  console.log("🎯 対象スケジュール:", targets.length);
+    case "隔週": {
+      if (!s.start_date) return false;
+      const start = new Date(s.start_date);
+      const diffDays = Math.floor((now.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
+      return diffDays % 14 === 0; // 14日ごと
+    }
+
+    case "月一": {
+      if (!s.start_date) return false;
+      const start = new Date(s.start_date);
+      return (
+        now.getDate() === start.getDate() ||
+        // 月末日対策（30日未満の場合）
+        (now.getDate() >= 28 && start.getDate() > 28)
+      );
+    }
+
+    default:
+      return false;
+  }
+});
+
+  console.log("📅 現在日付:", now.toISOString().split("T")[0]);
+console.log("🎯 対象スケジュール数:", targets.length);
+
 
   // 対象スケジュールごとに記事生成＆投稿
   for (const schedule of targets) {
