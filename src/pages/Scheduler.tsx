@@ -97,8 +97,12 @@ const fetchMainKeywords = async () => {
     setTimeout(() => setMessage(null), 3000);
   };
 
-  const handleAddSchedule = async () => {
-  if (!selectedAiConfigId || !selectedWpConfigId || !selectedMainKeyword) {
+ const handleSave = async () => {
+  if (
+    !formData.ai_config_id ||
+    !formData.wp_config_id ||
+    !selectedMainKeyword
+  ) {
     showMessage('error', 'AI設定・WordPress設定・キーワードを選択してください');
     return;
   }
@@ -107,12 +111,12 @@ const fetchMainKeywords = async () => {
 
   const { error } = await supabase.from('schedule_settings').insert([
     {
-      ai_config_id: selectedAiConfigId,
-      wp_config_id: selectedWpConfigId,
-      keyword: selectedMainKeyword,  // ← ここを追加
-      post_time,
-      frequency,
-      enabled,
+      ai_config_id: formData.ai_config_id,
+      wp_config_id: formData.wp_config_id,
+      keyword: selectedMainKeyword,  // ← 選択中のメインキーワード
+      post_time: formData.time,
+      frequency: formData.frequency,
+      enabled: formData.status,
     },
   ]);
 
@@ -125,6 +129,7 @@ const fetchMainKeywords = async () => {
     loadSchedules();
   }
 };
+
 
 
   const handleDelete = async (id: string) => {
@@ -332,12 +337,13 @@ const fetchMainKeywords = async () => {
 
             <div className="flex gap-4 pt-4">
               <button
-                onClick={handleSave}
-                disabled={loading}
-                className="px-6 py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors disabled:opacity-50"
-              >
-                スケジュールを追加
-              </button>
+  onClick={handleSave}
+  disabled={loading}
+  className="px-6 py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors disabled:opacity-50"
+>
+  スケジュールを追加
+</button>
+
             </div>
           </div>
         )}
