@@ -97,25 +97,35 @@ const fetchMainKeywords = async () => {
     setTimeout(() => setMessage(null), 3000);
   };
 
-  const handleSave = async () => {
-    if (!formData.ai_config_id || !formData.wp_config_id) {
-      showMessage('error', 'AI設定とWordPress設定を選択してください');
-      return;
-    }
+  const handleAddSchedule = async () => {
+  if (!selectedAiConfigId || !selectedWpConfigId || !selectedMainKeyword) {
+    showMessage('error', 'AI設定・WordPress設定・キーワードを選択してください');
+    return;
+  }
 
-    setLoading(true);
-    const { error } = await supabase
-      .from('schedule_settings')
-      .insert([formData]);
+  setLoading(true);
 
-    if (error) {
-      showMessage('error', 'スケジュールの保存に失敗しました');
-    } else {
-      showMessage('success', 'スケジュールを追加しました');
-      loadSchedules();
-    }
-    setLoading(false);
-  };
+  const { error } = await supabase.from('schedule_settings').insert([
+    {
+      ai_config_id: selectedAiConfigId,
+      wp_config_id: selectedWpConfigId,
+      keyword: selectedMainKeyword,  // ← ここを追加
+      post_time,
+      frequency,
+      enabled,
+    },
+  ]);
+
+  setLoading(false);
+
+  if (error) {
+    showMessage('error', 'スケジュールの追加に失敗しました');
+  } else {
+    showMessage('success', 'スケジュールを追加しました');
+    loadSchedules();
+  }
+};
+
 
   const handleDelete = async (id: string) => {
     if (!confirm('このスケジュールを削除してもよろしいですか？')) return;
