@@ -130,12 +130,24 @@ export const handler: Handler = async () => {
 
       if (!wpConfig) continue;
 
-      // ✅ AIで記事を生成
-      const { title, content } = await generateArticleByAI(
-        schedule.ai_config_id,
-        schedule.keyword,
-        schedule.related_keywords || []
-      );
+      // ✅ AIで記事を生成（related_keywordsからランダムに1つ選ぶ）
+const relatedList = Array.isArray(schedule.related_keywords)
+  ? schedule.related_keywords
+  : [];
+
+const selectedKeyword =
+  relatedList.length > 0
+    ? relatedList[Math.floor(Math.random() * relatedList.length)]
+    : schedule.keyword; // fallback: keyword
+
+console.log(`🧠 使用キーワード: ${selectedKeyword}`);
+
+const { title, content } = await generateArticleByAI(
+  schedule.ai_config_id,
+  selectedKeyword, // ← ここを入れ替え
+  relatedList
+);
+
 
       // ✅ WordPressへ投稿
       const postResult = await postToWordPress(wpConfig, { title, content });
