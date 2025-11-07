@@ -606,20 +606,95 @@ const fetchMainKeywords = async () => {
     <Trash2 className="w-5 h-5 inline-block" />
   </button>
 
-  {/* ✏️ 編集 */}
-  {!schedule.isEditing ? (
-    <button
-      onClick={() => {
-        schedule.isEditing = true;
-        setSchedules([...schedules]);
-      }}
-      className="px-4 py-2 border border-blue-300 text-blue-700 rounded-lg hover:bg-blue-50 transition-colors text-center"
-    >
-      ✏️ 編集
-    </button>
-  ) : (
-    <div className="space-y-2 border-t border-gray-200 pt-3 mt-3">
-      {/* 編集項目 */}
+  {/* ✏️ 編集エリア */}
+{!schedule.isEditing ? (
+  <button
+    onClick={() => {
+      schedule.isEditing = true;
+      setSchedules([...schedules]);
+    }}
+    className="px-4 py-2 border border-blue-300 text-blue-700 rounded-lg hover:bg-blue-50 transition-colors text-center"
+  >
+    ✏️ 編集
+  </button>
+) : (
+  <div className="border-t border-gray-200 pt-4 mt-4 space-y-4 text-sm text-gray-700 w-64">
+    {/* === AI設定 === */}
+    <div>
+      <label className="block text-xs text-gray-500 mb-1">AI設定</label>
+      <select
+        value={schedule.ai_config_id}
+        onChange={(e) => {
+          schedule.ai_config_id = e.target.value;
+          setSchedules([...schedules]);
+        }}
+        className="border rounded w-full p-2"
+      >
+        {aiConfigs.map((ai) => (
+          <option key={ai.id} value={ai.id}>
+            {ai.name || `${ai.provider} - ${ai.model}`}
+          </option>
+        ))}
+      </select>
+    </div>
+
+    {/* === WordPress設定 === */}
+    <div>
+      <label className="block text-xs text-gray-500 mb-1">WordPress設定</label>
+      <select
+        value={schedule.wp_config_id}
+        onChange={(e) => {
+          schedule.wp_config_id = e.target.value;
+          setSchedules([...schedules]);
+        }}
+        className="border rounded w-full p-2"
+      >
+        {wpConfigs.map((wp) => (
+          <option key={wp.id} value={wp.id}>
+            {wp.name} ({wp.url})
+          </option>
+        ))}
+      </select>
+    </div>
+
+    {/* === キーワード設定 === */}
+    <div>
+      <label className="block text-xs text-gray-500 mb-1">キーワード設定</label>
+      <select
+        value={schedule.keyword}
+        onChange={(e) => {
+          schedule.keyword = e.target.value;
+          const found = mainKeywords.find((k) => k.keyword === e.target.value);
+          schedule.related_keywords = found?.related_keywords || [];
+          setSchedules([...schedules]);
+        }}
+        className="border rounded w-full p-2"
+      >
+        <option value="">選択してください</option>
+        {mainKeywords.map((k) => (
+          <option key={k.id} value={k.keyword}>
+            {k.keyword}（{k.related_keywords?.length || 0}件）
+          </option>
+        ))}
+      </select>
+
+      {/* 関連キーワード表示 */}
+      {schedule.related_keywords?.length > 0 && (
+        <div className="flex flex-wrap gap-2 mt-2">
+          {schedule.related_keywords.map((word: string, i: number) => (
+            <span
+              key={i}
+              className="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full"
+            >
+              {word}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+
+    {/* === 投稿時刻 === */}
+    <div>
       <label className="block text-xs text-gray-500 mb-1">投稿時刻</label>
       <input
         type="time"
@@ -628,9 +703,12 @@ const fetchMainKeywords = async () => {
           schedule.post_time = e.target.value;
           setSchedules([...schedules]);
         }}
-        className="border rounded w-full p-2 text-sm"
+        className="border rounded w-full p-2"
       />
+    </div>
 
+    {/* === 頻度 === */}
+    <div>
       <label className="block text-xs text-gray-500 mb-1">頻度</label>
       <select
         value={schedule.frequency}
@@ -638,63 +716,87 @@ const fetchMainKeywords = async () => {
           schedule.frequency = e.target.value;
           setSchedules([...schedules]);
         }}
-        className="border rounded w-full p-2 text-sm"
+        className="border rounded w-full p-2"
       >
         <option value="毎日">毎日</option>
         <option value="毎週">毎週</option>
         <option value="隔週">隔週</option>
         <option value="月一">月一</option>
       </select>
+    </div>
 
-      <label className="block text-xs text-gray-500 mb-1">メインキーワード</label>
-      <input
-        type="text"
-        value={schedule.keyword}
-        onChange={(e) => {
-          schedule.keyword = e.target.value;
-          setSchedules([...schedules]);
-        }}
-        className="border rounded w-full p-2 text-sm"
-      />
-
-      {/* 保存・キャンセル */}
-      <div className="flex gap-2 mt-2">
-        <button
-          onClick={async () => {
-            const { error } = await supabase
-              .from("schedule_settings")
-              .update({
-                post_time: schedule.post_time,
-                frequency: schedule.frequency,
-                keyword: schedule.keyword,
-              })
-              .eq("id", schedule.id);
-
-            if (error) {
-              showMessage("error", "更新に失敗しました");
-            } else {
-              showMessage("success", "スケジュールを更新しました");
-              schedule.isEditing = false;
-              loadSchedules();
-            }
-          }}
-          className="flex-1 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
-        >
-          保存
-        </button>
-
-        <button
-          onClick={() => {
-            schedule.isEditing = false;
+    {/* === サイクル期間 === */}
+    <div className="grid grid-cols-2 gap-2">
+      <div>
+        <label className="block text-xs text-gray-500 mb-1">開始日</label>
+        <input
+          type="date"
+          value={schedule.start_date || ""}
+          onChange={(e) => {
+            schedule.start_date = e.target.value;
             setSchedules([...schedules]);
           }}
-          className="flex-1 px-4 py-2 border border-gray-300 rounded hover:bg-gray-100"
-        >
-          キャンセル
-        </button>
+          className="border rounded w-full p-2"
+        />
+      </div>
+      <div>
+        <label className="block text-xs text-gray-500 mb-1">終了日</label>
+        <input
+          type="date"
+          value={schedule.end_date || ""}
+          onChange={(e) => {
+            schedule.end_date = e.target.value;
+            setSchedules([...schedules]);
+          }}
+          className="border rounded w-full p-2"
+        />
       </div>
     </div>
-  )}
+
+    {/* === 保存・キャンセル === */}
+    <div className="flex gap-2 mt-4">
+      <button
+        onClick={async () => {
+          const { error } = await supabase
+            .from("schedule_settings")
+            .update({
+              ai_config_id: schedule.ai_config_id,
+              wp_config_id: schedule.wp_config_id,
+              keyword: schedule.keyword,
+              related_keywords: schedule.related_keywords,
+              post_time: schedule.post_time,
+              frequency: schedule.frequency,
+              start_date: schedule.start_date || null,
+              end_date: schedule.end_date || null,
+            })
+            .eq("id", schedule.id);
+
+          if (error) {
+            showMessage("error", "更新に失敗しました");
+          } else {
+            showMessage("success", "スケジュールを更新しました");
+            schedule.isEditing = false;
+            loadSchedules();
+          }
+        }}
+        className="flex-1 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+      >
+        保存
+      </button>
+
+      <button
+        onClick={() => {
+          schedule.isEditing = false;
+          setSchedules([...schedules]);
+        }}
+        className="flex-1 px-4 py-2 border border-gray-300 rounded hover:bg-gray-100"
+      >
+        キャンセル
+      </button>
+    </div>
+  </div>
+)}
+
 </div>
 
                   
