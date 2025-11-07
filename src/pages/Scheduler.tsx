@@ -67,13 +67,6 @@ const fetchMainKeywords = async () => {
 };
 
 
-  const [formData, setFormData] = useState({
-    ai_config_id: '',
-    wp_config_id: '',
-    time: '17:00',
-    frequency: '毎日',
-    status: true,
-  });
 
   useEffect(() => {
     loadData();
