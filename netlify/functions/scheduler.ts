@@ -1,6 +1,7 @@
 // netlify/functions/scheduler.ts
 import type { Handler } from "@netlify/functions";
 import { createClient } from "@supabase/supabase-js";
+import { generateArticleByAI } from "../../src/utils/generateArticle";
 
 // Supabase接続
 const supabase = createClient(
@@ -139,46 +140,50 @@ console.log("🎯 対象スケジュール数:", targets.length);
 
 
 
-  // 対象スケジュールごとに記事生成＆投稿
-  for (const schedule of targets) {
-    try {
-      console.log(`🚀 投稿開始: ${schedule.id}`);
+  import type { Handler } from "@netlify/functions";
+import { createClient } from "@supabase/supabase-js";
+import { generateArticleByAI } from "../../src/utils/generateArticle"; // ← 追加
 
-      // AI設定＆WP設定の読み込み
-      const { data: aiConfig } = await supabase
-        .from("ai_configs")
-        .select("*")
-        .eq("id", schedule.ai_config_id)
-        .single();
+const supabase = createClient(
+  process.env.SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_KEY!
+);
 
-      const { data: wpConfig } = await supabase
-        .from("wp_configs")
-        .select("*")
-        .eq("id", schedule.wp_config_id)
-        .single();
+// …（省略）…
 
-      if (!aiConfig || !wpConfig) {
-        console.log("⚠️ AIまたはWP設定が見つかりません:", schedule.id);
-        continue;
-      }
+for (const schedule of targets) {
+  try {
+    console.log(`🚀 投稿開始: ${schedule.id}`);
 
-      // AIで記事生成
-      const article = await generateArticle(aiConfig);
+    const { data: wpConfig } = await supabase
+      .from("wp_configs")
+      .select("*")
+      .eq("id", schedule.wp_config_id)
+      .single();
 
-      // WordPressに投稿
-      const postResult = await postToWordPress(wpConfig, article);
+    if (!wpConfig) continue;
 
-      // 実行日時を保存
-      await supabase
-        .from("schedule_settings")
-        .update({ last_run_at: new Date().toISOString() })
-        .eq("id", schedule.id);
+    // ✅ AIで記事を生成
+    const { title, content } = await generateArticleByAI(
+      schedule.ai_config_id,
+      schedule.keyword,
+      schedule.related_keywords || []
+    );
 
-      console.log(`✅ 投稿成功: ${postResult.link}`);
-    } catch (err: any) {
-      console.error("❌ 投稿エラー:", err.message);
-    }
+    // ✅ WordPress投稿処理
+    const post = await postToWordPress(wpConfig, { title, content });
+
+    await supabase
+      .from("schedule_settings")
+      .update({ last_run_at: new Date().toISOString() })
+      .eq("id", schedule.id);
+
+    console.log(`✅ 投稿完了: ${post.link}`);
+  } catch (err) {
+    console.error("❌ 投稿エラー:", err);
   }
+}
+
 
   return {
     statusCode: 200,
