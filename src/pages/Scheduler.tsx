@@ -443,7 +443,7 @@ const fetchMainKeywords = async () => {
     <p className="font-medium text-gray-700 mb-1">投稿時刻</p>
     <p className="flex items-center gap-1">
       <Clock className="w-4 h-4" />
-      {schedule.time}
+      {schedule.post_time}
     </p>
   </div>
 
@@ -461,6 +461,60 @@ const fetchMainKeywords = async () => {
         : "未設定"}
     </p>
   </div>
+
+                      {/* ✅ 次回投稿予定 */}
+<div className="col-span-2">
+  <p className="font-medium text-gray-700 mb-1">次回投稿予定</p>
+  <p>
+    {(() => {
+      if (!schedule.status) return "停止中";
+      if (!schedule.start_date || !schedule.time) return "未設定";
+
+      const start = new Date(schedule.start_date);
+      const now = new Date();
+
+      // 今日の基準時刻
+      const [hour, minute] = schedule.time.split(":").map(Number);
+      const todayAtTime = new Date();
+      todayAtTime.setHours(hour, minute, 0, 0);
+
+      let nextDate: Date;
+
+      switch (schedule.frequency) {
+        case "毎日":
+          nextDate = now > todayAtTime ? new Date(now.getTime() + 86400000) : now;
+          break;
+
+        case "毎週":
+          nextDate = new Date(
+            now.getTime() + (7 - now.getDay() + start.getDay()) * 86400000
+          );
+          break;
+
+        case "隔週":
+          nextDate = new Date(
+            now.getTime() + (14 - now.getDay() + start.getDay()) * 86400000
+          );
+          break;
+
+        case "月一":
+          nextDate = new Date(now);
+          nextDate.setMonth(now.getMonth() + 1);
+          break;
+
+        default:
+          return "不明";
+      }
+
+      // 終了日を過ぎていたら「終了」
+      if (schedule.end_date && new Date(schedule.end_date) < now)
+        return "期間終了";
+
+      return `${nextDate.toLocaleDateString("ja-JP")} ${schedule.time}`;
+    })()}
+  </p>
+</div>
+                      
 </div>
 
 
