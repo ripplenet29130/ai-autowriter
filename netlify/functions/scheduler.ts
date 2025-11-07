@@ -14,19 +14,60 @@ async function postToWordPress(wp: any, article: { title: string; content: strin
   console.log(`🌐 WordPress投稿開始: ${wp.url}`);
   const endpoint = `${wp.url}/wp-json/wp/v2/posts`;
 
+  // ✅ カテゴリ名→ID変換関数
+  async function getCategoryIdByName(name: string) {
+    try {
+      const res = await fetch(`${wp.url}/wp-json/wp/v2/categories?search=${encodeURIComponent(name)}`, {
+        headers: {
+          Authorization:
+            "Basic " + Buffer.from(`${wp.username}:${wp.app_password}`).toString("base64"),
+        },
+      });
+
+      if (!res.ok) {
+        console.warn(`⚠️ カテゴリ取得失敗 (${res.status}): ${name}`);
+        return 1; // fallback to 未分類
+      }
+
+      const categories = await res.json();
+      if (categories.length > 0) {
+        console.log(`✅ カテゴリ「${name}」のID: ${categories[0].id}`);
+        return categories[0].id;
+      } else {
+        console.warn(`⚠️ カテゴリ「${name}」が見つかりません`);
+        return 1; // fallback
+      }
+    } catch (e) {
+      console.error("❌ カテゴリ取得エラー:", e);
+      return 1; // fallback
+    }
+  }
+
+  // ✅ default_category が数値ならそのまま使う、文字列なら変換
+  let categoryId = 1; // fallback to 未分類
+  if (wp.default_category) {
+    if (typeof wp.default_category === "number") {
+      categoryId = wp.default_category;
+    } else if (!isNaN(Number(wp.default_category))) {
+      categoryId = Number(wp.default_category);
+    } else {
+      categoryId = await getCategoryIdByName(wp.default_category);
+    }
+  }
+
+  // ✅ 投稿リクエスト
   const response = await fetch(endpoint, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization:
-        "Basic " +
-        Buffer.from(`${wp.username}:${wp.app_password}`).toString("base64"),
+        "Basic " + Buffer.from(`${wp.username}:${wp.app_password}`).toString("base64"),
     },
     body: JSON.stringify({
       title: article.title,
       content: article.content,
       status: "publish",
-      categories: wp.default_category ? [wp.default_category] : undefined,
+      categories: [categoryId],
     }),
   });
 
@@ -39,6 +80,7 @@ async function postToWordPress(wp: any, article: { title: string; content: strin
   console.log(`✅ 投稿完了: ${result.link}`);
   return result;
 }
+
 
 // メイン処理
 export const handler: Handler = async () => {
