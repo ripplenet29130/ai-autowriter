@@ -323,6 +323,31 @@ const fetchMainKeywords = async () => {
     <option value="月一">月一</option>
   </select>
 </div>
+<div className="grid grid-cols-2 gap-6">
+  <div>
+    <label className="block text-sm font-medium text-gray-700 mb-2">
+      サイクル開始日
+    </label>
+    <input
+      type="date"
+      value={formData.start_date}
+      onChange={(e) => setFormData({ ...formData, start_date: e.target.value })}
+      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+    />
+  </div>
+
+  <div>
+    <label className="block text-sm font-medium text-gray-700 mb-2">
+      サイクル終了日
+    </label>
+    <input
+      type="date"
+      value={formData.end_date}
+      onChange={(e) => setFormData({ ...formData, end_date: e.target.value })}
+      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+    />
+  </div>
+</div>
 
             </div>
 
