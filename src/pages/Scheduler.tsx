@@ -24,37 +24,40 @@ export default function Scheduler() {
 
   // 👇 ココに置く（Scheduler関数の中に定義されていることを確認）
   const handleSave = async () => {
-    if (
-      !formData.ai_config_id ||
-      !formData.wp_config_id ||
-      !selectedMainKeyword
-    ) {
-      showMessage('error', 'AI設定・WordPress設定・キーワードを選択してください');
-      return;
-    }
+  if (
+    !formData.ai_config_id ||
+    !formData.wp_config_id ||
+    !selectedMainKeyword
+  ) {
+    showMessage('error', 'AI設定・WordPress設定・キーワードを選択してください');
+    return;
+  }
 
-    setLoading(true);
+  setLoading(true);
 
-    const { error } = await supabase.from('schedule_settings').insert([
-      {
-        ai_config_id: formData.ai_config_id,
-        wp_config_id: formData.wp_config_id,
-        keyword: selectedMainKeyword, // ← 選択中のメインキーワード
-        post_time: formData.time,
-        frequency: formData.frequency,
-        enabled: formData.status,
-      },
-    ]);
+  const { error } = await supabase.from('schedule_settings').insert([
+    {
+      ai_config_id: formData.ai_config_id,
+      wp_config_id: formData.wp_config_id,
+      keyword: selectedMainKeyword,
+      post_time: formData.time,
+      frequency: formData.frequency,
+      start_date: formData.start_date || null,
+      end_date: formData.end_date || null,
+      enabled: formData.status,
+    },
+  ]);
 
-    setLoading(false);
+  setLoading(false);
 
-    if (error) {
-      showMessage('error', 'スケジュールの追加に失敗しました');
-    } else {
-      showMessage('success', 'スケジュールを追加しました');
-      loadSchedules();
-    }
-  };
+  if (error) {
+    showMessage('error', 'スケジュールの追加に失敗しました');
+  } else {
+    showMessage('success', 'スケジュールを追加しました');
+    loadSchedules();
+  }
+};
+
 
 
 useEffect(() => {
