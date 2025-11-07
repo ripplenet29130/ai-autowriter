@@ -35,22 +35,24 @@ export default function Scheduler() {
 
   setLoading(true);
 
-  const { error } = await supabase.from('schedule_settings').insert([
-    {
-      ai_config_id: formData.ai_config_id,
-      wp_config_id: formData.wp_config_id,
-      keyword: selectedMainKeyword,
-      post_time: formData.time,
-      frequency: formData.frequency,
-      start_date: formData.start_date || null,
-      end_date: formData.end_date || null,
-      enabled: formData.status,
-    },
-  ]);
+   const insertData = {
+    ai_config_id: formData.ai_config_id,
+    wp_config_id: formData.wp_config_id,
+    keyword: selectedMainKeyword,
+    related_keywords: relatedKeywords, // ← JSONBとして保存
+    post_time: formData.time, // ← "time" → "post_time" に修正
+    frequency: formData.frequency,
+    start_date: formData.start_date || null, // ← 追加
+    end_date: formData.end_date || null, // ← 追加
+    enabled: formData.status, // ← "status" → "enabled" に修正
+  };
+
+  const { error } = await supabase.from('schedule_settings').insert([insertData]);
 
   setLoading(false);
 
   if (error) {
+    console.error("❌ Supabase insert error:", error);
     showMessage('error', 'スケジュールの追加に失敗しました');
   } else {
     showMessage('success', 'スケジュールを追加しました');
