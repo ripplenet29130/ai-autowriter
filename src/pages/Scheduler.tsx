@@ -462,58 +462,69 @@ const fetchMainKeywords = async () => {
     </p>
   </div>
 
-                      {/* ✅ 次回投稿予定 */}
+        {/* ✅ 次回投稿予定 */}
 <div className="col-span-2">
   <p className="font-medium text-gray-700 mb-1">次回投稿予定</p>
   <p>
     {(() => {
-      if (!schedule.status) return "停止中";
-      if (!schedule.start_date || !schedule.time) return "未設定";
+      try {
+        // 必要情報がない場合
+        if (!schedule.status) return "停止中";
+        if (!schedule.post_time || !schedule.frequency) return "未設定";
 
-      const start = new Date(schedule.start_date);
-      const now = new Date();
+        const now = new Date();
+        const today = new Date();
+        const [hour, minute] = schedule.post_time.split(":").map(Number);
+        today.setHours(hour, minute, 0, 0);
 
-      // 今日の基準時刻
-      const [hour, minute] = schedule.time.split(":").map(Number);
-      const todayAtTime = new Date();
-      todayAtTime.setHours(hour, minute, 0, 0);
+        let nextDate = new Date(today);
 
-      let nextDate: Date;
+        // === 頻度ごとの加算ロジック ===
+        switch (schedule.frequency) {
+          case "毎日":
+            if (now >= today) {
+              // 今日の時間を過ぎていたら翌日に
+              nextDate.setDate(nextDate.getDate() + 1);
+            }
+            break;
 
-      switch (schedule.frequency) {
-        case "毎日":
-          nextDate = now > todayAtTime ? new Date(now.getTime() + 86400000) : now;
-          break;
+          case "毎週":
+            // 今日の時間を過ぎていたら翌週の同じ曜日
+            nextDate.setDate(nextDate.getDate() + 7);
+            break;
 
-        case "毎週":
-          nextDate = new Date(
-            now.getTime() + (7 - now.getDay() + start.getDay()) * 86400000
-          );
-          break;
+          case "隔週":
+            nextDate.setDate(nextDate.getDate() + 14);
+            break;
 
-        case "隔週":
-          nextDate = new Date(
-            now.getTime() + (14 - now.getDay() + start.getDay()) * 86400000
-          );
-          break;
+          case "月一":
+            nextDate.setMonth(nextDate.getMonth() + 1);
+            break;
 
-        case "月一":
-          nextDate = new Date(now);
-          nextDate.setMonth(now.getMonth() + 1);
-          break;
+          default:
+            return "未設定";
+        }
 
-        default:
-          return "不明";
+        // サイクル終了日チェック
+        if (schedule.end_date && new Date(schedule.end_date) < nextDate) {
+          return "期間終了";
+        }
+
+        // フォーマット
+        const dateStr = nextDate.toLocaleDateString("ja-JP", {
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+        });
+        return `${dateStr} ${schedule.post_time}`;
+      } catch (e) {
+        console.error("次回投稿予定の計算エラー:", e);
+        return "未設定";
       }
-
-      // 終了日を過ぎていたら「終了」
-      if (schedule.end_date && new Date(schedule.end_date) < now)
-        return "期間終了";
-
-      return `${nextDate.toLocaleDateString("ja-JP")} ${schedule.time}`;
     })()}
   </p>
 </div>
+
                       
 </div>
 
