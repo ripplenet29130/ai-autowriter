@@ -562,8 +562,8 @@ const fetchMainKeywords = async () => {
 
                     <button
   onClick={async () => {
-    setLoading(true); // ← 投稿中フラグON
-    showMessage("success", "🕒 投稿を実行中です..."); // ← 即座に表示
+    setLoading(true); 
+    showMessage("success", "🕒 投稿を実行中です..."); 
 
     try {
       const res = await fetch("/.netlify/functions/post-now", {
@@ -601,6 +601,100 @@ const fetchMainKeywords = async () => {
                       <Trash2 className="w-5 h-5" />
                     </button>
                   </div>
+
+{/* ✏️ 編集ボタン */}
+<div className="mt-2">
+  {!schedule.isEditing ? (
+    <button
+      onClick={() => {
+        schedule.isEditing = true;
+        setSchedules([...schedules]); // 再レンダー
+      }}
+      className="w-full px-4 py-2 border border-blue-300 text-blue-700 rounded-lg hover:bg-blue-50 transition-colors"
+    >
+      ✏️ 編集
+    </button>
+  ) : (
+    <div className="space-y-2 border-t border-gray-200 pt-3 mt-3">
+      {/* 編集項目 */}
+      <label className="block text-xs text-gray-500 mb-1">投稿時刻</label>
+      <input
+        type="time"
+        value={schedule.post_time}
+        onChange={(e) => {
+          schedule.post_time = e.target.value;
+          setSchedules([...schedules]);
+        }}
+        className="border rounded w-full p-2 text-sm"
+      />
+
+      <label className="block text-xs text-gray-500 mb-1">頻度</label>
+      <select
+        value={schedule.frequency}
+        onChange={(e) => {
+          schedule.frequency = e.target.value;
+          setSchedules([...schedules]);
+        }}
+        className="border rounded w-full p-2 text-sm"
+      >
+        <option value="毎日">毎日</option>
+        <option value="毎週">毎週</option>
+        <option value="隔週">隔週</option>
+        <option value="月一">月一</option>
+      </select>
+
+      <label className="block text-xs text-gray-500 mb-1">メインキーワード</label>
+      <input
+        type="text"
+        value={schedule.keyword}
+        onChange={(e) => {
+          schedule.keyword = e.target.value;
+          setSchedules([...schedules]);
+        }}
+        className="border rounded w-full p-2 text-sm"
+      />
+
+      {/* 保存・キャンセル */}
+      <div className="flex gap-2 mt-2">
+        <button
+          onClick={async () => {
+            const { error } = await supabase
+              .from("schedule_settings")
+              .update({
+                post_time: schedule.post_time,
+                frequency: schedule.frequency,
+                keyword: schedule.keyword,
+              })
+              .eq("id", schedule.id);
+
+            if (error) {
+              showMessage("error", "更新に失敗しました");
+            } else {
+              showMessage("success", "スケジュールを更新しました");
+              schedule.isEditing = false;
+              loadSchedules();
+            }
+          }}
+          className="flex-1 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+        >
+          保存
+        </button>
+
+        <button
+          onClick={() => {
+            schedule.isEditing = false;
+            setSchedules([...schedules]);
+          }}
+          className="flex-1 px-4 py-2 border border-gray-300 rounded hover:bg-gray-100"
+        >
+          キャンセル
+        </button>
+      </div>
+    </div>
+  )}
+</div>
+
+                  
                 </div>
               </div>
             ))}
