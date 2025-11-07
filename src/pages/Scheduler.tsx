@@ -45,6 +45,7 @@ export default function Scheduler() {
     start_date: formData.start_date || null, // ← 追加
     end_date: formData.end_date || null, // ← 追加
     enabled: formData.status, // ← "status" → "enabled" に修正
+    status: formData.status, //
   };
 
   const { error } = await supabase.from('schedule_settings').insert([insertData]);
