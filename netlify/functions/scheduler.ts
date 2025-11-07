@@ -63,7 +63,7 @@ export const handler: Handler = async () => {
 
   // 投稿対象を抽出
   const targets = schedules.filter((s: any) => {
-    if (s.time !== currentTime) return false;
+    if (s.post_time !== currentTime) return false;
     const today = now.toISOString().split("T")[0];
 
     // 終了日チェック
