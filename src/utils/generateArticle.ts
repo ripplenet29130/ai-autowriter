@@ -1,0 +1,118 @@
+import { createClient } from "@supabase/supabase-js";
+
+const supabase = createClient(
+  process.env.SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_KEY!
+);
+
+export async function generateArticleByAI(ai_config_id: string, keyword: string, related_keywords: string[] = []) {
+  // ✅ SupabaseからAI設定を取得
+  const { data: aiConfig, error: aiError } = await supabase
+    .from("ai_configs")
+    .select("*")
+    .eq("id", ai_config_id)
+    .single();
+
+  if (aiError || !aiConfig) {
+    throw new Error("AI設定の取得に失敗しました");
+  }
+
+  // === 共通プロンプト ===
+  const prompt = `
+あなたはSEOに強い日本語ライターです。
+次の条件に基づいてブログ記事を作成してください。
+
+【キーワード】${keyword}
+【関連ワード】${related_keywords.join("、")}
+【トーン】${aiConfig.tone || "ナチュラル"}
+【スタイル】${aiConfig.style || "ブログ風"}
+【ボリューム】${aiConfig.article_length || "中程度"}
+
+# 出力フォーマット
+1. 最初の行には **タイトル** のみを出力してください（挨拶文などは不要）
+2. 本文は見出しタグ <h2>, <h3> を使い、段落には <p> を使ってください
+3. Markdown記号（##, **, *など）は使わないでください
+4. 出力は完全なHTML構造で、WordPressのGutenbergブロックにそのまま貼れる形式にしてください
+5. 自然でキャッチーなタイトルを自動生成してください
+6. 「\`\`\`html」や「\`\`\`」などのコードブロック記号は絶対に含めないでください
+`;
+
+  let generatedText = "";
+
+  switch ((aiConfig.provider || "").toLowerCase()) {
+    case "gemini":
+    case "google gemini": {
+      const geminiKey = aiConfig.api_key || process.env.VITE_GEMINI_API_KEY;
+      const model = aiConfig.model || "gemini-2.5-flash";
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: {
+              temperature: aiConfig.temperature ?? 0.7,
+              maxOutputTokens: aiConfig.max_tokens ?? 4000,
+            },
+          }),
+        }
+      );
+      const data = await res.json();
+      generatedText = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+      break;
+    }
+
+    case "openai": {
+      const openaiKey = aiConfig.api_key || process.env.OPENAI_API_KEY;
+      const model = aiConfig.model || "gpt-4o-mini";
+      const res = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${openaiKey}`,
+        },
+        body: JSON.stringify({
+          model,
+          messages: [{ role: "user", content: prompt }],
+          temperature: aiConfig.temperature ?? 0.7,
+          max_tokens: aiConfig.max_tokens ?? 4000,
+        }),
+      });
+      const data = await res.json();
+      generatedText = data?.choices?.[0]?.message?.content || "";
+      break;
+    }
+
+    case "anthropic claude": {
+      const claudeKey = aiConfig.api_key || process.env.CLAUDE_API_KEY;
+      const model = aiConfig.model || "claude-3-sonnet-20240229";
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": claudeKey,
+          "anthropic-version": "2023-06-01",
+        },
+        body: JSON.stringify({
+          model,
+          max_tokens: aiConfig.max_tokens ?? 4000,
+          temperature: aiConfig.temperature ?? 0.7,
+          messages: [{ role: "user", content: prompt }],
+        }),
+      });
+      const data = await res.json();
+      generatedText = data?.content?.[0]?.text || "";
+      break;
+    }
+
+    default:
+      throw new Error(`未対応のAIプロバイダ: ${aiConfig.provider}`);
+  }
+
+  const [firstLine, ...rest] = generatedText.split("\n");
+  const title = firstLine?.trim() || `${keyword}に関する記事`;
+  const content = rest.join("\n").trim();
+
+  return { title, content };
+}
