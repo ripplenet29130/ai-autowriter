@@ -112,6 +112,7 @@ export const handler: Handler = async () => {
   });
 
   console.log("📅 現在日付:", now.toISOString().split("T")[0]);
+  console.log("🕒 現在時刻(JST):", currentTime);
   console.log("🎯 対象スケジュール数:", targets.length);
 
   // ===============================
