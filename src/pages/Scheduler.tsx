@@ -10,21 +10,21 @@ export default function Scheduler() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   
-  const [trendKeywords, setTrendKeywords] = useState<any[]>([]);
-  const [selectedKeywordId, setSelectedKeywordId] = useState<string | null>(null);
-  
-  // useEffectでキーワード取得
+  const [mainKeywords, setMainKeywords] = useState<any[]>([]);
+  const [selectedMainKeyword, setSelectedMainKeyword] = useState<string | null>(null);
+  const [relatedKeywords, setRelatedKeywords] = useState<string[]>([]);
+
 useEffect(() => {
-  fetchTrendKeywords();
+  fetchMainKeywords();
 }, []);
 
-const fetchTrendKeywords = async () => {
+const fetchMainKeywords = async () => {
   const { data, error } = await supabase
-    .from('trend_keywords')
-    .select('*')
-    .order('created_at', { ascending: false });
-  if (!error) setTrendKeywords(data || []);
+    .from("trend_keywords")
+    .select("id, main_keyword, related_keywords");
+  if (!error) setMainKeywords(data || []);
 };
+
 
   const [formData, setFormData] = useState({
     ai_config_id: '',
@@ -236,21 +236,45 @@ const fetchTrendKeywords = async () => {
               </select>
             </div>
 
-            <div>
+          {/* メインキーワード選択 */}
+<div className="mt-4">
   <label className="block text-sm font-medium text-gray-700">キーワード設定</label>
   <select
     className="mt-1 block w-full border border-gray-300 rounded-md p-2"
-    value={selectedKeywordId || ''}
-    onChange={(e) => setSelectedKeywordId(e.target.value)}
+    value={selectedMainKeyword || ""}
+    onChange={(e) => {
+      const selected = e.target.value;
+      setSelectedMainKeyword(selected);
+      const found = mainKeywords.find((k) => k.main_keyword === selected);
+      setRelatedKeywords(found?.related_keywords || []);
+    }}
   >
-    <option value="">キーワードを選択</option>
-    {trendKeywords.map(k => (
-      <option key={k.id} value={k.id}>
-        {k.keyword}
+    <option hidden value="">キーワードを選択</option> {/* ← 表示されない */}
+    {mainKeywords.map((k) => (
+      <option key={k.id} value={k.main_keyword}>
+        {k.main_keyword}（{k.related_keywords?.length || 0}件の関連ワード）
       </option>
     ))}
   </select>
 </div>
+
+{/* 関連ワード表示 */}
+{relatedKeywords.length > 0 && (
+  <div className="mt-3">
+    <p className="text-sm text-gray-600 mb-1">関連ワード</p>
+    <div className="flex flex-wrap gap-2">
+      {relatedKeywords.map((word, index) => (
+        <span
+          key={index}
+          className="bg-blue-100 text-blue-800 text-sm px-3 py-1 rounded-full"
+        >
+          {word}
+        </span>
+      ))}
+    </div>
+  </div>
+)}
+
 
             <div className="grid grid-cols-2 gap-6">
               <div>
