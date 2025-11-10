@@ -848,7 +848,7 @@ const fetchMainKeywords = async () => {
               related_keywords: schedule.related_keywords,
               post_time: schedule.post_time,
               frequency: schedule.frequency,
-              post_status: postStatus,
+              post_status: schedule.post_status,
               start_date: schedule.start_date || null,
               end_date: schedule.end_date || null,
             })
