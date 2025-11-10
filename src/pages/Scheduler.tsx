@@ -22,8 +22,7 @@ export default function Scheduler() {
     post_status: 'publish',
     status: true,
   });
-  const [postStatus, setPostStatus] = useState("publish");
-
+  
   const handleSave = async () => {
   if (
     !formData.ai_config_id ||
@@ -302,35 +301,96 @@ const fetchMainKeywords = async () => {
 )}
 
 
-            <div className="grid grid-cols-2 gap-6">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  投稿時刻
-                </label>
-                <input
-                  type="time"
-                  value={formData.time}
-                  onChange={(e) => setFormData({ ...formData, time: e.target.value })}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                />
-              </div>
+            {/* === 投稿設定エリア === */}
+<div className="grid grid-cols-3 gap-6">
+  {/* 投稿時刻 */}
+  <div>
+    <label className="block text-sm font-medium text-gray-700 mb-2">
+      投稿時刻
+    </label>
+    <input
+      type="time"
+      value={formData.time}
+      onChange={(e) =>
+        setFormData({ ...formData, time: e.target.value })
+      }
+      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+    />
+  </div>
 
-              <div>
-  <label className="block text-sm font-medium text-gray-700 mb-2">
-    投稿頻度
-  </label>
-  <select
-    value={formData.frequency}
-    onChange={(e) => setFormData({ ...formData, frequency: e.target.value })}
-    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-  >
-    <option value="毎日">毎日</option>
-    <option value="毎週">毎週</option>
-    <option value="隔週">隔週</option>
-    <option value="月一">月一</option>
-  </select>
+  {/* 投稿頻度 */}
+  <div>
+    <label className="block text-sm font-medium text-gray-700 mb-2">
+      投稿頻度
+    </label>
+    <select
+      value={formData.frequency}
+      onChange={(e) =>
+        setFormData({ ...formData, frequency: e.target.value })
+      }
+      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+    >
+      <option value="毎日">毎日</option>
+      <option value="毎週">毎週</option>
+      <option value="隔週">隔週</option>
+      <option value="月一">月一</option>
+    </select>
+  </div>
+
+  {/* 投稿状態 */}
+  <div>
+    <label className="block text-sm font-medium text-gray-700 mb-2">
+      投稿状態
+    </label>
+    <select
+      value={formData.post_status}
+      onChange={(e) =>
+        setFormData({ ...formData, post_status: e.target.value })
+      }
+      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+    >
+      <option value="publish">公開</option>
+      <option value="draft">下書き</option>
+    </select>
+  </div>
 </div>
+
+{/* === 投稿設定エリア === */}
 <div className="grid grid-cols-2 gap-6">
+  {/* 投稿時刻 */}
+  <div>
+    <label className="block text-sm font-medium text-gray-700 mb-2">
+      投稿時刻
+    </label>
+    <input
+      type="time"
+      value={formData.time}
+      onChange={(e) => setFormData({ ...formData, time: e.target.value })}
+      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+    />
+  </div>
+
+  {/* 投稿頻度 */}
+  <div>
+    <label className="block text-sm font-medium text-gray-700 mb-2">
+      投稿頻度
+    </label>
+    <select
+      value={formData.frequency}
+      onChange={(e) => setFormData({ ...formData, frequency: e.target.value })}
+      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+    >
+      <option value="毎日">毎日</option>
+      <option value="毎週">毎週</option>
+      <option value="隔週">隔週</option>
+      <option value="月一">月一</option>
+    </select>
+  </div>
+</div>
+
+{/* === サイクル期間＋投稿状態 === */}
+<div className="grid grid-cols-3 gap-6 mt-6">
+  {/* サイクル開始日 */}
   <div>
     <label className="block text-sm font-medium text-gray-700 mb-2">
       サイクル開始日
@@ -343,6 +403,7 @@ const fetchMainKeywords = async () => {
     />
   </div>
 
+  {/* サイクル終了日 */}
   <div>
     <label className="block text-sm font-medium text-gray-700 mb-2">
       サイクル終了日
@@ -354,23 +415,28 @@ const fetchMainKeywords = async () => {
       className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
     />
   </div>
+
+  {/* 投稿状態 */}
+  <div>
+    <label className="block text-sm font-medium text-gray-700 mb-2">
+      投稿状態
+    </label>
+    <select
+      value={formData.post_status}
+      onChange={(e) => setFormData({ ...formData, post_status: e.target.value })}
+      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+    >
+      <option value="publish">公開</option>
+      <option value="draft">下書き</option>
+    </select>
+  </div>
 </div>
+
+
 
             </div>
 
-            <div className="flex flex-col">
-  <label className="text-sm font-medium mb-1">投稿状態</label>
-  <select
-  className="border rounded-md p-2"
-  value={formData.post_status}
-  onChange={(e) => setFormData({ ...formData, post_status: e.target.value })}
->
-  <option value="publish">公開</option>
-  <option value="draft">下書き</option>
-</select>
-
-</div>
-
+           
 
             <div className="flex items-center gap-3">
               <input
