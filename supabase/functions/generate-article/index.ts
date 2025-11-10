@@ -78,32 +78,48 @@ Deno.serve(async (req: Request) => {
     console.log(`🤖 AI設定: ${aiConfig.provider} - ${model}`);
     console.log(`🎭 トーン: ${tone}, スタイル: ${style}, ボリューム: ${article_length}`);
 
-    const relatedKeywordsText = related_keywords.length > 0 
-      ? `\n\n関連キーワード（記事内で自然に組み込む）: ${related_keywords.join(", ")}`
-      : "";
+    const relatedKeywordsText = related_keywords.length > 0
+      ? related_keywords.join(", ")
+      : keyword;
 
-    const prompt = `あなたはプロのSEOライターです。以下の条件で記事を作成してください。
+    const prompt = `あなたはプロのSEOライターです。以下の条件で日本語の記事を作成してください。
 
-メインキーワード: 「${keyword}」${relatedKeywordsText}
+条件
 
-条件:
-- トーン: ${tone}
-- スタイル: ${style}
-- ボリューム: ${article_length}
+記事の中心テーマ（関連キーワード群）: ${relatedKeywordsText}
 
-構成:
-1. タイトル（SEOを意識した魅力的なタイトル）
-2. 導入文（読者の関心を引く）
-3. 本文（H2、H3見出しを使用し、読みやすく構造化）
-4. まとめ（要点を再度伝える）
+トーン: ${tone}
 
-出力形式:
+スタイル: ${style}
+
+ボリューム目安: ${article_length}
+
+構成とHTMLルール
+
+タイトル → <h2>（1回のみ、SEOを意識した魅力的なタイトル）
+
+導入文 → <p>（全体概要と読者の関心を引く内容）
+
+本文 →
+　最初の見出しを <h3> から始め、下層に進む場合は <h4> → <h5> → <h6> と階層順に使用。
+　<h1> は使わない。<h2> はタイトル以外に使わない。
+
+まとめ → <h3>まとめ</h3><p>…</p>
+
+出力形式（JSONのみ）
+
 {
-  "title": "タイトル",
-  "content": "HTML形式の本文（<h2>, <h3>, <p>タグを使用）"
+  "title": "タイトル（h2タグ内の文字列のみ）",
+  "content": "<h2>タイトル</h2><p>導入文</p><h3>...</h3><p>...</p><h4>...</h4><p>...</p><h5>...</h5><p>...</p><h3>まとめ</h3><p>...</p>"
 }
 
-JSON形式で返してください。説明文は不要です。`;
+注意点
+
+関連キーワードを主軸に構成（メインキーワードは自然に含める）。
+
+各見出しは内容の流れに沿って論理的に階層化する。
+
+JSON以外の出力は禁止。`;
 
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${api_key}`,
