@@ -108,7 +108,10 @@ Deno.serve(async (req: Request) => {
 - 見出し階層は論理的に。
 - JSON以外の出力は禁止。`;
 
-
+ // 👇 ここを追加！
+    console.log("🧠 実際にGeminiへ送信されるプロンプト ↓↓↓");
+    console.log(prompt);
+    console.log("↑↑↑ ここまでが送信プロンプト");
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${api_key}`,
       {
