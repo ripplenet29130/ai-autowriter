@@ -68,6 +68,7 @@ async function postToWordPress(wp: any, article: { title: string; content: strin
       content: article.content,
       status: "publish",
       categories: [categoryId],
+      status: schedule.post_status || "publish",
     }),
   });
 
