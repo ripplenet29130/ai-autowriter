@@ -19,10 +19,11 @@ export default function Scheduler() {
     frequency: '毎日',
     start_date: '',   // ← 開始日
     end_date: '',     // ← 終了日
+    post_status: 'publish',
     status: true,
   });
+  const [postStatus, setPostStatus] = useState("publish");
 
-  // 👇 ココに置く（Scheduler関数の中に定義されていることを確認）
   const handleSave = async () => {
   if (
     !formData.ai_config_id ||
@@ -40,11 +41,12 @@ export default function Scheduler() {
     wp_config_id: formData.wp_config_id,
     keyword: selectedMainKeyword,
     related_keywords: Array.isArray(relatedKeywords) ? relatedKeywords : [],
-    post_time: formData.time, // ← "time" → "post_time" に修正
+    post_time: formData.time, // 
     frequency: formData.frequency,
     start_date: formData.start_date || null, // ← 追加
     end_date: formData.end_date || null, // ← 追加
-    status: formData.status, //
+    status: formData.status, 
+    post_status: formData.post_status,
   };
 
   const { error } = await supabase.from('schedule_settings').insert([insertData]);
@@ -355,6 +357,20 @@ const fetchMainKeywords = async () => {
 </div>
 
             </div>
+
+            <div className="flex flex-col">
+  <label className="text-sm font-medium mb-1">投稿状態</label>
+  <select
+  className="border rounded-md p-2"
+  value={formData.post_status}
+  onChange={(e) => setFormData({ ...formData, post_status: e.target.value })}
+>
+  <option value="publish">公開</option>
+  <option value="draft">下書き</option>
+</select>
+
+</div>
+
 
             <div className="flex items-center gap-3">
               <input
@@ -766,6 +782,7 @@ const fetchMainKeywords = async () => {
               related_keywords: schedule.related_keywords,
               post_time: schedule.post_time,
               frequency: schedule.frequency,
+              post_status: postStatus,
               start_date: schedule.start_date || null,
               end_date: schedule.end_date || null,
             })
