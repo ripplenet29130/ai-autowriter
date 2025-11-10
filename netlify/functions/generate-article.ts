@@ -26,7 +26,20 @@ export const handler: Handler = async (event) => {
     }
 
     // === 共通プロンプト作成 ===
-        const prompt = `あなたはプロのSEOライターです。以下の条件で日本語の記事を作成してください。
+
+
+    // ✅ ここを追加！
+const relatedKeywordsText =
+  Array.isArray(related_keywords) && related_keywords.length > 0
+    ? related_keywords.join("、")
+    : keyword;
+
+    // ✅ AI設定の値を変数にしておくと安全
+const tone = aiConfig.tone || "ナチュラル";
+const style = aiConfig.style || "ブログ風";
+const article_length = aiConfig.article_length || "中程度";
+    
+const prompt = `あなたはプロのSEOライターです。以下の条件で日本語の記事を作成してください。
 
 条件
 記事の中心テーマ（関連キーワード群）: ${relatedKeywordsText}
