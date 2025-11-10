@@ -66,7 +66,6 @@ async function postToWordPress(wp: any, article: { title: string; content: strin
     body: JSON.stringify({
       title: article.title,
       content: article.content,
-      status: "publish",
       categories: [categoryId],
       status: schedule.post_status || "publish",
     }),
