@@ -500,29 +500,24 @@ export default function TrendAnalysis() {
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-6">
               {relatedKeywords.map((kw, i) => (
-                <label
+                <div
                   key={i}
-                  className={`cursor-pointer rounded-lg px-4 py-3 border-2 transition-colors ${
+                  onClick={() => handleToggleKeyword(kw)}
+                  className={`cursor-pointer rounded-lg px-4 py-3 border-2 transition-all ${
                     selectedKeywords.includes(kw)
                       ? "bg-blue-100 border-blue-400"
-                      : "bg-gray-50 border-gray-200"
+                      : "bg-gray-50 border-gray-200 hover:border-gray-300"
                   }`}
                 >
-                  <input
-                    type="checkbox"
-                    checked={selectedKeywords.includes(kw)}
-                    onChange={() => handleToggleKeyword(kw)}
-                    className="mr-3"
-                  />
                   {kw}
-                </label>
+                </div>
               ))}
             </div>
 
-            <div className="flex gap-3">
+            <div className="flex gap-3 justify-end">
               <button
                 onClick={handleToggleAll}
-                className="px-6 py-3 bg-gray-600 text-white rounded-lg"
+                className="px-6 py-3 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
               >
                 {selectedKeywords.length === relatedKeywords.length
                   ? "全解除"
@@ -531,7 +526,7 @@ export default function TrendAnalysis() {
               <button
                 onClick={handleTransferToList}
                 disabled={loading || selectedKeywords.length === 0}
-                className="px-6 py-3 bg-blue-600 text-white rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
                 リストに転記
               </button>
