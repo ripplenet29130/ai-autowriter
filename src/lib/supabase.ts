@@ -44,6 +44,7 @@ export type WPConfig = {
   username: string;
   app_password: string;
   default_category: string;
+  post_type: string;
   is_active: boolean;
   created_at: string;
 };
