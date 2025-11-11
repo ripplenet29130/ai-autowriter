@@ -188,14 +188,6 @@ export default function ArticleGenerator() {
       body: JSON.stringify(payload),
     });
 
-    const response = await fetch(`${wpUrl}/wp-json/wp/v2/posts`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json; charset=utf-8',
-        Authorization: authHeader,
-      },
-      body: JSON.stringify(payload),
-    });
 
     if (!response.ok) {
       const errorText = await response.text();
