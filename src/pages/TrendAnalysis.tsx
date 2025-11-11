@@ -28,6 +28,7 @@ export default function TrendAnalysis() {
   const [activeTab, setActiveTab] = useState<"ai" | "google">("ai");
 
   const [relatedKeywords, setRelatedKeywords] = useState<string[]>([]);
+  const [selectedKeywords, setSelectedKeywords] = useState<string[]>([]);
   const [savedKeywords, setSavedKeywords] = useState<TrendKeyword[]>([]);
   const [googleTrends, setGoogleTrends] = useState<any[]>([]);
 
@@ -117,10 +118,12 @@ export default function TrendAnalysis() {
       if (!response.ok) throw new Error("AI分析に失敗しました");
 
       const result = await response.json();
-      setRelatedKeywords(result.related_keywords || []);
+      const keywords = result.related_keywords || [];
+      setRelatedKeywords(keywords);
+      setSelectedKeywords(keywords);
       showMessage(
         "success",
-        `${result.related_keywords?.length || 0}件のキーワードを抽出しました`
+        `${keywords.length}件のキーワードを抽出しました`
       );
     } catch (error) {
       console.error("AI分析エラー:", error);
@@ -176,8 +179,8 @@ export default function TrendAnalysis() {
 
   /** 🔹 保存 */
   const handleSave = async () => {
-    if (relatedKeywords.length === 0)
-      return showMessage("error", "保存するデータがありません");
+    if (selectedKeywords.length === 0)
+      return showMessage("error", "保存するキーワードを選択してください");
 
     setLoading(true);
     try {
@@ -190,7 +193,7 @@ export default function TrendAnalysis() {
 
       const saveData = {
         keyword: keywordTrimmed,
-        related_keywords: relatedKeywords,
+        related_keywords: selectedKeywords,
         ai_config_id: selectedAiConfigId,
         source: "ai",
         created_at: new Date().toISOString(),
@@ -200,21 +203,56 @@ export default function TrendAnalysis() {
 
       if (error) throw error;
 
-      showMessage("success", "キーワードを保存しました 🎉");
+      showMessage("success", "キーワードを保存しました");
 
-      // 保存後Googleトレンド呼び出し
       handleAnalyzeGoogleAfterSave(keywordTrimmed);
-      
-      // ✅ 保存直後にリスト更新
+
       await loadSavedKeywords();
-      
+
       setKeyword("");
       setRelatedKeywords([]);
+      setSelectedKeywords([]);
     } catch (e) {
       console.error("保存エラー:", e);
       showMessage("error", "保存中にエラーが発生しました");
     } finally {
       setLoading(false);
+    }
+  };
+
+  /** 🔹 選択キーワードをキーワードリスト管理に移す */
+  const handleTransferToList = () => {
+    if (selectedKeywords.length === 0) {
+      return showMessage("error", "転記するキーワードを選択してください");
+    }
+
+    setManualMode("new");
+    setNewListName(keyword.trim());
+    setNewListKeywords([...selectedKeywords]);
+
+    showMessage("success", `${selectedKeywords.length}件のキーワードを転記しました`);
+
+    setTimeout(() => {
+      const listSection = document.querySelector('[data-section="keyword-list"]');
+      if (listSection) {
+        listSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    }, 100);
+  };
+
+  /** 🔹 キーワード選択トグル */
+  const handleToggleKeyword = (kw: string) => {
+    setSelectedKeywords((prev) =>
+      prev.includes(kw) ? prev.filter((k) => k !== kw) : [...prev, kw]
+    );
+  };
+
+  /** 🔹 全選択/全解除 */
+  const handleToggleAll = () => {
+    if (selectedKeywords.length === relatedKeywords.length) {
+      setSelectedKeywords([]);
+    } else {
+      setSelectedKeywords([...relatedKeywords]);
     }
   };
 
@@ -460,23 +498,50 @@ export default function TrendAnalysis() {
                 <Sparkles className="w-5 h-5 text-blue-600" />
                 AIが提案する関連キーワード
               </h3>
-              <button
-                onClick={handleSave}
-                disabled={loading}
-                className="px-4 py-2 bg-green-600 text-white rounded-lg flex items-center gap-2"
-              >
-                <Save className="w-4 h-4" /> 保存
-              </button>
+              <div className="flex gap-2">
+                <button
+                  onClick={handleToggleAll}
+                  className="px-4 py-2 bg-gray-600 text-white rounded-lg text-sm"
+                >
+                  {selectedKeywords.length === relatedKeywords.length
+                    ? "全解除"
+                    : "全選択"}
+                </button>
+                <button
+                  onClick={handleTransferToList}
+                  disabled={loading}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg flex items-center gap-2"
+                >
+                  リストに転記 ({selectedKeywords.length})
+                </button>
+                <button
+                  onClick={handleSave}
+                  disabled={loading}
+                  className="px-4 py-2 bg-green-600 text-white rounded-lg flex items-center gap-2"
+                >
+                  <Save className="w-4 h-4" /> 保存
+                </button>
+              </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               {relatedKeywords.map((kw, i) => (
-                <div
+                <label
                   key={i}
-                  className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3"
+                  className={`cursor-pointer rounded-lg px-4 py-3 border-2 transition-colors ${
+                    selectedKeywords.includes(kw)
+                      ? "bg-blue-100 border-blue-400"
+                      : "bg-gray-50 border-gray-200"
+                  }`}
                 >
+                  <input
+                    type="checkbox"
+                    checked={selectedKeywords.includes(kw)}
+                    onChange={() => handleToggleKeyword(kw)}
+                    className="mr-3"
+                  />
                   {kw}
-                </div>
+                </label>
               ))}
             </div>
           </div>
@@ -544,7 +609,7 @@ export default function TrendAnalysis() {
       </div>
 
       {/* 🔹 キーワードリスト管理セクション */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-8 mb-8">
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-8 mb-8" data-section="keyword-list">
         <h2 className="text-xl font-semibold text-gray-800 mb-6">
           キーワードリスト管理
         </h2>
