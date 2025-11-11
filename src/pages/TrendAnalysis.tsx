@@ -38,6 +38,10 @@ export default function TrendAnalysis() {
     text: string;
   } | null>(null);
 
+  const [manualKeyword, setManualKeyword] = useState("");
+  const [manualRelatedKeywords, setManualRelatedKeywords] = useState<string[]>([]);
+  const [manualKeywordInput, setManualKeywordInput] = useState("");
+
   /** 🔹 初期読み込み */
   useEffect(() => {
     loadAiConfigs();
@@ -217,6 +221,58 @@ export default function TrendAnalysis() {
 
     showMessage("success", "削除しました");
     loadSavedKeywords();
+  };
+
+  /** 🔹 手動でキーワードを追加 */
+  const handleAddManualKeyword = () => {
+    const trimmed = manualKeywordInput.trim();
+    if (!trimmed) return showMessage("error", "キーワードを入力してください");
+    if (manualRelatedKeywords.includes(trimmed)) {
+      return showMessage("error", "既に追加されています");
+    }
+    setManualRelatedKeywords([...manualRelatedKeywords, trimmed]);
+    setManualKeywordInput("");
+  };
+
+  /** 🔹 手動キーワードを削除 */
+  const handleRemoveManualKeyword = (index: number) => {
+    setManualRelatedKeywords(manualRelatedKeywords.filter((_, i) => i !== index));
+  };
+
+  /** 🔹 手動入力セットを保存 */
+  const handleSaveManual = async () => {
+    if (!manualKeyword.trim()) {
+      return showMessage("error", "メインキーワードを入力してください");
+    }
+    if (manualRelatedKeywords.length === 0) {
+      return showMessage("error", "関連キーワードを1つ以上追加してください");
+    }
+
+    setLoading(true);
+    try {
+      const saveData = {
+        keyword: manualKeyword.trim(),
+        related_keywords: manualRelatedKeywords,
+        ai_config_id: selectedAiConfigId || null,
+        source: "manual",
+        created_at: new Date().toISOString(),
+      };
+
+      const { error } = await supabase.from("trend_keywords").insert(saveData);
+
+      if (error) throw error;
+
+      showMessage("success", "手動キーワードセットを保存しました");
+      await loadSavedKeywords();
+
+      setManualKeyword("");
+      setManualRelatedKeywords([]);
+    } catch (e) {
+      console.error("保存エラー:", e);
+      showMessage("error", "保存中にエラーが発生しました");
+    } finally {
+      setLoading(false);
+    }
   };
 
   const selectedAiConfig = aiConfigs.find((c) => c.id === selectedAiConfigId);
@@ -417,6 +473,76 @@ export default function TrendAnalysis() {
             )}
           </div>
         )}
+      </div>
+
+      {/* 🔹 手動キーワード入力セクション */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-8 mb-8">
+        <h2 className="text-xl font-semibold text-gray-800 mb-6">
+          手動でキーワードセットを作成
+        </h2>
+
+        <div className="mb-4">
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            メインキーワード
+          </label>
+          <input
+            type="text"
+            value={manualKeyword}
+            onChange={(e) => setManualKeyword(e.target.value)}
+            placeholder="例: AGA治療"
+            className="w-full px-4 py-3 border border-gray-300 rounded-lg"
+          />
+        </div>
+
+        <div className="mb-4">
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            関連キーワード
+          </label>
+          <div className="flex gap-3 mb-3">
+            <input
+              type="text"
+              value={manualKeywordInput}
+              onChange={(e) => setManualKeywordInput(e.target.value)}
+              onKeyPress={(e) => e.key === "Enter" && handleAddManualKeyword()}
+              placeholder="キーワードを入力してEnter"
+              className="flex-1 px-4 py-3 border border-gray-300 rounded-lg"
+            />
+            <button
+              onClick={handleAddManualKeyword}
+              className="px-6 py-3 bg-blue-600 text-white rounded-lg"
+            >
+              追加
+            </button>
+          </div>
+
+          {manualRelatedKeywords.length > 0 && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
+              {manualRelatedKeywords.map((kw, i) => (
+                <div
+                  key={i}
+                  className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 flex justify-between items-center"
+                >
+                  <span>{kw}</span>
+                  <button
+                    onClick={() => handleRemoveManualKeyword(i)}
+                    className="text-red-600 hover:bg-red-50 rounded p-1"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <button
+          onClick={handleSaveManual}
+          disabled={loading}
+          className="w-full px-6 py-3 bg-green-600 text-white rounded-lg flex items-center justify-center gap-2"
+        >
+          <Save className="w-5 h-5" />
+          {loading ? "保存中..." : "キーワードセットを保存"}
+        </button>
       </div>
 
       {/* 🔹 保存済みキーワード一覧 */}
