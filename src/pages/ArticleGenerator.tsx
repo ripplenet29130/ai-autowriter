@@ -147,31 +147,46 @@ export default function ArticleGenerator() {
     const wpConfig = wpConfigs.find((w) => w.id === selectedWpConfigId);
     if (!wpConfig) throw new Error('WordPress設定が見つかりません');
 
+
     // ✅ URL整形
     const wpUrl = wpConfig.url.replace(/\/$/, '');
-
+    
     // ✅ Basic認証
     const authHeader = 'Basic ' + btoa(`${wpConfig.username}:${wpConfig.app_password}`);
-
+    
     // ✅ Gutenberg対応＋カテゴリ型安全
-const payload: any = {
-  title: generatedArticle.title,
-  content: {
-    raw: generatedArticle.content,
-  },
-  status: postStatus,
-};
-
-// ✅ カテゴリ処理の修正版（確実に整数化）
-if (wpConfig.default_category) {
-  const catId = Number(wpConfig.default_category);
-  if (!isNaN(catId)) {
-    payload.categories = [catId];
-  } else {
-    console.warn('⚠ default_category が整数ではありません:', wpConfig.default_category);
-  }
-}
-
+    const payload: any = {
+      title: generatedArticle.title,
+      content: {
+        raw: generatedArticle.content,
+      },
+      status: postStatus,
+    };
+    
+    // ✅ カテゴリ処理の修正版（確実に整数化）
+    if (wpConfig.default_category) {
+      const catId = Number(wpConfig.default_category);
+      if (!isNaN(catId)) {
+        payload.categories = [catId];
+      } else {
+        console.warn('⚠ default_category が整数ではありません:', wpConfig.default_category);
+      }
+    }
+    
+    // ✅ 投稿タイプを判定してAPIエンドポイントを動的に変更
+    const postType = wpConfig.post_type || 'post';
+    const endpoint = `${wpUrl}/wp-json/wp/v2/${postType}`;
+    
+    console.log('📮 投稿タイプ:', postType, '→', endpoint);
+    
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json; charset=utf-8',
+        Authorization: authHeader,
+      },
+      body: JSON.stringify(payload),
+    });
 
     const response = await fetch(`${wpUrl}/wp-json/wp/v2/posts`, {
       method: 'POST',
