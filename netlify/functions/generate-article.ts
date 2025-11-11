@@ -27,9 +27,10 @@ export const handler: Handler = async (event) => {
 
     // === 共通プロンプト作成 ===
     const relatedKeywordsText =
-      Array.isArray(related_keywords) && related_keywords.length > 0
-        ? related_keywords.join("、")
-        : keyword;
+  Array.isArray(related_keywords) && related_keywords.length > 0
+    ? related_keywords[Math.floor(Math.random() * related_keywords.length)]
+    : keyword;
+
 
     const tone = aiConfig.tone || "ナチュラル";
     const style = aiConfig.style || "ブログ風";
