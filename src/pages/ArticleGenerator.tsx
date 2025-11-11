@@ -30,6 +30,7 @@ export default function ArticleGenerator() {
   const [posting, setPosting] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [postedUrl, setPostedUrl] = useState<string | null>(null);
+  const [postStatus, setPostStatus] = useState<'publish' | 'draft'>('publish');
 
   useEffect(() => {
     loadConfigs();
@@ -158,7 +159,7 @@ const payload: any = {
   content: {
     raw: generatedArticle.content,
   },
-  status: 'publish',
+  status: postStatus,
 };
 
 // ✅ カテゴリ処理の修正版（確実に整数化）
@@ -326,6 +327,20 @@ if (wpConfig.default_category) {
   </div>
 )}
 
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            投稿状態
+          </label>
+          <select
+            value={postStatus}
+            onChange={(e) => setPostStatus(e.target.value as 'publish' | 'draft')}
+            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          >
+            <option value="publish">公開</option>
+            <option value="draft">下書き</option>
+          </select>
         </div>
 
         {selectedAiConfig && (
