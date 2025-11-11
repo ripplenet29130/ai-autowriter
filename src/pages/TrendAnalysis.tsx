@@ -269,13 +269,37 @@ export default function TrendAnalysis() {
 
   /** 🔹 新規リスト：キーワード追加 */
   const handleAddNewKeyword = () => {
-    const trimmed = newKeywordInput.trim();
-    if (!trimmed) return showMessage("error", "キーワードを入力してください");
-    if (newListKeywords.includes(trimmed)) {
-      return showMessage("error", "既に追加されています");
+    if (!newKeywordInput.trim()) return showMessage("error", "キーワードを入力してください");
+
+    // カンマ区切りで複数キーワードを処理
+    const keywords = newKeywordInput
+      .split(",")
+      .map((kw) => kw.trim())
+      .filter((kw) => kw.length > 0);
+
+    const newKeywords: string[] = [];
+    const duplicates: string[] = [];
+
+    keywords.forEach((kw) => {
+      if (newListKeywords.includes(kw)) {
+        duplicates.push(kw);
+      } else {
+        newKeywords.push(kw);
+      }
+    });
+
+    if (newKeywords.length > 0) {
+      setNewListKeywords([...newListKeywords, ...newKeywords]);
+      setNewKeywordInput("");
+
+      if (newKeywords.length > 1) {
+        showMessage("success", `${newKeywords.length}件のキーワードを追加しました`);
+      }
     }
-    setNewListKeywords([...newListKeywords, trimmed]);
-    setNewKeywordInput("");
+
+    if (duplicates.length > 0 && newKeywords.length === 0) {
+      showMessage("error", "すでに追加されています");
+    }
   };
 
   /** 🔹 新規リスト：キーワード削除 */
@@ -331,13 +355,37 @@ export default function TrendAnalysis() {
 
   /** 🔹 編集リスト：キーワード追加 */
   const handleAddEditKeyword = () => {
-    const trimmed = editKeywordInput.trim();
-    if (!trimmed) return showMessage("error", "キーワードを入力してください");
-    if (editListKeywords.includes(trimmed)) {
-      return showMessage("error", "既に追加されています");
+    if (!editKeywordInput.trim()) return showMessage("error", "キーワードを入力してください");
+
+    // カンマ区切りで複数キーワードを処理
+    const keywords = editKeywordInput
+      .split(",")
+      .map((kw) => kw.trim())
+      .filter((kw) => kw.length > 0);
+
+    const newKeywords: string[] = [];
+    const duplicates: string[] = [];
+
+    keywords.forEach((kw) => {
+      if (editListKeywords.includes(kw)) {
+        duplicates.push(kw);
+      } else {
+        newKeywords.push(kw);
+      }
+    });
+
+    if (newKeywords.length > 0) {
+      setEditListKeywords([...editListKeywords, ...newKeywords]);
+      setEditKeywordInput("");
+
+      if (newKeywords.length > 1) {
+        showMessage("success", `${newKeywords.length}件のキーワードを追加しました`);
+      }
     }
-    setEditListKeywords([...editListKeywords, trimmed]);
-    setEditKeywordInput("");
+
+    if (duplicates.length > 0 && newKeywords.length === 0) {
+      showMessage("error", "すでに追加されています");
+    }
   };
 
   /** 🔹 編集リスト：キーワード削除 */
@@ -651,7 +699,7 @@ export default function TrendAnalysis() {
                   value={newKeywordInput}
                   onChange={(e) => setNewKeywordInput(e.target.value)}
                   onKeyPress={(e) => e.key === "Enter" && handleAddNewKeyword()}
-                  placeholder="キーワードを入力してEnter"
+                  placeholder="キーワードを入力してEnter（複数の場合は,区切り）"
                   className="flex-1 px-4 py-3 border border-gray-300 rounded-lg"
                 />
                 <button
@@ -739,7 +787,7 @@ export default function TrendAnalysis() {
                       value={editKeywordInput}
                       onChange={(e) => setEditKeywordInput(e.target.value)}
                       onKeyPress={(e) => e.key === "Enter" && handleAddEditKeyword()}
-                      placeholder="キーワードを追加してEnter"
+                      placeholder="キーワードを入力してEnter（複数の場合は,区切り）"
                       className="flex-1 px-4 py-3 border border-gray-300 rounded-lg"
                     />
                     <button
