@@ -31,7 +31,11 @@ export default function WPSettings() {
     if (error) {
       showMessage('error', 'データの読み込みに失敗しました');
     } else {
-      setConfigs(data || []);
+      const configsWithDefaults = (data || []).map(config => ({
+        ...config,
+        post_type: config.post_type || 'post'
+      }));
+      setConfigs(configsWithDefaults);
     }
   };
 
