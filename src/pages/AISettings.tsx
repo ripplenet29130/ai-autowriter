@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase, AIConfig } from '../lib/supabase';
-import { Eye, EyeOff, Save, Trash2 } from 'lucide-react';
+import { Eye, EyeOff, Save, Trash2, Edit2 } from 'lucide-react';
 import Toast from '../components/Toast';
 
 export default function AISettings() {
@@ -8,6 +8,7 @@ export default function AISettings() {
   const [showApiKey, setShowApiKey] = useState(false);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
 
   const [formData, setFormData] = useState({
     name: '',
@@ -71,36 +72,89 @@ export default function AISettings() {
     }
 
     setLoading(true);
-    const { error } = await supabase.from('ai_configs').insert([
-      {
-        name: formData.name || `${formData.provider} - ${formData.model}`,
-        provider: formData.provider,
-        api_key: formData.api_key,
-        model: formData.model,
-        temperature: formData.temperature,
-        max_tokens: formData.max_tokens,
-        enable_image: formData.enable_image,
-        tone: formData.tone,
-        article_length: formData.article_length,
-        style: formData.style,
-      },
-    ]);
+
+    const saveData = {
+      name: formData.name || `${formData.provider} - ${formData.model}`,
+      provider: formData.provider,
+      api_key: formData.api_key,
+      model: formData.model,
+      temperature: formData.temperature,
+      max_tokens: formData.max_tokens,
+      enable_image: formData.enable_image,
+      tone: formData.tone,
+      article_length: formData.article_length,
+      style: formData.style,
+    };
+
+    let error;
+    if (editingId) {
+      const result = await supabase
+        .from('ai_configs')
+        .update(saveData)
+        .eq('id', editingId);
+      error = result.error;
+    } else {
+      const result = await supabase.from('ai_configs').insert([saveData]);
+      error = result.error;
+    }
 
     if (error) {
       showMessage('error', '設定の保存に失敗しました');
     } else {
-      showMessage('success', '設定を保存しました');
+      showMessage('success', editingId ? '設定を更新しました' : '設定を保存しました');
       loadConfigs();
       setFormData({
-        ...formData,
+        name: '',
+        provider: 'Gemini',
         api_key: '',
+        model: 'gemini-2.5-flash',
+        temperature: 0.7,
+        max_tokens: 4000,
+        enable_image: false,
+        tone: 'ビジネス',
+        article_length: '中（1000〜1500字）',
+        style: 'SEO重視',
       });
+      setEditingId(null);
     }
     setLoading(false);
   };
 
   const handleTest = () => {
     showMessage('success', '接続テスト機能は準備中です');
+  };
+
+  const handleEdit = (config: AIConfig) => {
+    setEditingId(config.id);
+    setFormData({
+      name: config.name || '',
+      provider: config.provider,
+      api_key: config.api_key,
+      model: config.model,
+      temperature: config.temperature,
+      max_tokens: config.max_tokens,
+      enable_image: config.enable_image,
+      tone: config.tone || 'ビジネス',
+      article_length: config.article_length || '中（1000〜1500字）',
+      style: config.style || 'SEO重視',
+    });
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleCancelEdit = () => {
+    setEditingId(null);
+    setFormData({
+      name: '',
+      provider: 'Gemini',
+      api_key: '',
+      model: 'gemini-2.5-flash',
+      temperature: 0.7,
+      max_tokens: 4000,
+      enable_image: false,
+      tone: 'ビジネス',
+      article_length: '中（1000〜1500字）',
+      style: 'SEO重視',
+    });
   };
 
   const handleDelete = async (id: string) => {
@@ -116,6 +170,9 @@ export default function AISettings() {
     } else {
       showMessage('success', '設定を削除しました');
       loadConfigs();
+      if (editingId === id) {
+        handleCancelEdit();
+      }
     }
   };
 
@@ -143,9 +200,19 @@ export default function AISettings() {
       </div>
 
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-8">
-        <h2 className="text-xl font-semibold text-gray-800 mb-6">
-          新しいAI設定
-        </h2>
+        <div className="flex items-center justify-between mb-6">
+          <h2 className="text-xl font-semibold text-gray-800">
+            {editingId ? 'AI設定を編集' : '新しいAI設定'}
+          </h2>
+          {editingId && (
+            <button
+              onClick={handleCancelEdit}
+              className="px-4 py-2 text-gray-600 hover:text-gray-800 transition-colors"
+            >
+              キャンセル
+            </button>
+          )}
+        </div>
 
         <div className="space-y-6">
           {/* 設定名 */}
@@ -375,7 +442,7 @@ export default function AISettings() {
               className="flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors disabled:opacity-50"
             >
               <Save className="w-5 h-5" />
-              設定を保存
+              {editingId ? '設定を更新' : '設定を保存'}
             </button>
           </div>
         </div>
@@ -418,13 +485,22 @@ export default function AISettings() {
                       </p>
                     </div>
                   </div>
-                  <button
-                    onClick={() => handleDelete(config.id)}
-                    className="ml-4 p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                    title="削除"
-                  >
-                    <Trash2 className="w-5 h-5" />
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => handleEdit(config)}
+                      className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                      title="編集"
+                    >
+                      <Edit2 className="w-5 h-5" />
+                    </button>
+                    <button
+                      onClick={() => handleDelete(config.id)}
+                      className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                      title="削除"
+                    >
+                      <Trash2 className="w-5 h-5" />
+                    </button>
+                  </div>
                 </div>
               </div>
             ))}
