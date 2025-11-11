@@ -38,9 +38,15 @@ export default function TrendAnalysis() {
     text: string;
   } | null>(null);
 
-  const [manualKeyword, setManualKeyword] = useState("");
-  const [manualRelatedKeywords, setManualRelatedKeywords] = useState<string[]>([]);
-  const [manualKeywordInput, setManualKeywordInput] = useState("");
+  const [manualMode, setManualMode] = useState<"new" | "edit">("new");
+  const [newListName, setNewListName] = useState("");
+  const [newListKeywords, setNewListKeywords] = useState<string[]>([]);
+  const [newKeywordInput, setNewKeywordInput] = useState("");
+
+  const [editListId, setEditListId] = useState("");
+  const [editListName, setEditListName] = useState("");
+  const [editListKeywords, setEditListKeywords] = useState<string[]>([]);
+  const [editKeywordInput, setEditKeywordInput] = useState("");
 
   /** 🔹 初期読み込み */
   useEffect(() => {
@@ -223,36 +229,36 @@ export default function TrendAnalysis() {
     loadSavedKeywords();
   };
 
-  /** 🔹 手動でキーワードを追加 */
-  const handleAddManualKeyword = () => {
-    const trimmed = manualKeywordInput.trim();
+  /** 🔹 新規リスト：キーワード追加 */
+  const handleAddNewKeyword = () => {
+    const trimmed = newKeywordInput.trim();
     if (!trimmed) return showMessage("error", "キーワードを入力してください");
-    if (manualRelatedKeywords.includes(trimmed)) {
+    if (newListKeywords.includes(trimmed)) {
       return showMessage("error", "既に追加されています");
     }
-    setManualRelatedKeywords([...manualRelatedKeywords, trimmed]);
-    setManualKeywordInput("");
+    setNewListKeywords([...newListKeywords, trimmed]);
+    setNewKeywordInput("");
   };
 
-  /** 🔹 手動キーワードを削除 */
-  const handleRemoveManualKeyword = (index: number) => {
-    setManualRelatedKeywords(manualRelatedKeywords.filter((_, i) => i !== index));
+  /** 🔹 新規リスト：キーワード削除 */
+  const handleRemoveNewKeyword = (index: number) => {
+    setNewListKeywords(newListKeywords.filter((_, i) => i !== index));
   };
 
-  /** 🔹 手動入力セットを保存 */
-  const handleSaveManual = async () => {
-    if (!manualKeyword.trim()) {
-      return showMessage("error", "メインキーワードを入力してください");
+  /** 🔹 新規リスト：保存 */
+  const handleSaveNewList = async () => {
+    if (!newListName.trim()) {
+      return showMessage("error", "リスト名を入力してください");
     }
-    if (manualRelatedKeywords.length === 0) {
-      return showMessage("error", "関連キーワードを1つ以上追加してください");
+    if (newListKeywords.length === 0) {
+      return showMessage("error", "キーワードを1つ以上追加してください");
     }
 
     setLoading(true);
     try {
       const saveData = {
-        keyword: manualKeyword.trim(),
-        related_keywords: manualRelatedKeywords,
+        keyword: newListName.trim(),
+        related_keywords: newListKeywords,
         ai_config_id: selectedAiConfigId || null,
         source: "manual",
         created_at: new Date().toISOString(),
@@ -262,14 +268,76 @@ export default function TrendAnalysis() {
 
       if (error) throw error;
 
-      showMessage("success", "手動キーワードセットを保存しました");
+      showMessage("success", "キーワードリストを保存しました");
       await loadSavedKeywords();
 
-      setManualKeyword("");
-      setManualRelatedKeywords([]);
+      setNewListName("");
+      setNewListKeywords([]);
     } catch (e) {
       console.error("保存エラー:", e);
       showMessage("error", "保存中にエラーが発生しました");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  /** 🔹 編集リスト：選択時 */
+  const handleSelectEditList = (id: string) => {
+    const selected = savedKeywords.find((kw) => kw.id === id);
+    if (selected) {
+      setEditListId(id);
+      setEditListName(selected.keyword);
+      setEditListKeywords([...selected.related_keywords]);
+    }
+  };
+
+  /** 🔹 編集リスト：キーワード追加 */
+  const handleAddEditKeyword = () => {
+    const trimmed = editKeywordInput.trim();
+    if (!trimmed) return showMessage("error", "キーワードを入力してください");
+    if (editListKeywords.includes(trimmed)) {
+      return showMessage("error", "既に追加されています");
+    }
+    setEditListKeywords([...editListKeywords, trimmed]);
+    setEditKeywordInput("");
+  };
+
+  /** 🔹 編集リスト：キーワード削除 */
+  const handleRemoveEditKeyword = (index: number) => {
+    setEditListKeywords(editListKeywords.filter((_, i) => i !== index));
+  };
+
+  /** 🔹 編集リスト：更新保存 */
+  const handleUpdateList = async () => {
+    if (!editListId) return showMessage("error", "リストが選択されていません");
+    if (!editListName.trim()) {
+      return showMessage("error", "リスト名を入力してください");
+    }
+    if (editListKeywords.length === 0) {
+      return showMessage("error", "キーワードを1つ以上追加してください");
+    }
+
+    setLoading(true);
+    try {
+      const { error } = await supabase
+        .from("trend_keywords")
+        .update({
+          keyword: editListName.trim(),
+          related_keywords: editListKeywords,
+        })
+        .eq("id", editListId);
+
+      if (error) throw error;
+
+      showMessage("success", "キーワードリストを更新しました");
+      await loadSavedKeywords();
+
+      setEditListId("");
+      setEditListName("");
+      setEditListKeywords([]);
+    } catch (e) {
+      console.error("更新エラー:", e);
+      showMessage("error", "更新中にエラーが発生しました");
     } finally {
       setLoading(false);
     }
@@ -475,74 +543,193 @@ export default function TrendAnalysis() {
         )}
       </div>
 
-      {/* 🔹 手動キーワード入力セクション */}
+      {/* 🔹 キーワードリスト管理セクション */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-8 mb-8">
         <h2 className="text-xl font-semibold text-gray-800 mb-6">
-          手動でキーワードセットを作成
+          キーワードリスト管理
         </h2>
 
-        <div className="mb-4">
-          <label className="block text-sm font-medium text-gray-700 mb-2">
-            メインキーワード
-          </label>
-          <input
-            type="text"
-            value={manualKeyword}
-            onChange={(e) => setManualKeyword(e.target.value)}
-            placeholder="例: AGA治療"
-            className="w-full px-4 py-3 border border-gray-300 rounded-lg"
-          />
+        {/* タブ */}
+        <div className="flex gap-4 border-b mb-6">
+          <button
+            onClick={() => setManualMode("new")}
+            className={`px-4 py-2 border-b-2 font-medium ${
+              manualMode === "new"
+                ? "border-blue-600 text-blue-600"
+                : "border-transparent text-gray-500"
+            }`}
+          >
+            新規追加
+          </button>
+          <button
+            onClick={() => setManualMode("edit")}
+            className={`px-4 py-2 border-b-2 font-medium ${
+              manualMode === "edit"
+                ? "border-blue-600 text-blue-600"
+                : "border-transparent text-gray-500"
+            }`}
+          >
+            編集
+          </button>
         </div>
 
-        <div className="mb-4">
-          <label className="block text-sm font-medium text-gray-700 mb-2">
-            関連キーワード
-          </label>
-          <div className="flex gap-3 mb-3">
-            <input
-              type="text"
-              value={manualKeywordInput}
-              onChange={(e) => setManualKeywordInput(e.target.value)}
-              onKeyPress={(e) => e.key === "Enter" && handleAddManualKeyword()}
-              placeholder="キーワードを入力してEnter"
-              className="flex-1 px-4 py-3 border border-gray-300 rounded-lg"
-            />
+        {/* 新規追加モード */}
+        {manualMode === "new" && (
+          <div>
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                リスト名
+              </label>
+              <input
+                type="text"
+                value={newListName}
+                onChange={(e) => setNewListName(e.target.value)}
+                placeholder="例: AGA治療関連キーワード"
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg"
+              />
+            </div>
+
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                キーワード追加
+              </label>
+              <div className="flex gap-3 mb-3">
+                <input
+                  type="text"
+                  value={newKeywordInput}
+                  onChange={(e) => setNewKeywordInput(e.target.value)}
+                  onKeyPress={(e) => e.key === "Enter" && handleAddNewKeyword()}
+                  placeholder="キーワードを入力してEnter"
+                  className="flex-1 px-4 py-3 border border-gray-300 rounded-lg"
+                />
+                <button
+                  onClick={handleAddNewKeyword}
+                  className="px-6 py-3 bg-blue-600 text-white rounded-lg"
+                >
+                  追加
+                </button>
+              </div>
+
+              {newListKeywords.length > 0 && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
+                  {newListKeywords.map((kw, i) => (
+                    <div
+                      key={i}
+                      className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 flex justify-between items-center"
+                    >
+                      <span>{kw}</span>
+                      <button
+                        onClick={() => handleRemoveNewKeyword(i)}
+                        className="text-red-600 hover:bg-red-50 rounded p-1"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
             <button
-              onClick={handleAddManualKeyword}
-              className="px-6 py-3 bg-blue-600 text-white rounded-lg"
+              onClick={handleSaveNewList}
+              disabled={loading}
+              className="w-full px-6 py-3 bg-green-600 text-white rounded-lg flex items-center justify-center gap-2"
             >
-              追加
+              <Save className="w-5 h-5" />
+              {loading ? "保存中..." : "キーワードリストを保存"}
             </button>
           </div>
+        )}
 
-          {manualRelatedKeywords.length > 0 && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
-              {manualRelatedKeywords.map((kw, i) => (
-                <div
-                  key={i}
-                  className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 flex justify-between items-center"
-                >
-                  <span>{kw}</span>
-                  <button
-                    onClick={() => handleRemoveManualKeyword(i)}
-                    className="text-red-600 hover:bg-red-50 rounded p-1"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
-              ))}
+        {/* 編集モード */}
+        {manualMode === "edit" && (
+          <div>
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                編集するリストを選択
+              </label>
+              <select
+                value={editListId}
+                onChange={(e) => handleSelectEditList(e.target.value)}
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg"
+              >
+                <option value="">リストを選択してください</option>
+                {savedKeywords.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.keyword} ({item.related_keywords.length}件)
+                  </option>
+                ))}
+              </select>
             </div>
-          )}
-        </div>
 
-        <button
-          onClick={handleSaveManual}
-          disabled={loading}
-          className="w-full px-6 py-3 bg-green-600 text-white rounded-lg flex items-center justify-center gap-2"
-        >
-          <Save className="w-5 h-5" />
-          {loading ? "保存中..." : "キーワードセットを保存"}
-        </button>
+            {editListId && (
+              <>
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    リスト名
+                  </label>
+                  <input
+                    type="text"
+                    value={editListName}
+                    onChange={(e) => setEditListName(e.target.value)}
+                    placeholder="リスト名を入力"
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg"
+                  />
+                </div>
+
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    キーワード編集
+                  </label>
+                  <div className="flex gap-3 mb-3">
+                    <input
+                      type="text"
+                      value={editKeywordInput}
+                      onChange={(e) => setEditKeywordInput(e.target.value)}
+                      onKeyPress={(e) => e.key === "Enter" && handleAddEditKeyword()}
+                      placeholder="キーワードを追加してEnter"
+                      className="flex-1 px-4 py-3 border border-gray-300 rounded-lg"
+                    />
+                    <button
+                      onClick={handleAddEditKeyword}
+                      className="px-6 py-3 bg-blue-600 text-white rounded-lg"
+                    >
+                      追加
+                    </button>
+                  </div>
+
+                  {editListKeywords.length > 0 && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
+                      {editListKeywords.map((kw, i) => (
+                        <div
+                          key={i}
+                          className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 flex justify-between items-center"
+                        >
+                          <span>{kw}</span>
+                          <button
+                            onClick={() => handleRemoveEditKeyword(i)}
+                            className="text-red-600 hover:bg-red-50 rounded p-1"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <button
+                  onClick={handleUpdateList}
+                  disabled={loading}
+                  className="w-full px-6 py-3 bg-green-600 text-white rounded-lg flex items-center justify-center gap-2"
+                >
+                  <Save className="w-5 h-5" />
+                  {loading ? "更新中..." : "変更を保存"}
+                </button>
+              </>
+            )}
+          </div>
+        )}
       </div>
 
       {/* 🔹 保存済みキーワード一覧 */}
