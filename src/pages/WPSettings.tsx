@@ -89,10 +89,6 @@ export default function WPSettings() {
     }
   };
 
-  const handleTest = () => {
-    showMessage('success', '接続テスト機能は準備中です');
-  };
-
   const toggleActive = async (id: string, currentStatus: boolean) => {
     const { error } = await supabase
       .from('wp_configs')
@@ -269,12 +265,6 @@ export default function WPSettings() {
                     </div>
                   </div>
                   <div className="flex gap-2">
-                    <button
-                      onClick={handleTest}
-                      className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors text-sm"
-                    >
-                      接続テスト
-                    </button>
                     <button
                       onClick={() => toggleActive(config.id, config.is_active)}
                       className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors text-sm"
