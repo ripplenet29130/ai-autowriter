@@ -174,7 +174,7 @@ export default function ArticleGenerator() {
     }
     
     // ✅ 投稿タイプを判定してAPIエンドポイントを動的に変更
-    const postType = wpConfig.post_type || 'post';
+    const postType = wpConfig.post_type || 'posts';
     const endpoint = `${wpUrl}/wp-json/wp/v2/${postType}`;
     
     console.log('📮 投稿タイプ:', postType, '→', endpoint);
