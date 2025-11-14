@@ -94,7 +94,7 @@ export default function ArticleGenerator() {
     const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
     const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-    const response = await fetch(`${supabaseUrl}/functions/v1/generate-article`, {
+    const response = await fetch(`/.netlify/functions/generate-article`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
