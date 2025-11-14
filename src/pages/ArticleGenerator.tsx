@@ -367,6 +367,21 @@ export default function ArticleGenerator() {
                   {selectedAiConfig.article_length}
                 </p>
               </div>
+              {/* ⭐ 言語 */}
+              <div className="bg-gray-50 rounded-lg p-3">
+              <p className="text-gray-500 mb-1">言語</p>
+              <p className="font-medium text-gray-800">
+                {selectedAiConfig.language === "ja"
+                  ? "日本語"
+                  : selectedAiConfig.language === "en"
+                  ? "英語"
+                  : selectedAiConfig.language === "zh"
+                  ? "中国語"
+                  : selectedAiConfig.language === "ko"
+                  ? "韓国語"
+                  : selectedAiConfig.language}
+              </p>
+  </div>
             </div>
           </div>
         )}
