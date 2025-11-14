@@ -30,6 +30,18 @@ export function buildUnifiedPrompt(center, aiConfig) {
       ? "韓国語"
       : "日本語";
 
+    // 言語-specific NOTE（自然な翻訳の補足指示）
+  const langNote =
+    language === "ja"
+      ? "自然で読みやすい日本語で書いてください。"
+      : language === "en"
+      ? "Write in natural, fluent, and readable English for a general audience."
+      : language === "zh"
+      ? "请使用自然、流畅、易读的简体中文撰写文章。"
+      : language === "ko"
+      ? "자연스럽고 읽기 쉬운 한국어로 작성해주세요."
+      : "自然で読みやすい日本語で書いてください。";
+  
   return `
 あなたはSEOに強いプロのライターです。
 以下の条件で${langLabel}の記事を作成してください。
