@@ -101,9 +101,8 @@ export default function ArticleGenerator() {
         'Authorization': `Bearer ${supabaseAnonKey}`,
       },
       body: JSON.stringify({
-        ai_config_id: selectedAiConfigId,
-        keyword: selectedKeyword.keyword,
-        related_keywords: selectedKeyword.related_keywords,
+      ai_config_id: selectedAiConfigId,
+      center: randomKeyword
       }),
     });
 
