@@ -17,6 +17,7 @@
     "react-dom": "^18.3.1",
     "react-router-dom": "^7.9.5",
     "recharts": "^3.4.1"
+    "google-trends-api": "^4.9.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.9.1",
