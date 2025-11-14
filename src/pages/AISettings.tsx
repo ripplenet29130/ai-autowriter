@@ -124,10 +124,6 @@ export default function AISettings() {
     setLoading(false);
   };
 
-  const handleTest = () => {
-    showMessage('success', '接続テスト機能は準備中です');
-  };
-
   const handleEdit = (config: AIConfig) => {
     setEditingId(config.id);
   };
@@ -320,7 +316,8 @@ export default function AISettings() {
                 <option value="リスト形式">リスト形式</option>
               </select>
             </div>
-
+            
+          {/* 出力言語 */}
             <div>
               <label className="block text-xs font-medium text-gray-700 mb-1">
                 出力言語
@@ -328,10 +325,8 @@ export default function AISettings() {
             
               <select
                 value={editData.language}
-                onChange={(e) =>
-                  setEditData({ ...editData, language: e.target.value })
-                }
-                className="w-full border rounded px-3 py-2"
+                onChange={(e) => setEditData({ ...editData, language: e.target.value })}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
               >
                 <option value="ja">日本語</option>
                 <option value="en">English</option>
@@ -670,14 +665,27 @@ export default function AISettings() {
             </select>
           </div>
 
+          {/* 出力言語 */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              出力言語
+            </label>
+            <select
+              value={formData.language}
+              onChange={(e) =>
+                setFormData({ ...formData, language: e.target.value })
+              }
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            >
+              <option value="ja">日本語</option>
+              <option value="en">English</option>
+              <option value="zh">中文 (Chinese)</option>
+              <option value="ko">한국어 (Korean)</option>
+            </select>
+          </div>
+
           {/* ボタン */}
           <div className="flex gap-4 pt-4">
-            <button
-              onClick={handleTest}
-              className="px-6 py-3 border border-gray-300 rounded-lg text-gray-700 font-medium hover:bg-gray-50 transition-colors"
-            >
-              接続テスト
-            </button>
             <button
               onClick={handleSave}
               disabled={loading}
