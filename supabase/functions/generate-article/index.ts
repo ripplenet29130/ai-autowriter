@@ -164,8 +164,6 @@ Deno.serve(async (req: Request) => {
   });
 }
 
-  }
-
   try {
     const { ai_config_id, keyword, related_keywords = [] }: RequestBody = await req.json();
 
