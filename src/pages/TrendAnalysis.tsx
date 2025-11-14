@@ -737,33 +737,6 @@ export default function TrendAnalysis() {
   );
 }
 
-/* ==============================================================
-   🔹 Googleトレンド取得（フロントのみ）
- ============================================================== */
-
-/** 関連キーワード取得（Exploreページ HTMLパース） */
-async function fetchGoogleRelated(keyword: string) {
-  try {
-    const url = `https://trends.google.com/trends/explore?hl=ja&tz=-540&geo=JP&q=${encodeURIComponent(
-      keyword
-    )}`;
-
-    const html = await fetch(url).then((r) => r.text());
-
-    const match = html.match(/"RELATED_QUERIES".*?(\{.*?\})/);
-
-    if (!match) return [];
-
-    const jsonText = match[1];
-    const data = JSON.parse(jsonText);
-
-    return data.rankedKeyword || [];
-  } catch (e) {
-    console.error("関連キーワード取得エラー", e);
-    return [];
-  }
-}
-
 /** 日本の急上昇ワード（フロント RSS） */
 async function fetchDailyRising() {
   try {
