@@ -50,7 +50,10 @@ export const handler: Handler = async (event) => {
       statusCode: 200,
       body: JSON.stringify({
         related: relatedJson.default.rankedList,
-        timeline: timelineJson.default.timelineData,
+        timeline: timelineJson.default.timelineData.map((item: any) => ({
+          formattedTime: item.formattedTime,
+          value: item.value,
+        })),
       }),
     };
   } catch (e) {
