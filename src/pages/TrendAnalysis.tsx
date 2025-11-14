@@ -8,8 +8,12 @@ import {
   Sparkles,
   Brain,
   Globe,
+  Edit,
+  TrendingDown,
+  Activity,
 } from "lucide-react";
 import Toast from "../components/Toast";
+import TrendChart from "../components/TrendChart";
 
 interface TrendKeyword {
   id: string;
@@ -31,6 +35,12 @@ export default function TrendAnalysis() {
   const [selectedKeywords, setSelectedKeywords] = useState<string[]>([]);
   const [savedKeywords, setSavedKeywords] = useState<TrendKeyword[]>([]);
   const [googleTrends, setGoogleTrends] = useState<any[]>([]);
+
+  const [googleTrendData, setGoogleTrendData] = useState<{
+    related: any;
+    timeline: any;
+  } | null>(null);
+  const [loadingTrends, setLoadingTrends] = useState(false);
 
   const [loading, setLoading] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
@@ -138,38 +148,31 @@ export default function TrendAnalysis() {
     if (!keyword.trim())
       return showMessage("error", "キーワードを入力してください");
 
-    setAnalyzing(true);
+    setLoadingTrends(true);
+    setGoogleTrendData(null);
 
     try {
-      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-      const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-
-      const response = await fetch(
-        `${supabaseUrl}/functions/v1/google-trends`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${supabaseAnonKey}`,
-          },
-          body: JSON.stringify({
-            keyword: keyword.trim(),
-            timeRange: "now 7-d",
-            geo: "JP",
-          }),
-        }
-      );
+      const response = await fetch("/.netlify/functions/google-trends", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          keyword: keyword.trim(),
+        }),
+      });
 
       if (!response.ok) throw new Error("Googleトレンド分析に失敗しました");
 
       const result = await response.json();
+      setGoogleTrendData(result);
       showMessage("success", "Googleトレンドデータを取得しました");
       console.log("Googleトレンド結果:", result);
     } catch (error) {
       console.error("Googleトレンド分析エラー:", error);
       showMessage("error", "Googleトレンド分析に失敗しました");
     } finally {
-      setAnalyzing(false);
+      setLoadingTrends(false);
     }
   };
 
@@ -585,59 +588,86 @@ export default function TrendAnalysis() {
         {/* 🔹 Google結果 */}
         {activeTab === "google" && (
           <div className="mt-6">
-            {googleTrends.length === 0 ? (
-              <p className="text-gray-500">まだトレンドデータがありません。</p>
-            ) : (
-              googleTrends.map((trend, i) => (
-                <div
-                  key={i}
-                  className="bg-white border border-gray-200 rounded-lg p-6 mb-6 shadow-sm"
-                >
-                  <h3 className="text-lg font-semibold text-gray-800 mb-2">
-                    {trend.keyword}
-                  </h3>
+            {loadingTrends && (
+              <div className="flex items-center justify-center py-12">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+              </div>
+            )}
 
-                  {trend.trend_score?.timeline && (
-                    <div className="mb-4">
-                      <p className="text-sm text-gray-600 mb-2">人気度推移</p>
-                      <div className="space-y-2">
-                        {trend.trend_score.timeline.map((item: any, j: number) => (
-                          <div key={j} className="flex items-center gap-3">
-                            <span className="text-xs text-gray-500 w-20">
-                              {item.time}
+            {!loadingTrends && !googleTrendData && (
+              <div className="text-center py-12 text-gray-500">
+                <Globe className="w-16 h-16 mx-auto mb-4 opacity-50" />
+                <p>キーワードを入力して分析を開始してください</p>
+              </div>
+            )}
+
+            {!loadingTrends && googleTrendData && (
+              <div className="space-y-6">
+                {/* グラフ */}
+                <div className="bg-white border border-gray-200 rounded-lg p-6 shadow-sm">
+                  <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
+                    <Activity className="w-5 h-5 text-blue-600" />
+                    過去30日の検索トレンド
+                  </h3>
+                  <TrendChart data={googleTrendData.timeline} />
+                </div>
+
+                {/* 関連キーワード */}
+                {googleTrendData.related?.[0]?.rankedKeyword && (
+                  <div className="bg-white border border-gray-200 rounded-lg p-6 shadow-sm">
+                    <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
+                      <Search className="w-5 h-5 text-blue-600" />
+                      関連キーワード Top10
+                    </h3>
+                    <ul className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      {googleTrendData.related[0].rankedKeyword
+                        .slice(0, 10)
+                        .map((item: any, idx: number) => (
+                          <li
+                            key={idx}
+                            className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg border border-gray-200 hover:border-blue-300 transition-colors"
+                          >
+                            <span className="text-sm font-semibold text-blue-600 min-w-[24px]">
+                              #{idx + 1}
                             </span>
-                            <div className="flex-1 bg-gray-200 rounded-full h-4">
-                              <div
-                                className="bg-blue-600 h-4 rounded-full"
-                                style={{ width: `${item.value}%` }}
-                              ></div>
-                            </div>
-                            <span className="text-xs text-gray-700">
+                            <span className="text-gray-800">{item.query}</span>
+                            <span className="ml-auto text-xs text-gray-500">
                               {item.value}
                             </span>
-                          </div>
+                          </li>
                         ))}
-                      </div>
-                    </div>
-                  )}
+                    </ul>
+                  </div>
+                )}
 
-                  {trend.rising_keywords?.length > 0 && (
-                    <div>
-                      <p className="text-sm text-gray-600 mb-2">上昇キーワード</p>
-                      <div className="flex flex-wrap gap-2">
-                        {trend.rising_keywords.slice(0, 10).map((kw: string, j: number) => (
-                          <span
-                            key={j}
-                            className="px-3 py-1 bg-green-50 border border-green-200 rounded-full text-sm text-green-800"
+                {/* 急上昇キーワード */}
+                {googleTrendData.related?.[1]?.rankedKeyword && (
+                  <div className="bg-white border border-gray-200 rounded-lg p-6 shadow-sm">
+                    <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
+                      <TrendingDown className="w-5 h-5 text-red-600" />
+                      急上昇キーワード Top10
+                    </h3>
+                    <ul className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      {googleTrendData.related[1].rankedKeyword
+                        .slice(0, 10)
+                        .map((item: any, idx: number) => (
+                          <li
+                            key={idx}
+                            className="flex items-center gap-3 p-3 bg-red-50 rounded-lg border border-red-200 hover:border-red-400 transition-colors"
                           >
-                            {kw}
-                          </span>
+                            <span className="text-sm font-semibold text-red-600 min-w-[24px]">
+                              #{idx + 1}
+                            </span>
+                            <span className="text-gray-800">{item.query}</span>
+                            <span className="ml-auto text-xs text-red-600 font-medium">
+                              {item.value === "Breakout" ? "急上昇" : `+${item.value}`}
+                            </span>
+                          </li>
                         ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              ))
+                    </ul>
+                  </div>
+                )}
+              </div>
             )}
           </div>
         )}
