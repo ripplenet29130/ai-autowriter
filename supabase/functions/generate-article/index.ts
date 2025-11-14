@@ -13,6 +13,144 @@ interface RequestBody {
   related_keywords?: string[];
 }
 
+function buildUnifiedPrompt(center: string, aiConfig: any) {
+  const tone = aiConfig.tone || "ナチュラル";
+  const style = aiConfig.style || "ブログ風";
+  const length = aiConfig.article_length || "中程度";
+  const language = aiConfig.language || "ja";
+
+  const langLabel =
+    language === "ja"
+      ? "日本語"
+      : language === "en"
+      ? "英語"
+      : language === "zh"
+      ? "中国語"
+      : language === "ko"
+      ? "韓国語"
+      : "日本語";
+
+  const langNote =
+    language === "ja"
+      ? "自然で読みやすい日本語で書いてください。"
+      : language === "en"
+      ? "Write in natural, fluent, and readable English for a general audience."
+      : language === "zh"
+      ? "请使用自然、流畅、易读的简体中文撰写文章。"
+      : language === "ko"
+      ? "자연스럽고 읽기 쉬운 한국어로 작성해주세요."
+      : "自然で読みやすい日本語で書いてください。";
+
+  return `
+あなたはSEOに強いプロのライターです。
+以下の条件で${langLabel}の記事を作成してください。
+
+【記事の中心テーマ（最重要）】
+${center}
+
+※この記事は上記テーマ1つだけを深く掘り下げてください。
+※他の関連話題には触れなくてもよい。
+
+【文体トーン】
+${tone}
+
+【スタイル】
+${style}
+
+【ボリューム】
+${length}
+
+# HTMLルール
+1. 出力は JSON のみ
+2. JSON は "title" と "content" の2フィールドのみ
+3. title はテキストのみ（HTMLタグ禁止）
+4. content は <h3> から開始する
+5. <h1>, <h2>, <h5>, <h6> は使用禁止
+6. 段落は <p>...</p> を使い、1段落2〜3文にする
+7. 改行文字（\\n, \n）、コードブロック（\`\`\`）は禁止
+8. 最後に <h3>まとめ</h3><p>...</p> を付ける
+
+# 出力形式（これのみ）
+{
+  "title": "タイトル",
+  "content": "<h3>...</h3><p>...</p>"
+}
+`;
+}
+
+async function callAI(aiConfig: any, prompt: string): Promise<string> {
+  const provider = (aiConfig.provider || "").toLowerCase();
+  let text = "";
+
+  if (provider.includes("gemini")) {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${aiConfig.model}:generateContent?key=${aiConfig.api_key}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: {
+            temperature: aiConfig.temperature ?? 0.7,
+            maxOutputTokens: aiConfig.max_tokens ?? 4000
+          }
+        })
+      }
+    );
+    const data = await res.json();
+    text = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+  } else if (provider.includes("openai")) {
+    const res = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${aiConfig.api_key}`
+      },
+      body: JSON.stringify({
+        model: aiConfig.model,
+        messages: [{ role: "user", content: prompt }],
+        temperature: aiConfig.temperature ?? 0.7,
+        max_tokens: aiConfig.max_tokens ?? 4000
+      })
+    });
+    const data = await res.json();
+    text = data?.choices?.[0]?.message?.content || "";
+  } else if (provider.includes("claude")) {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": aiConfig.api_key,
+        "anthropic-version": "2023-06-01"
+      },
+      body: JSON.stringify({
+        model: aiConfig.model,
+        messages: [{ role: "user", content: prompt }],
+        temperature: aiConfig.temperature ?? 0.7,
+        max_tokens: aiConfig.max_tokens ?? 4000
+      })
+    });
+    const data = await res.json();
+    text = data?.content?.[0]?.text || "";
+  }
+
+  return text;
+}
+
+function parseArticle(rawText: string): { title: string; content: string } {
+  const match = rawText.match(/\{[\s\S]*\}/);
+  if (!match) throw new Error("JSON構造が見つかりませんでした");
+
+  const article = JSON.parse(match[0]);
+
+  article.content = article.content
+    .replace(/\\n|\\r|\\t/g, "")
+    .replace(/\n+/g, "")
+    .trim();
+
+  return article;
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response(null, {
@@ -68,115 +206,26 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    const api_key = aiConfig.api_key;
-    const model = aiConfig.model || "gemini-2.0-flash-lite";
-    const temperature = aiConfig.temperature || 0.7;
-    const tone = aiConfig.tone || "ビジネス";
-    const article_length = aiConfig.article_length || "中（1000〜1500字）";
-    const style = aiConfig.style || "SEO重視";
+    console.log(`🤖 AI設定: ${aiConfig.provider} - ${aiConfig.model}`);
 
-    console.log(`🤖 AI設定: ${aiConfig.provider} - ${model}`);
-    console.log(`🎭 トーン: ${tone}, スタイル: ${style}, ボリューム: ${article_length}`);
+    const center =
+      Array.isArray(related_keywords) && related_keywords.length > 0
+        ? related_keywords[Math.floor(Math.random() * related_keywords.length)]
+        : keyword;
 
-    const relatedKeywordsText = related_keywords.length > 0
-      ? related_keywords.join(", ")
-      : keyword;
+    console.log(`🎯 中心テーマ: ${center}`);
 
-    const prompt = `あなたはプロのSEOライターです。以下の条件で日本語の記事を作成してください。
+    const prompt = buildUnifiedPrompt(center, aiConfig);
 
-条件
-記事の中心テーマ（関連キーワード群）: ${relatedKeywordsText}
-トーン: ${tone}
-スタイル: ${style}
-ボリューム目安: ${article_length}
-
-構成とHTMLルール
-1. タイトルは <h2> タグを使わず、"title" フィールドに文字列として出力。
-2. 本文 ("content") は <h3> から始める。
-3. 下層に進む場合は <h4> → <h5> → <h6> と階層順に使用。
-4. <h1> は使わない。<h2> はタイトル以外に使わない。
-5. 最後に <h3>まとめ</h3><p>…</p> を入れる。
-
-出力形式（JSONのみ）
-{
-  "title": "タイトル（文字列のみ。タグは不要）",
-  "content": "<h3>...</h3><p>...</p><h4>...</h4><p>...</p><h3>まとめ</h3><p>...</p>"
-}
-
-注意点
-- 関連キーワードを主軸に構成（メインキーワードは自然に含める）。
-- 見出し階層は論理的に。
-- JSON以外の出力は禁止。`;
-
- // 👇 ここを追加！
-    console.log("🧠 実際にGeminiへ送信されるプロンプト ↓↓↓");
+    console.log("🧠 送信プロンプト:");
     console.log(prompt);
-    console.log("↑↑↑ ここまでが送信プロンプト");
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${api_key}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ role: "user", parts: [{ text: prompt }] }],
-          generationConfig: {
-            temperature,
-            maxOutputTokens: aiConfig.max_tokens || 4000,
-          },
-        }),
-      }
-    );
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error(`❌ Gemini APIエラー: ${errorText}`);
-      return new Response(
-        JSON.stringify({ error: `Gemini APIエラー: ${response.status}` }),
-        {
-          status: 500,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        }
-      );
-    }
+    const rawOutput = await callAI(aiConfig, prompt);
 
-    const result = await response.json();
+    console.log("📝 AI生出力:");
+    console.log(rawOutput.substring(0, 500));
 
-    if (result.error) {
-      console.error(`❌ Geminiエラー: ${result.error.message}`);
-      return new Response(
-        JSON.stringify({ error: result.error.message }),
-        {
-          status: 500,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        }
-      );
-    }
-
-    const text = result.candidates?.[0]?.content?.parts?.[0]?.text || "";
-    console.log(`📝 Gemini出力: ${text.substring(0, 200)}...`);
-
-    let article: { title: string; content: string };
-    try {
-      const jsonMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/) || text.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        const jsonText = jsonMatch[1] || jsonMatch[0];
-        article = JSON.parse(jsonText);
-      } else {
-        article = JSON.parse(text);
-      }
-    } catch (parseError) {
-      console.error(`❌ JSON解析エラー:`, parseError);
-      return new Response(
-        JSON.stringify({ 
-          error: "記事の解析に失敗しました",
-          raw_output: text 
-        }),
-        {
-          status: 500,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        }
-      );
-    }
+    const article = parseArticle(rawOutput);
 
     if (!article.title || !article.content) {
       return new Response(
@@ -194,7 +243,7 @@ Deno.serve(async (req: Request) => {
       JSON.stringify({
         title: article.title,
         content: article.content,
-        keyword,
+        keyword: center,
         ai_config_id,
       }),
       {
