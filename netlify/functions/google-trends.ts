@@ -1,4 +1,5 @@
 import type { Handler } from "@netlify/functions";
+import googleTrends from "google-trends-api";
 
 export const handler: Handler = async (event) => {
   const { keyword } = JSON.parse(event.body || "{}");
@@ -11,51 +12,35 @@ export const handler: Handler = async (event) => {
   }
 
   try {
-    const exploreUrl = `https://trends.google.com/trends/api/explore?hl=ja&tz=-540&req=${encodeURIComponent(
-      JSON.stringify({
-        comparisonItem: [{ keyword, time: "today 1-m" }],
-        category: 0,
-        property: "",
-      })
-    )}`;
+    // --- 関連キーワード ---
+    const relatedRaw = await googleTrends.relatedQueries({
+      keyword,
+      geo: "JP",
+    });
 
-    const exploreRes = await fetch(exploreUrl);
-    const exploreText = await exploreRes.text();
-    const exploreJson = JSON.parse(exploreText.slice(5));
+    const relatedJson = JSON.parse(relatedRaw);
+    const related =
+      relatedJson.default?.rankedList ?? [];
 
-    const relatedWidget = exploreJson.widgets.find(
-      (w: any) => w.id === "RELATED_QUERIES"
-    );
-    const timelineWidget = exploreJson.widgets.find(
-      (w: any) => w.id === "TIMESERIES"
-    );
+    // --- 推移データ ---
+    const timelineRaw = await googleTrends.interestOverTime({
+      keyword,
+      geo: "JP",
+      timeframe: "today 1-m",
+    });
 
-    const relatedUrl = `https://trends.google.com/trends/api/widgetdata/relatedsearches?hl=ja&tz=-540&req=${encodeURIComponent(
-      JSON.stringify(relatedWidget.request)
-    )}&token=${relatedWidget.token}`;
-
-    const timelineUrl = `https://trends.google.com/trends/api/widgetdata/multiline?hl=ja&tz=-540&req=${encodeURIComponent(
-      JSON.stringify(timelineWidget.request)
-    )}&token=${timelineWidget.token}`;
-
-    const [relatedRes, timelineRes] = await Promise.all([
-      fetch(relatedUrl),
-      fetch(timelineUrl),
-    ]);
-
-    const relatedJson = JSON.parse((await relatedRes.text()).slice(5));
-    const timelineJson = JSON.parse((await timelineRes.text()).slice(5));
+    const timelineJson = JSON.parse(timelineRaw);
+    const timeline =
+      timelineJson.default?.timelineData?.map((item: any) => ({
+        formattedTime: item.formattedTime,
+        value: item.value,
+      })) ?? [];
 
     return {
       statusCode: 200,
-      body: JSON.stringify({
-        related: relatedJson.default.rankedList,
-        timeline: timelineJson.default.timelineData.map((item: any) => ({
-          formattedTime: item.formattedTime,
-          value: item.value,
-        })),
-      }),
+      body: JSON.stringify({ related, timeline }),
     };
+
   } catch (e) {
     return {
       statusCode: 500,
