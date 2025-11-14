@@ -6,182 +6,224 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_KEY!
 );
 
-export const handler: Handler = async (event) => {
-  try {
-    const { ai_config_id, keyword, related_keywords, wp_url } = JSON.parse(event.body || "{}");
+/* =========================================================
+   ① 中心テーマだけで記事を生成するプロンプト生成関数
+   ========================================================= */
+function buildUnifiedPrompt({
+  center,
+  tone,
+  style,
+  length,
+  language
+}) {
+  const langLabel =
+    language === "ja"
+      ? "日本語"
+      : language === "en"
+      ? "英語"
+      : language === "zh"
+      ? "中国語"
+      : language === "ko"
+      ? "韓国語"
+      : "日本語";
 
-    if (!ai_config_id || !keyword) {
-      return { statusCode: 400, body: JSON.stringify({ error: "パラメータが不足しています" }) };
+  return `
+あなたはSEOに強いプロのライターです。
+以下の条件で${langLabel}の記事を作成してください。
+
+【記事の中心テーマ】
+${center}
+
+※この記事は上記「中心テーマ」1つだけを深掘りする内容にしてください。
+※関連語や他の話題には触れなくても良い。
+※専門的で正確だが、一般読者にも読みやすい構成にする。
+
+【トーン】
+${tone}
+
+【スタイル】
+${style}
+
+【ボリューム】
+${length}
+
+# HTMLルール
+1. 出力形式は JSON のみ
+2. JSON には "title" と "content" の2フィールドのみ
+3. title はテキストのみ（タグ禁止）
+4. content は <h3> から開始
+5. セクション区切りは <h3>、補足は <h4>
+6. <h1>, <h2>, <h5>, <h6> は禁止
+7. 段落は必ず <p>…</p> で書き、1段落は 2〜3 文
+8. 改行文字（\\n, \n）、コードブロック（\`\`\`）は禁止
+9. 最後に <h3>まとめ</h3><p>...</p> を追加すること
+
+# 出力形式（必ずこれのみ）
+{
+  "title": "タイトル",
+  "content": "<h3>...</h3><p>...</p>"
+}
+
+JSON以外の余分なテキストは出力しないこと。
+`;
+}
+
+/* =========================================================
+   ② AI呼び出し（Gemini / OpenAI / Claude）
+   ========================================================= */
+async function runAIModel(aiConfig, prompt) {
+  const provider = (aiConfig.provider || "").toLowerCase();
+  let text = "";
+
+  switch (provider) {
+    case "gemini":
+    case "google gemini": {
+      const key = aiConfig.api_key;
+      const model = aiConfig.model || "gemini-2.5-flash";
+
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: {
+              temperature: aiConfig.temperature ?? 0.7,
+              maxOutputTokens: aiConfig.max_tokens ?? 4000
+            }
+          })
+        }
+      );
+      const data = await res.json();
+      text = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+      break;
     }
 
-    // ✅ SupabaseからAI設定を取得
-    const { data: aiConfig, error: aiError } = await supabase
+    case "openai": {
+      const key = aiConfig.api_key;
+      const model = aiConfig.model || "gpt-4o-mini";
+
+      const res = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${key}`
+        },
+        body: JSON.stringify({
+          model,
+          messages: [{ role: "user", content: prompt }],
+          temperature: aiConfig.temperature ?? 0.7,
+          max_tokens: aiConfig.max_tokens ?? 4000
+        })
+      });
+      const data = await res.json();
+      text = data?.choices?.[0]?.message?.content || "";
+      break;
+    }
+
+    case "anthropic claude": {
+      const key = aiConfig.api_key;
+      const model = aiConfig.model || "claude-3-sonnet-20240229";
+
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": key,
+          "anthropic-version": "2023-06-01"
+        },
+        body: JSON.stringify({
+          model,
+          messages: [{ role: "user", content: prompt }],
+          max_tokens: aiConfig.max_tokens ?? 4000,
+          temperature: aiConfig.temperature ?? 0.7
+        })
+      });
+      const data = await res.json();
+      text = data?.content?.[0]?.text || "";
+      break;
+    }
+
+    default:
+      throw new Error(`未対応のAIプロバイダ: ${aiConfig.provider}`);
+  }
+
+  return text;
+}
+
+/* =========================================================
+   ③ メインハンドラー（generate-article）
+   ========================================================= */
+export const handler: Handler = async (event) => {
+  try {
+    const { ai_config_id, keyword, related_keywords, wp_url } =
+      JSON.parse(event.body || "{}");
+
+    if (!ai_config_id || !keyword) {
+      return {
+        statusCode: 400,
+        body: JSON.stringify({ error: "パラメータが不足しています" })
+      };
+    }
+
+    // 🔍 AI設定取得
+    const { data: aiConfig, error } = await supabase
       .from("ai_configs")
       .select("*")
       .eq("id", ai_config_id)
       .single();
 
-    if (aiError || !aiConfig) {
-      throw new Error("AI設定の取得に失敗しました");
-    }
+    if (error || !aiConfig) throw new Error("AI設定の取得に失敗しました");
 
-    // === 共通プロンプト作成 ===
-    const relatedKeywordsText =
-  Array.isArray(related_keywords) && related_keywords.length > 0
-    ? related_keywords[Math.floor(Math.random() * related_keywords.length)]
-    : keyword;
+    // 🔥 “中心テーマ”を related_keywords から1つ抽出
+    const center =
+      Array.isArray(related_keywords) && related_keywords.length > 0
+        ? related_keywords[Math.floor(Math.random() * related_keywords.length)]
+        : keyword;
 
+    // 🔥 プロンプト生成（中心テーマのみ）
+    const prompt = buildUnifiedPrompt({
+      center,
+      tone: aiConfig.tone,
+      style: aiConfig.style,
+      length: aiConfig.article_length,
+      language: aiConfig.language || "ja"
+    });
 
-    const tone = aiConfig.tone || "ナチュラル";
-    const style = aiConfig.style || "ブログ風";
-    const article_length = aiConfig.article_length || "中程度";
-
-    const prompt = `あなたはプロのSEOライターです。以下の条件で日本語の記事を作成してください。
-
-条件
-記事の中心テーマ（関連キーワード群）: ${relatedKeywordsText}
-トーン: ${tone}
-スタイル: ${style}
-ボリューム目安: ${article_length}
-
-構成とHTMLルール
-1. タイトルは "title" フィールドに文字列として出力（<h2>タグは使わない）。
-2. 本文 ("content") は <h3> から始め、下層は <h4> → <h5> → <h6> の順で使用できる。
-3. 段落は1段落あたり2〜3文でまとめ、各段落は <p> ... </p> タグで囲む。
-4. 段落間には1行分の余白を持たせるため、<p> タグをしっかり分けてください。
-5. <h1> は使用禁止。<h2> はタイトル以外で使用禁止。
-6. 改行文字(\n, \\n)は使用せず、HTMLタグのみで整形する。
-7. 最後に <h3>まとめ</h3><p>...内容...</p> を入れる。
-8. 出力時にJSON形式で、余分な説明やコードブロックは含めない。
-
-出力形式
-{
-  "title": "タイトル（文字列のみ。タグは不要）",
-  "content": "<h3>...</h3><p>...</p><h4>...</h4><p>...</p><h3>まとめ</h3><p>...</p>"
-}
-
-注意点
-- 関連キーワードを自然に配置する。
-- JSON以外のテキストは一切含めない。
-`;
-
-    console.log("🧠 実際に送信されるプロンプト ↓↓↓");
+    console.log("🧠 実行プロンプト：");
     console.log(prompt);
-    console.log("↑↑↑ ここまでが送信プロンプト");
 
-    let generatedText = "";
+    // 🔥 AI生成
+    const raw = await runAIModel(aiConfig, prompt);
 
-    // === AIプロバイダごとに分岐 ===
-    switch ((aiConfig.provider || "").toLowerCase()) {
-      case "gemini":
-      case "google gemini": {
-        const geminiKey = aiConfig.api_key || process.env.VITE_GEMINI_API_KEY;
-        const model = aiConfig.model || "gemini-2.5-flash";
-        const res = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              contents: [{ parts: [{ text: prompt }] }],
-              generationConfig: {
-                temperature: aiConfig.temperature ?? 0.7,
-                maxOutputTokens: aiConfig.max_tokens ?? 4000,
-              },
-            }),
-          }
-        );
-        const data = await res.json();
-        generatedText =
-          data?.candidates?.[0]?.content?.parts?.[0]?.text || "Geminiでの生成に失敗しました。";
-        break;
-      }
+    // 🔍 JSON抽出
+    const match = raw.match(/\{[\s\S]*\}/);
+    if (!match) throw new Error("JSON構造が見つかりませんでした");
 
-      case "openai": {
-        const openaiKey = aiConfig.api_key || process.env.OPENAI_API_KEY;
-        const model = aiConfig.model || "gpt-4o-mini";
-        const res = await fetch("https://api.openai.com/v1/chat/completions", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${openaiKey}`,
-          },
-          body: JSON.stringify({
-            model,
-            messages: [{ role: "user", content: prompt }],
-            temperature: aiConfig.temperature ?? 0.7,
-            max_tokens: aiConfig.max_tokens ?? 4000,
-          }),
-        });
-        const data = await res.json();
-        generatedText = data?.choices?.[0]?.message?.content || "OpenAIでの生成に失敗しました。";
-        break;
-      }
+    const article = JSON.parse(match[0]);
 
-      case "anthropic claude": {
-        const claudeKey = aiConfig.api_key || process.env.CLAUDE_API_KEY;
-        const model = aiConfig.model || "claude-3-sonnet-20240229";
-        const res = await fetch("https://api.anthropic.com/v1/messages", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-api-key": claudeKey,
-            "anthropic-version": "2023-06-01",
-          },
-          body: JSON.stringify({
-            model,
-            max_tokens: aiConfig.max_tokens ?? 4000,
-            temperature: aiConfig.temperature ?? 0.7,
-            messages: [{ role: "user", content: prompt }],
-          }),
-        });
-        const data = await res.json();
-        generatedText = data?.content?.[0]?.text || "Claudeでの生成に失敗しました。";
-        break;
-      }
-
-      default:
-        throw new Error(`未対応のAIプロバイダです: ${aiConfig.provider}`);
-    }
-
-    // ✅ JSON形式を解析
-    let article = { title: "", content: "" };
-    try {
-      const match = generatedText.match(/\{[\s\S]*\}/);
-      if (match) {
-        article = JSON.parse(match[0]);
-      } else {
-        throw new Error("JSON構造が見つかりませんでした。");
-      }
-    } catch (e) {
-      console.error("JSON解析エラー:", e);
-      throw new Error("AI出力の解析に失敗しました。");
-    }
-
-    // ✅ 不要な改行コード・\n除去
+    // 🔧 不要な改行削除
     article.content = article.content
       .replace(/\\n|\\r|\\t/g, "")
       .replace(/\n+/g, "")
       .replace(/\s{2,}/g, " ")
       .trim();
 
-    // ✅ 実際の記事URL（WordPressのルートURLを使用）
-    const postUrl = `${wp_url?.replace(/\/$/, "")}/`; // 最後のスラッシュ重複防止
-
     return {
       statusCode: 200,
       body: JSON.stringify({
         title: article.title,
         content: article.content,
-        keyword,
-        post_url: postUrl, // ← WordPress確認リンク
-      }),
+        keyword: center, // ←中心テーマを返す
+        post_url: `${wp_url?.replace(/\/$/, "")}/`
+      })
     };
-  } catch (error) {
-    console.error("generate-article エラー:", error);
+  } catch (e) {
+    console.error("❌ generate-article エラー:", e);
     return {
       statusCode: 500,
-      body: JSON.stringify({ error: (error as Error).message }),
+      body: JSON.stringify({ error: e.message })
     };
   }
 };
