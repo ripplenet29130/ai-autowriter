@@ -98,7 +98,6 @@ export default function ArticleGenerator() {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${supabaseAnonKey}`,
       },
       body: JSON.stringify({
       ai_config_id: selectedAiConfigId,
