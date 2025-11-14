@@ -9,7 +9,6 @@ export default function AISettings() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [language, setLanguage] = useState(config.language || "ja");
 
   const [formData, setFormData] = useState({
     name: '',
@@ -22,6 +21,7 @@ export default function AISettings() {
     tone: 'ビジネス',
     article_length: '中（1000〜1500字）',
     style: 'SEO重視',
+    language: 'ja',
   });
 
   useEffect(() => {
@@ -85,6 +85,7 @@ export default function AISettings() {
       tone: formData.tone,
       article_length: formData.article_length,
       style: formData.style,
+      language: formData.language,
     };
 
     let error;
@@ -318,10 +319,15 @@ export default function AISettings() {
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1">出力言語</label>
+              <label className="block text-xs font-medium text-gray-700 mb-1">
+                出力言語
+              </label>
+            
               <select
-                value={language}
-                onChange={(e) => setLanguage(e.target.value)}
+                value={editData.language}
+                onChange={(e) =>
+                  setEditData({ ...editData, language: e.target.value })
+                }
                 className="w-full border rounded px-3 py-2"
               >
                 <option value="ja">日本語</option>
@@ -330,6 +336,7 @@ export default function AISettings() {
                 <option value="ko">한국어（Korean）</option>
               </select>
             </div>
+
 
 
             <div className="flex items-center">
