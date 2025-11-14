@@ -6,9 +6,10 @@
 import { createClient } from "@supabase/supabase-js";
 
 const supabase = createClient(
-  import.meta.env.VITE_SUPABASE_URL!,
-  import.meta.env.VITE_SUPABASE_SERVICE_KEY!
+  process.env.SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_KEY!
 );
+
 
 /* -----------------------------------------------
   プロンプト生成（中心テーマのみ使用）
