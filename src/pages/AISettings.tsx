@@ -9,6 +9,7 @@ export default function AISettings() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [language, setLanguage] = useState(config.language || "ja");
 
   const [formData, setFormData] = useState({
     name: '',
@@ -315,6 +316,21 @@ export default function AISettings() {
                 <option value="リスト形式">リスト形式</option>
               </select>
             </div>
+
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">出力言語</label>
+              <select
+                value={language}
+                onChange={(e) => setLanguage(e.target.value)}
+                className="w-full border rounded px-3 py-2"
+              >
+                <option value="ja">日本語</option>
+                <option value="en">English</option>
+                <option value="zh">中文（Chinese）</option>
+                <option value="ko">한국어（Korean）</option>
+              </select>
+            </div>
+
 
             <div className="flex items-center">
               <input
