@@ -93,9 +93,8 @@ export default function ArticleGenerator() {
     // ✅ Supabase Edge Function 呼び出し
     const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
     const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-     
-    // ✅ Netlify Functions の呼び出し
-    const response = await fetch(`/.netlify/functions/generate-article`, {
+
+    const response = await fetch(`${supabaseUrl}/functions/v1/generate-article`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
