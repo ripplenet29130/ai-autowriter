@@ -8,8 +8,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     { path: '/', label: 'ダッシュボード', icon: LayoutDashboard },
     { path: '/ai-settings', label: 'AI設定', icon: Brain },
     { path: '/wp-settings', label: 'WordPress設定', icon: Globe },
-    { path: '/scheduler', label: 'スケジューラー', icon: Calendar },
     { path: '/trend-analysis', label: 'トレンド分析', icon: TrendingUp },
+    { path: '/scheduler', label: 'スケジューラー', icon: Calendar },
     { path: '/article-generator', label: '記事生成', icon: FileText },
   ];
 
