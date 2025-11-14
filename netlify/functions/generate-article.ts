@@ -44,12 +44,12 @@ export const handler: Handler = async (event) => {
     }
 
     // ------------------------------------------------------
-    // ② 中心テーマを抽出（related_keywords から 1つ）
+    // ② 中心テーマ（関連キーワードから1つ）
     // ------------------------------------------------------
     const center =
       Array.isArray(related_keywords) && related_keywords.length > 0
         ? related_keywords[Math.floor(Math.random() * related_keywords.length)]
-        : keyword; // fallback
+        : keyword;
 
     // ------------------------------------------------------
     // ③ プロンプト生成（中心テーマのみ）
@@ -60,20 +60,20 @@ export const handler: Handler = async (event) => {
     console.log(prompt);
 
     // ------------------------------------------------------
-    // ④ AIへ送信
+    // ④ AIへ送信（引数順に注意）
     // ------------------------------------------------------
-    const rawOutput = await callAI(aiConfig, prompt);
+    const rawOutput = await callAI(prompt, aiConfig);
 
     console.log("=== AI 生出力 ===");
     console.log(rawOutput);
 
     // ------------------------------------------------------
-    // ⑤ JSON解析
+    // ⑤ JSON を解析
     // ------------------------------------------------------
     const article = parseArticle(rawOutput);
 
     // ------------------------------------------------------
-    // ⑥ WordPress URL整形
+    // ⑥ WordPress URL 整形
     // ------------------------------------------------------
     const postUrl = `${wp_url?.replace(/\/$/, "")}/`;
 
