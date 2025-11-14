@@ -51,6 +51,7 @@ export default function AISettings() {
           tone: latest.tone || 'ビジネス',
           article_length: latest.article_length || '中（1000〜1500字）',
           style: latest.style || 'SEO重視',
+          language: latest.language || 'ja',
         });
       }
     }
@@ -116,6 +117,7 @@ export default function AISettings() {
         tone: 'ビジネス',
         article_length: '中（1000〜1500字）',
         style: 'SEO重視',
+        language: 'ja',
       });
       setEditingId(null);
     }
@@ -202,6 +204,7 @@ export default function AISettings() {
       tone: config.tone || 'ビジネス',
       article_length: config.article_length || '中（1000〜1500字）',
       style: config.style || 'SEO重視',
+      language: config.language || 'ja',
     });
 
     const handleSave = () => {
