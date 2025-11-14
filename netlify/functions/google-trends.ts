@@ -118,4 +118,12 @@ export const handler: Handler = async (event) => {
       }),
     };
   } catch (e) {
-    ret
+    return {
+      statusCode: 500,
+      body: JSON.stringify({
+        error: "Google Trends Error",
+        details: String(e),
+      }),
+    };
+  }
+};
