@@ -6,7 +6,7 @@
 import type { Handler } from "@netlify/functions";
 import { createClient } from "@supabase/supabase-js";
 
-// 🔥 共通AIエンジンを読み込み
+// 🔥 共通AIエンジン
 import {
   buildUnifiedPrompt,
   callAI,
@@ -21,7 +21,9 @@ const supabase = createClient(
 export const handler: Handler = async (event) => {
   try {
     const body = JSON.parse(event.body || "{}");
-    const { ai_config_id, keyword, related_keywords = [], wp_url } = body;
+
+    // 🟦 フロント側から送った「center」を受け取る
+    const { ai_config_id, center, wp_url } = body;
 
     if (!ai_config_id) {
       return {
@@ -44,15 +46,7 @@ export const handler: Handler = async (event) => {
     }
 
     // ------------------------------------------------------
-    // ② 中心テーマ（関連キーワードから1つ）
-    // ------------------------------------------------------
-    const center =
-      Array.isArray(related_keywords) && related_keywords.length > 0
-        ? related_keywords[Math.floor(Math.random() * related_keywords.length)]
-        : keyword;
-
-    // ------------------------------------------------------
-    // ③ プロンプト生成（中心テーマのみ）
+    // ② プロンプト生成（中心テーマはフロントからの center）
     // ------------------------------------------------------
     const prompt = buildUnifiedPrompt(center, aiConfig);
 
@@ -60,25 +54,25 @@ export const handler: Handler = async (event) => {
     console.log(prompt);
 
     // ------------------------------------------------------
-    // ④ AIへ送信（引数順に注意）
+    // ③ AIへ送信（引数順の修正）
     // ------------------------------------------------------
-    const rawOutput = await callAI(prompt, aiConfig);
+    const rawOutput = await callAI(aiConfig, prompt);
 
     console.log("=== AI 生出力 ===");
     console.log(rawOutput);
 
     // ------------------------------------------------------
-    // ⑤ JSON を解析
+    // ④ JSON を解析
     // ------------------------------------------------------
     const article = parseArticle(rawOutput);
 
     // ------------------------------------------------------
-    // ⑥ WordPress URL 整形
+    // ⑤ WordPress URL 整形
     // ------------------------------------------------------
     const postUrl = `${wp_url?.replace(/\/$/, "")}/`;
 
     // ------------------------------------------------------
-    // ⑦ レスポンス返却
+    // ⑥ レスポンス返却
     // ------------------------------------------------------
     return {
       statusCode: 200,
