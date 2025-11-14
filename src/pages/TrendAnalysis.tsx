@@ -737,25 +737,5 @@ export default function TrendAnalysis() {
   );
 }
 
-/** 日本の急上昇ワード（フロント RSS） */
-async function fetchDailyRising() {
-  try {
-    const xml = await fetch(
-      "https://trends.google.com/trends/trendingsearches/daily/rss?geo=JP"
-    ).then((r) => r.text());
-
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(xml, "text/xml");
-
-    const items = doc.querySelectorAll("item title");
-
-    return Array.from(items)
-      .map((item) => item.textContent || "")
-      .slice(0, 10);
-  } catch (e) {
-    console.error("急上昇ワード取得エラー", e);
-    return [];
-  }
-}
 
       
