@@ -1,3 +1,7 @@
+// ==============================================
+// TrendAnalysis.tsx（完全最新版・Netlify対応）
+// ==============================================
+
 import { useState, useEffect } from "react";
 import { supabase, AIConfig } from "../lib/supabase";
 import {
@@ -17,6 +21,7 @@ interface TrendKeyword {
   related_keywords: string[];
   ai_config_id?: string;
   rising_keywords?: string[];
+  trend_score?: any;
   source: string;
   created_at: string;
 }
@@ -30,7 +35,7 @@ export default function TrendAnalysis() {
   const [relatedKeywords, setRelatedKeywords] = useState<string[]>([]);
   const [selectedKeywords, setSelectedKeywords] = useState<string[]>([]);
   const [savedKeywords, setSavedKeywords] = useState<TrendKeyword[]>([]);
-  const [googleTrends, setGoogleTrends] = useState<any[]>([]);
+  const [googleTrends, setGoogleTrends] = useState<TrendKeyword[]>([]);
 
   const [loading, setLoading] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
@@ -49,62 +54,60 @@ export default function TrendAnalysis() {
   const [editListKeywords, setEditListKeywords] = useState<string[]>([]);
   const [editKeywordInput, setEditKeywordInput] = useState("");
 
-  /** 🔹 初期読み込み */
+  // 初期読み込み
   useEffect(() => {
     loadAiConfigs();
     loadSavedKeywords();
     loadTrends();
   }, []);
 
-  /** 🔹 AI設定一覧を取得 */
+  // AI設定読み込み
   const loadAiConfigs = async () => {
-    const { data, error } = await supabase
+    const { data } = await supabase
       .from("ai_configs")
       .select("*")
       .order("created_at", { ascending: false });
-    if (!error && data && data.length > 0) {
+
+    if (data) {
       setAiConfigs(data);
-      const activeConfig =
+      const active =
         data.find((c) => c.provider === "Gemini") || data[0];
-      setSelectedAiConfigId(activeConfig.id);
+      setSelectedAiConfigId(active?.id || "");
     }
   };
 
-  /** 🔹 保存済みキーワードを取得 */
+  // 保存済みキーワード読み込み
   const loadSavedKeywords = async () => {
-    const { data, error } = await supabase
+    const { data } = await supabase
       .from("trend_keywords")
       .select("*")
       .order("created_at", { ascending: false });
-    if (!error && data) setSavedKeywords(data);
+
+    if (data) setSavedKeywords(data);
   };
 
-  /** 🔹 トレンドデータ取得 */
+  // Googleトレンド最新5件
   const loadTrends = async () => {
-    const { data, error } = await supabase
+    const { data } = await supabase
       .from("trend_keywords")
       .select("keyword, trend_score, rising_keywords, created_at")
       .order("created_at", { ascending: false })
       .limit(5);
-    if (!error && data) setGoogleTrends(data);
-    else console.error("トレンドデータ取得エラー:", error?.message);
+
+    if (data) setGoogleTrends(data);
   };
 
+  // トースト
   const showMessage = (type: "success" | "error", text: string) => {
     setMessage({ type, text });
     setTimeout(() => setMessage(null), 3000);
   };
 
-  /** 🔹 AI分析 */
+  // 🔹 AI分析（Netlify Function）
   const handleAnalyzeAI = async () => {
-    if (!keyword.trim())
-      return showMessage("error", "キーワードを入力してください");
-    if (!selectedAiConfigId)
-      return showMessage("error", "AI設定を選択してください");
+    if (!keyword.trim()) return showMessage("error", "キーワードを入力してください");
 
     setAnalyzing(true);
-    setRelatedKeywords([]);
-
     try {
       const response = await fetch("/.netlify/functions/ai-suggestions", {
         method: "POST",
@@ -115,139 +118,134 @@ export default function TrendAnalysis() {
         }),
       });
 
-      if (!response.ok) throw new Error("AI分析に失敗しました");
+      const json = await response.json();
+      const kws = json.related_keywords || [];
 
-      const result = await response.json();
-      const keywords = result.related_keywords || [];
-      setRelatedKeywords(keywords);
-      setSelectedKeywords(keywords);
-      showMessage(
-        "success",
-        `${keywords.length}件のキーワードを抽出しました`
-      );
-    } catch (error) {
-      console.error("AI分析エラー:", error);
+      setRelatedKeywords(kws);
+      setSelectedKeywords(kws);
+
+      showMessage("success", `${kws.length}件のキーワードを抽出しました`);
+    } catch (e) {
       showMessage("error", "AI分析に失敗しました");
-    } finally {
-      setAnalyzing(false);
     }
+    setAnalyzing(false);
   };
 
-  /** 🔹 Googleトレンド分析 */
+  // 🔹 Googleトレンド（Netlify Function）
   const handleAnalyzeGoogle = async () => {
-    if (!keyword.trim())
-      return showMessage("error", "キーワードを入力してください");
+    if (!keyword.trim()) return showMessage("error", "キーワードを入力してください");
 
     setAnalyzing(true);
-
     try {
-      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-      const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+      const response = await fetch("/.netlify/functions/google-trends", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          keyword: keyword.trim(),
+          timeRange: "now 7-d",
+          geo: "JP",
+        }),
+      });
 
-      const response = await fetch(
-        `${supabaseUrl}/functions/v1/google-trends`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${supabaseAnonKey}`,
-          },
-          body: JSON.stringify({
-            keyword: keyword.trim(),
-            timeRange: "now 7-d",
-            geo: "JP",
-          }),
-        }
-      );
-
-      if (!response.ok) throw new Error("Googleトレンド分析に失敗しました");
-
-      const result = await response.json();
-      showMessage("success", "Googleトレンドデータを取得しました");
-      console.log("Googleトレンド結果:", result);
-    } catch (error) {
-      console.error("Googleトレンド分析エラー:", error);
-      showMessage("error", "Googleトレンド分析に失敗しました");
-    } finally {
-      setAnalyzing(false);
+      const json = await response.json();
+      console.log("Google Trend:", json);
+      showMessage("success", "Googleトレンドを取得しました");
+    } catch (e) {
+      showMessage("error", "Googleトレンドの取得に失敗しました");
     }
+    setAnalyzing(false);
   };
 
-  /** 🔹 分析切替 */
   const handleAnalyze = () =>
     activeTab === "ai" ? handleAnalyzeAI() : handleAnalyzeGoogle();
 
-  /** 🔹 保存 */
+  // 🔹 キーワード保存（AI結果）
   const handleSave = async () => {
     if (selectedKeywords.length === 0)
-      return showMessage("error", "保存するキーワードを選択してください");
+      return showMessage("error", "キーワードを選択してください");
 
     setLoading(true);
-    try {
-      const keywordTrimmed = keyword.trim();
-      if (!keywordTrimmed) {
-        showMessage("error", "キーワードを入力してください");
-        setLoading(false);
-        return;
-      }
 
-      const saveData = {
-        keyword: keywordTrimmed,
+    try {
+      const base = {
+        keyword: keyword.trim(),
         related_keywords: selectedKeywords,
         ai_config_id: selectedAiConfigId,
         source: "ai",
         created_at: new Date().toISOString(),
       };
 
-      const { error } = await supabase.from("trend_keywords").insert(saveData);
+      await supabase.from("trend_keywords").insert(base);
 
-      if (error) throw error;
+      showMessage("success", "AIキーワードを保存しました");
 
-      showMessage("success", "キーワードを保存しました");
+      // Googleトレンドを続けて取得
+      await handleAnalyzeGoogleAfterSave(keyword.trim());
 
-      handleAnalyzeGoogleAfterSave(keywordTrimmed);
-
-      await loadSavedKeywords();
+      loadSavedKeywords();
 
       setKeyword("");
       setRelatedKeywords([]);
       setSelectedKeywords([]);
     } catch (e) {
-      console.error("保存エラー:", e);
-      showMessage("error", "保存中にエラーが発生しました");
-    } finally {
-      setLoading(false);
+      showMessage("error", "保存に失敗しました");
+    }
+
+    setLoading(false);
+  };
+
+  // 🔹 Googleトレンド → 自動更新（Netlify版）
+  const handleAnalyzeGoogleAfterSave = async (kw: string) => {
+    try {
+      const response = await fetch("/.netlify/functions/google-trends", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          keyword: kw,
+          timeRange: "now 7-d",
+          geo: "JP",
+        }),
+      });
+
+      const json = await response.json();
+
+      await supabase
+        .from("trend_keywords")
+        .update({
+          trend_score: json.trend_score,
+          rising_keywords: json.rising,
+          source: "hybrid",
+        })
+        .eq("keyword", kw);
+    } catch (err) {
+      console.log("Google Auto Update failed:", err);
     }
   };
 
-  /** 🔹 選択キーワードをキーワードリスト管理に移す */
+  // 🔹 リストに転記
   const handleTransferToList = () => {
-    if (selectedKeywords.length === 0) {
-      return showMessage("error", "転記するキーワードを選択してください");
-    }
+    if (selectedKeywords.length === 0)
+      return showMessage("error", "転記するキーワードがありません");
 
     setManualMode("new");
     setNewListName(keyword.trim());
     setNewListKeywords([...selectedKeywords]);
 
-    showMessage("success", `${selectedKeywords.length}件のキーワードを転記しました`);
-
     setTimeout(() => {
-      const listSection = document.querySelector('[data-section="keyword-list"]');
-      if (listSection) {
-        listSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }
-    }, 100);
+      const el = document.querySelector('[data-section="keyword-list"]');
+      el?.scrollIntoView({ behavior: "smooth" });
+    }, 200);
   };
 
-  /** 🔹 キーワード選択トグル */
+  // 🔹 キーワード選択
   const handleToggleKeyword = (kw: string) => {
     setSelectedKeywords((prev) =>
-      prev.includes(kw) ? prev.filter((k) => k !== kw) : [...prev, kw]
+      prev.includes(kw)
+        ? prev.filter((x) => x !== kw)
+        : [...prev, kw]
     );
   };
 
-  /** 🔹 全選択/全解除 */
   const handleToggleAll = () => {
     if (selectedKeywords.length === relatedKeywords.length) {
       setSelectedKeywords([]);
@@ -256,183 +254,111 @@ export default function TrendAnalysis() {
     }
   };
 
-  /** 🔹 削除 */
+  // 🔹 保存済み削除
   const handleDelete = async (id: string) => {
-    if (!confirm("このキーワードを削除してもよろしいですか？")) return;
+    if (!confirm("削除しますか？")) return;
 
-    const { error } = await supabase.from("trend_keywords").delete().eq("id", id);
-    if (error) return showMessage("error", "削除に失敗しました");
-
-    showMessage("success", "削除しました");
+    await supabase.from("trend_keywords").delete().eq("id", id);
     loadSavedKeywords();
   };
 
-  /** 🔹 新規リスト：キーワード追加 */
+  // 🔹 新規リストの追加
   const handleAddNewKeyword = () => {
-    if (!newKeywordInput.trim()) return showMessage("error", "キーワードを入力してください");
+    if (!newKeywordInput.trim()) return;
 
-    // カンマ区切りで複数キーワードを処理
-    const keywords = newKeywordInput
+    const arr = newKeywordInput
       .split(",")
-      .map((kw) => kw.trim())
-      .filter((kw) => kw.length > 0);
+      .map((x) => x.trim())
+      .filter((x) => x.length > 0);
 
-    const newKeywords: string[] = [];
-    const duplicates: string[] = [];
+    const newOnes = arr.filter((x) => !newListKeywords.includes(x));
 
-    keywords.forEach((kw) => {
-      if (newListKeywords.includes(kw)) {
-        duplicates.push(kw);
-      } else {
-        newKeywords.push(kw);
-      }
-    });
-
-    if (newKeywords.length > 0) {
-      setNewListKeywords([...newListKeywords, ...newKeywords]);
-      setNewKeywordInput("");
-
-      if (newKeywords.length > 1) {
-        showMessage("success", `${newKeywords.length}件のキーワードを追加しました`);
-      }
-    }
-
-    if (duplicates.length > 0 && newKeywords.length === 0) {
-      showMessage("error", "すでに追加されています");
-    }
+    setNewListKeywords([...newListKeywords, ...newOnes]);
+    setNewKeywordInput("");
   };
 
-  /** 🔹 新規リスト：キーワード削除 */
-  const handleRemoveNewKeyword = (index: number) => {
-    setNewListKeywords(newListKeywords.filter((_, i) => i !== index));
+  const handleRemoveNewKeyword = (i: number) => {
+    setNewListKeywords(newListKeywords.filter((_, idx) => idx !== i));
   };
 
-  /** 🔹 新規リスト：保存 */
+  // 🔹 新規リスト保存
   const handleSaveNewList = async () => {
-    if (!newListName.trim()) {
-      return showMessage("error", "リスト名を入力してください");
-    }
-    if (newListKeywords.length === 0) {
-      return showMessage("error", "キーワードを1つ以上追加してください");
-    }
+    if (!newListName.trim()) return showMessage("error", "名前を入力してください");
+    if (newListKeywords.length === 0)
+      return showMessage("error", "キーワードを追加してください");
 
     setLoading(true);
-    try {
-      const saveData = {
-        keyword: newListName.trim(),
-        related_keywords: newListKeywords,
-        ai_config_id: selectedAiConfigId || null,
-        source: "manual",
-        created_at: new Date().toISOString(),
-      };
 
-      const { error } = await supabase.from("trend_keywords").insert(saveData);
-
-      if (error) throw error;
-
-      showMessage("success", "キーワードリストを保存しました");
-      await loadSavedKeywords();
-
-      setNewListName("");
-      setNewListKeywords([]);
-    } catch (e) {
-      console.error("保存エラー:", e);
-      showMessage("error", "保存中にエラーが発生しました");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  /** 🔹 編集リスト：選択時 */
-  const handleSelectEditList = (id: string) => {
-    const selected = savedKeywords.find((kw) => kw.id === id);
-    if (selected) {
-      setEditListId(id);
-      setEditListName(selected.keyword);
-      setEditListKeywords([...selected.related_keywords]);
-    }
-  };
-
-  /** 🔹 編集リスト：キーワード追加 */
-  const handleAddEditKeyword = () => {
-    if (!editKeywordInput.trim()) return showMessage("error", "キーワードを入力してください");
-
-    // カンマ区切りで複数キーワードを処理
-    const keywords = editKeywordInput
-      .split(",")
-      .map((kw) => kw.trim())
-      .filter((kw) => kw.length > 0);
-
-    const newKeywords: string[] = [];
-    const duplicates: string[] = [];
-
-    keywords.forEach((kw) => {
-      if (editListKeywords.includes(kw)) {
-        duplicates.push(kw);
-      } else {
-        newKeywords.push(kw);
-      }
+    await supabase.from("trend_keywords").insert({
+      keyword: newListName.trim(),
+      related_keywords: newListKeywords,
+      ai_config_id: selectedAiConfigId,
+      source: "manual",
+      created_at: new Date().toISOString(),
     });
 
-    if (newKeywords.length > 0) {
-      setEditListKeywords([...editListKeywords, ...newKeywords]);
-      setEditKeywordInput("");
+    showMessage("success", "リストを保存しました");
+    loadSavedKeywords();
 
-      if (newKeywords.length > 1) {
-        showMessage("success", `${newKeywords.length}件のキーワードを追加しました`);
-      }
-    }
+    setNewListName("");
+    setNewListKeywords([]);
 
-    if (duplicates.length > 0 && newKeywords.length === 0) {
-      showMessage("error", "すでに追加されています");
-    }
+    setLoading(false);
   };
 
-  /** 🔹 編集リスト：キーワード削除 */
-  const handleRemoveEditKeyword = (index: number) => {
-    setEditListKeywords(editListKeywords.filter((_, i) => i !== index));
+  // 🔹 編集モードの選択
+  const handleSelectEditList = (id: string) => {
+    const target = savedKeywords.find((x) => x.id === id);
+    if (!target) return;
+
+    setEditListId(target.id);
+    setEditListName(target.keyword);
+    setEditListKeywords([...target.related_keywords]);
   };
 
-  /** 🔹 編集リスト：更新保存 */
+  // 🔹 編集キーワード追加
+  const handleAddEditKeyword = () => {
+    if (!editKeywordInput.trim()) return;
+
+    const arr = editKeywordInput
+      .split(",")
+      .map((x) => x.trim())
+      .filter((x) => x.length > 0);
+
+    const newOnes = arr.filter((x) => !editListKeywords.includes(x));
+
+    setEditListKeywords([...editListKeywords, ...newOnes]);
+    setEditKeywordInput("");
+  };
+
+  const handleRemoveEditKeyword = (i: number) => {
+    setEditListKeywords(editListKeywords.filter((_, idx) => idx !== i));
+  };
+
+  // 🔹 編集保存
   const handleUpdateList = async () => {
-    if (!editListId) return showMessage("error", "リストが選択されていません");
-    if (!editListName.trim()) {
-      return showMessage("error", "リスト名を入力してください");
-    }
-    if (editListKeywords.length === 0) {
-      return showMessage("error", "キーワードを1つ以上追加してください");
-    }
+    if (!editListId) return;
 
-    setLoading(true);
-    try {
-      const { error } = await supabase
-        .from("trend_keywords")
-        .update({
-          keyword: editListName.trim(),
-          related_keywords: editListKeywords,
-        })
-        .eq("id", editListId);
+    await supabase
+      .from("trend_keywords")
+      .update({
+        keyword: editListName.trim(),
+        related_keywords: editListKeywords,
+      })
+      .eq("id", editListId);
 
-      if (error) throw error;
-
-      showMessage("success", "キーワードリストを更新しました");
-      await loadSavedKeywords();
-
-      setEditListId("");
-      setEditListName("");
-      setEditListKeywords([]);
-    } catch (e) {
-      console.error("更新エラー:", e);
-      showMessage("error", "更新中にエラーが発生しました");
-    } finally {
-      setLoading(false);
-    }
+    showMessage("success", "リストを更新しました");
+    loadSavedKeywords();
   };
 
-  const selectedAiConfig = aiConfigs.find((c) => c.id === selectedAiConfigId);
+  // ======= UI =======
+  const selectedAiConfig = aiConfigs.find(
+    (c) => c.id === selectedAiConfigId
+  );
 
   return (
-    <div>
+    <div className="p-4 md:p-8">
+
       {message && (
         <Toast
           type={message.type}
@@ -441,56 +367,39 @@ export default function TrendAnalysis() {
         />
       )}
 
+      {/* ----- タイトル ----- */}
       <div className="mb-8">
         <div className="flex items-center gap-3 mb-2">
           <TrendingUp className="w-8 h-8 text-blue-600" />
-          <h1 className="text-3xl font-bold text-gray-800">トレンド分析</h1>
+          <h1 className="text-3xl font-bold text-gray-800">
+            トレンド分析
+          </h1>
         </div>
         <p className="text-gray-600">
           AI × Googleトレンドでデータドリブンなキーワード戦略を構築
         </p>
       </div>
 
-      {/* 🔸 AI設定なし時 */}
-      {aiConfigs.length === 0 && (
-        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-6">
-          <p className="text-yellow-800 font-medium mb-1">
-            AI設定が未登録です
-          </p>
-          <p className="text-yellow-700 text-sm">
-            Gemini APIキーを登録してください。
-          </p>
-        </div>
-      )}
+      {/* ==============================
+           入力セクション
+      =============================== */}
+      <div className="bg-white rounded-xl shadow-sm border p-8 mb-8">
 
-      {/* 🔸 入力セクション */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-8 mb-8">
-        <h2 className="text-xl font-semibold text-gray-800 mb-6">
-          キーワード分析
-        </h2>
-
-        {/* 設定選択 */}
+        {/* AI設定 */}
         <div className="mb-4">
-          <label className="block text-sm font-medium text-gray-700 mb-2">
-            AI設定
-          </label>
+          <label className="block text-sm mb-2">AI設定</label>
+
           <select
             value={selectedAiConfigId}
             onChange={(e) => setSelectedAiConfigId(e.target.value)}
-            className="w-full px-4 py-3 border border-gray-300 rounded-lg"
+            className="w-full border px-4 py-3 rounded-lg"
           >
-            {aiConfigs.map((config) => (
-              <option key={config.id} value={config.id}>
-                {config.name || `${config.provider} - ${config.model}`}
+            {aiConfigs.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name || `${c.provider} - ${c.model}`}
               </option>
             ))}
           </select>
-          {selectedAiConfig && (
-            <p className="text-xs text-gray-500 mt-1">
-              Temperature: {selectedAiConfig.temperature}, Max Tokens:{" "}
-              {selectedAiConfig.max_tokens}
-            </p>
-          )}
         </div>
 
         {/* キーワード入力 */}
@@ -500,45 +409,47 @@ export default function TrendAnalysis() {
             value={keyword}
             onChange={(e) => setKeyword(e.target.value)}
             placeholder="例: AGA治療"
-            className="flex-1 px-4 py-3 border border-gray-300 rounded-lg"
+            className="flex-1 border px-4 py-3 rounded-lg"
           />
           <button
             onClick={handleAnalyze}
             disabled={analyzing}
-            className="px-6 py-3 bg-blue-600 text-white rounded-lg flex items-center gap-2"
+            className="px-6 py-3 bg-blue-600 text-white rounded-lg"
           >
-            <Search className="w-5 h-5" />
-            {analyzing ? "分析中..." : "分析開始"}
+            {analyzing ? "分析中…" : "分析開始"}
           </button>
         </div>
 
         {/* タブ */}
         <div className="flex gap-4 border-b mb-6">
           <button
-            onClick={() => setActiveTab("ai")}
             className={`px-4 py-2 border-b-2 ${
               activeTab === "ai"
                 ? "border-blue-600 text-blue-600"
                 : "border-transparent text-gray-500"
             }`}
+            onClick={() => setActiveTab("ai")}
           >
             <Brain className="inline w-5 h-5 mr-2" />
             AI分析結果
           </button>
+
           <button
-            onClick={() => setActiveTab("google")}
             className={`px-4 py-2 border-b-2 ${
               activeTab === "google"
                 ? "border-blue-600 text-blue-600"
                 : "border-transparent text-gray-500"
             }`}
+            onClick={() => setActiveTab("google")}
           >
             <Globe className="inline w-5 h-5 mr-2" />
             Googleトレンド
           </button>
         </div>
 
-        {/* 🔹 AI結果 */}
+        {/* ==============================
+            AI（関連キーワード）
+        =============================== */}
         {activeTab === "ai" && relatedKeywords.length > 0 && (
           <div>
             <h3 className="text-lg font-semibold flex items-center gap-2 mb-4">
@@ -546,15 +457,15 @@ export default function TrendAnalysis() {
               AIが提案する関連キーワード
             </h3>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-6">
+            <div className="grid md:grid-cols-2 gap-3 mb-6">
               {relatedKeywords.map((kw, i) => (
                 <div
                   key={i}
                   onClick={() => handleToggleKeyword(kw)}
-                  className={`cursor-pointer rounded-lg px-4 py-3 border-2 transition-all ${
+                  className={`cursor-pointer px-4 py-3 rounded-lg border-2 ${
                     selectedKeywords.includes(kw)
                       ? "bg-blue-100 border-blue-400"
-                      : "bg-gray-50 border-gray-200 hover:border-gray-300"
+                      : "bg-gray-50 border-gray-200"
                   }`}
                 >
                   {kw}
@@ -562,10 +473,10 @@ export default function TrendAnalysis() {
               ))}
             </div>
 
-            <div className="flex gap-3 justify-end">
+            <div className="flex justify-end gap-3">
               <button
                 onClick={handleToggleAll}
-                className="px-6 py-3 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
+                className="px-6 py-3 bg-gray-600 text-white rounded-lg"
               >
                 {selectedKeywords.length === relatedKeywords.length
                   ? "全解除"
@@ -573,8 +484,7 @@ export default function TrendAnalysis() {
               </button>
               <button
                 onClick={handleTransferToList}
-                disabled={loading || selectedKeywords.length === 0}
-                className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                className="px-6 py-3 bg-blue-600 text-white rounded-lg"
               >
                 リストに転記
               </button>
@@ -582,126 +492,129 @@ export default function TrendAnalysis() {
           </div>
         )}
 
-        {/* 🔹 Google結果 */}
+        {/* ==============================
+            Googleトレンド表示
+        =============================== */}
         {activeTab === "google" && (
-          <div className="mt-6">
-            {googleTrends.length === 0 ? (
-              <p className="text-gray-500">まだトレンドデータがありません。</p>
-            ) : (
-              googleTrends.map((trend, i) => (
-                <div
-                  key={i}
-                  className="bg-white border border-gray-200 rounded-lg p-6 mb-6 shadow-sm"
-                >
-                  <h3 className="text-lg font-semibold text-gray-800 mb-2">
-                    {trend.keyword}
-                  </h3>
-
-                  {trend.trend_score?.timeline && (
-                    <div className="mb-4">
-                      <p className="text-sm text-gray-600 mb-2">人気度推移</p>
-                      <div className="space-y-2">
-                        {trend.trend_score.timeline.map((item: any, j: number) => (
-                          <div key={j} className="flex items-center gap-3">
-                            <span className="text-xs text-gray-500 w-20">
-                              {item.time}
-                            </span>
-                            <div className="flex-1 bg-gray-200 rounded-full h-4">
-                              <div
-                                className="bg-blue-600 h-4 rounded-full"
-                                style={{ width: `${item.value}%` }}
-                              ></div>
-                            </div>
-                            <span className="text-xs text-gray-700">
-                              {item.value}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {trend.rising_keywords?.length > 0 && (
-                    <div>
-                      <p className="text-sm text-gray-600 mb-2">上昇キーワード</p>
-                      <div className="flex flex-wrap gap-2">
-                        {trend.rising_keywords.slice(0, 10).map((kw: string, j: number) => (
-                          <span
-                            key={j}
-                            className="px-3 py-1 bg-green-50 border border-green-200 rounded-full text-sm text-green-800"
-                          >
-                            {kw}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              ))
+          <div>
+            {googleTrends.length === 0 && (
+              <p className="text-gray-500">トレンドデータがありません。</p>
             )}
+            {googleTrends.map((trend, i) => (
+              <div
+                key={i}
+                className="p-6 border mb-4 rounded-lg shadow-sm bg-white"
+              >
+                <h3 className="font-semibold text-lg">{trend.keyword}</h3>
+
+                {trend.trend_score?.timeline && (
+                  <>
+                    <p className="text-sm mt-3 mb-2 text-gray-600">
+                      人気度推移
+                    </p>
+
+                    {trend.trend_score.timeline.map((item, j) => (
+                      <div key={j} className="flex items-center gap-3 mb-2">
+                        <span className="text-xs w-20">{item.time}</span>
+                        <div className="flex-1 bg-gray-200 h-3 rounded-full">
+                          <div
+                            className="bg-blue-600 h-3 rounded-full"
+                            style={{ width: `${item.value}%` }}
+                          />
+                        </div>
+                        <span className="text-xs">{item.value}</span>
+                      </div>
+                    ))}
+                  </>
+                )}
+
+                {trend.rising_keywords?.length > 0 && (
+                  <>
+                    <p className="text-sm mt-4 mb-2">上昇キーワード</p>
+                    <div className="flex gap-2 flex-wrap">
+                      {trend.rising_keywords.slice(0, 10).map((kw, j) => (
+                        <span
+                          key={j}
+                          className="px-3 py-1 bg-green-50 border border-green-200 text-green-700 rounded-full text-sm"
+                        >
+                          {kw}
+                        </span>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            ))}
           </div>
         )}
       </div>
 
-      {/* 🔹 キーワードリスト管理セクション */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-8 mb-8" data-section="keyword-list">
-        <h2 className="text-xl font-semibold text-gray-800 mb-6">
+      {/* ==============================
+          キーワードリスト管理
+      =============================== */}
+      <div
+        className="bg-white rounded-xl shadow-sm border p-8 mb-8"
+        data-section="keyword-list"
+      >
+        <h2 className="text-xl font-semibold mb-6">
           キーワードリスト管理
         </h2>
 
         {/* タブ */}
         <div className="flex gap-4 border-b mb-6">
           <button
-            onClick={() => setManualMode("new")}
-            className={`px-4 py-2 border-b-2 font-medium ${
+            className={`px-4 py-2 border-b-2 ${
               manualMode === "new"
                 ? "border-blue-600 text-blue-600"
-                : "border-transparent text-gray-500"
+                : "border-transparent text-gray-600"
             }`}
+            onClick={() => setManualMode("new")}
           >
             新規追加
           </button>
+
           <button
-            onClick={() => setManualMode("edit")}
-            className={`px-4 py-2 border-b-2 font-medium ${
+            className={`px-4 py-2 border-b-2 ${
               manualMode === "edit"
                 ? "border-blue-600 text-blue-600"
-                : "border-transparent text-gray-500"
+                : "border-transparent text-gray-600"
             }`}
+            onClick={() => setManualMode("edit")}
           >
             編集
           </button>
         </div>
 
-        {/* 新規追加モード */}
+        {/* ====================
+            新規追加
+        ==================== */}
         {manualMode === "new" && (
-          <div>
+          <>
+            {/* リスト名 */}
             <div className="mb-4">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                リスト名
-              </label>
+              <label className="text-sm mb-2 block">リスト名</label>
               <input
-                type="text"
                 value={newListName}
                 onChange={(e) => setNewListName(e.target.value)}
-                placeholder="例: AGA治療関連キーワード"
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg"
+                className="w-full px-4 py-3 border rounded-lg"
               />
             </div>
 
+            {/* キーワード */}
             <div className="mb-4">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                キーワード追加
-              </label>
+              <label className="text-sm mb-2 block">キーワード追加</label>
+
               <div className="flex gap-3 mb-3">
                 <input
-                  type="text"
                   value={newKeywordInput}
                   onChange={(e) => setNewKeywordInput(e.target.value)}
-                  onKeyPress={(e) => e.key === "Enter" && handleAddNewKeyword()}
-                  placeholder="キーワードを入力してEnter（複数の場合は,区切り）"
-                  className="flex-1 px-4 py-3 border border-gray-300 rounded-lg"
+                  onKeyDown={(e) =>
+                    e.key === "Enter" && handleAddNewKeyword()
+                  }
+                  className="flex-1 px-4 py-3 border rounded-lg"
+                  placeholder="例: AGA薄毛, 育毛剤効果"
                 />
+
                 <button
                   onClick={handleAddNewKeyword}
                   className="px-6 py-3 bg-blue-600 text-white rounded-lg"
@@ -711,16 +624,16 @@ export default function TrendAnalysis() {
               </div>
 
               {newListKeywords.length > 0 && (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
+                <div className="grid md:grid-cols-2 gap-3">
                   {newListKeywords.map((kw, i) => (
                     <div
                       key={i}
-                      className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 flex justify-between items-center"
+                      className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 flex justify-between"
                     >
                       <span>{kw}</span>
                       <button
                         onClick={() => handleRemoveNewKeyword(i)}
-                        className="text-red-600 hover:bg-red-50 rounded p-1"
+                        className="text-red-500"
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
@@ -732,31 +645,30 @@ export default function TrendAnalysis() {
 
             <button
               onClick={handleSaveNewList}
-              disabled={loading}
-              className="w-full px-6 py-3 bg-green-600 text-white rounded-lg flex items-center justify-center gap-2"
+              className="w-full bg-green-600 text-white py-3 rounded-lg"
             >
-              <Save className="w-5 h-5" />
-              {loading ? "保存中..." : "キーワードリストを保存"}
+              保存する
             </button>
-          </div>
+          </>
         )}
 
-        {/* 編集モード */}
+        {/* ====================
+            編集
+        ==================== */}
         {manualMode === "edit" && (
-          <div>
+          <>
+            {/* リスト選択 */}
             <div className="mb-4">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                編集するリストを選択
-              </label>
+              <label className="block text-sm mb-2">リストを選択</label>
               <select
                 value={editListId}
                 onChange={(e) => handleSelectEditList(e.target.value)}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg"
+                className="w-full border px-4 py-3 rounded-lg"
               >
-                <option value="">リストを選択してください</option>
-                {savedKeywords.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.keyword} ({item.related_keywords.length}件)
+                <option value="">選択してください</option>
+                {savedKeywords.map((x) => (
+                  <option key={x.id} value={x.id}>
+                    {x.keyword}（{x.related_keywords.length}件）
                   </option>
                 ))}
               </select>
@@ -764,32 +676,35 @@ export default function TrendAnalysis() {
 
             {editListId && (
               <>
+                {/* リスト名 */}
                 <div className="mb-4">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <label className="block text-sm mb-2">
                     リスト名
                   </label>
                   <input
-                    type="text"
                     value={editListName}
                     onChange={(e) => setEditListName(e.target.value)}
-                    placeholder="リスト名を入力"
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg"
+                    className="w-full border px-4 py-3 rounded-lg"
                   />
                 </div>
 
+                {/* キーワード */}
                 <div className="mb-4">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <label className="block text-sm mb-2">
                     キーワード編集
                   </label>
+
                   <div className="flex gap-3 mb-3">
                     <input
-                      type="text"
                       value={editKeywordInput}
                       onChange={(e) => setEditKeywordInput(e.target.value)}
-                      onKeyPress={(e) => e.key === "Enter" && handleAddEditKeyword()}
-                      placeholder="キーワードを入力してEnter（複数の場合は,区切り）"
-                      className="flex-1 px-4 py-3 border border-gray-300 rounded-lg"
+                      onKeyDown={(e) =>
+                        e.key === "Enter" && handleAddEditKeyword()
+                      }
+                      className="flex-1 border px-4 py-3 rounded-lg"
+                      placeholder="例: AGA原因, 育毛サプリ"
                     />
+
                     <button
                       onClick={handleAddEditKeyword}
                       className="px-6 py-3 bg-blue-600 text-white rounded-lg"
@@ -798,145 +713,102 @@ export default function TrendAnalysis() {
                     </button>
                   </div>
 
-                  {editListKeywords.length > 0 && (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
-                      {editListKeywords.map((kw, i) => (
-                        <div
-                          key={i}
-                          className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 flex justify-between items-center"
+                  <div className="grid md:grid-cols-2 gap-3">
+                    {editListKeywords.map((kw, i) => (
+                      <div
+                        key={i}
+                        className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 flex justify-between"
+                      >
+                        <span>{kw}</span>
+
+                        <button
+                          onClick={() => handleRemoveEditKeyword(i)}
+                          className="text-red-500"
                         >
-                          <span>{kw}</span>
-                          <button
-                            onClick={() => handleRemoveEditKeyword(i)}
-                            className="text-red-600 hover:bg-red-50 rounded p-1"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
                 </div>
 
                 <button
                   onClick={handleUpdateList}
-                  disabled={loading}
-                  className="w-full px-6 py-3 bg-green-600 text-white rounded-lg flex items-center justify-center gap-2"
+                  className="w-full bg-green-600 text-white py-3 rounded-lg"
                 >
-                  <Save className="w-5 h-5" />
-                  {loading ? "更新中..." : "変更を保存"}
+                  保存更新
                 </button>
               </>
             )}
-          </div>
+          </>
         )}
       </div>
 
-      {/* 🔹 保存済みキーワード一覧 */}
-      {savedKeywords.length > 0 && (
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-8">
-          <h2 className="text-xl font-semibold text-gray-800 mb-6">
-            保存済みキーワード
-          </h2>
-          <div className="space-y-4">
-            {savedKeywords.map((item) => (
-              <div
-                key={item.id}
-                className="border border-gray-200 rounded-lg p-6 hover:border-blue-300 transition-colors"
-              >
-                <div className="flex justify-between items-start mb-4">
-                  <div>
-                    <h3 className="text-lg font-semibold">{item.keyword}</h3>
-                    <p className="text-xs text-gray-500">
-                      {new Date(item.created_at).toLocaleString("ja-JP")}
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => handleDelete(item.id)}
-                    className="text-red-600 hover:bg-red-50 rounded-lg p-2"
-                  >
-                    <Trash2 className="w-5 h-5" />
-                  </button>
-                </div>
+      {/* ==============================
+          保存済み一覧
+      =============================== */}
+      <div className="bg-white rounded-xl shadow-sm border p-8">
+        <h2 className="text-xl font-semibold mb-6">
+          保存済みキーワード
+        </h2>
 
-                {item.related_keywords?.length > 0 && (
-                  <div className="mb-2">
-                    <p className="text-sm font-medium text-gray-700 mb-2">
-                      AI提案キーワード
-                    </p>
-                    <div className="flex flex-wrap gap-2">
-                      {item.related_keywords.map((kw, j) => (
-                        <span
-                          key={j}
-                          className="px-3 py-1 bg-gray-100 rounded-full text-sm"
-                        >
-                          {kw}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {item.rising_keywords?.length > 0 && (
-                  <div>
-                    <p className="text-sm font-medium text-gray-700 mb-2">
-                      上昇トレンド
-                    </p>
-                    <div className="flex flex-wrap gap-2">
-                      {item.rising_keywords.slice(0, 5).map((kw, j) => (
-                        <span
-                          key={j}
-                          className="px-3 py-1 bg-green-50 border border-green-200 rounded-full text-sm text-green-800"
-                        >
-                          {kw}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
+        {savedKeywords.map((item) => (
+          <div
+            key={item.id}
+            className="border rounded-lg p-6 mb-4 hover:border-blue-300 transition"
+          >
+            <div className="flex justify-between">
+              <div>
+                <h3 className="text-lg font-semibold">{item.keyword}</h3>
+                <p className="text-xs text-gray-500">
+                  {new Date(item.created_at).toLocaleString("ja-JP")}
+                </p>
               </div>
-            ))}
+
+              <button
+                onClick={() => handleDelete(item.id)}
+                className="text-red-600"
+              >
+                <Trash2 className="w-5 h-5" />
+              </button>
+            </div>
+
+            {item.related_keywords?.length > 0 && (
+              <div className="mt-4">
+                <p className="font-medium text-sm mb-2">
+                  AI関連キーワード
+                </p>
+                <div className="flex gap-2 flex-wrap">
+                  {item.related_keywords.map((kw, j) => (
+                    <span
+                      key={j}
+                      className="px-3 py-1 bg-gray-100 rounded-full text-sm"
+                    >
+                      {kw}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {item.rising_keywords?.length > 0 && (
+              <div className="mt-4">
+                <p className="font-medium text-sm mb-2">上昇ワード</p>
+                <div className="flex gap-2 flex-wrap">
+                  {item.rising_keywords.slice(0, 5).map((kw, j) => (
+                    <span
+                      key={j}
+                      className="px-3 py-1 bg-green-50 border border-green-200 rounded-full text-sm"
+                    >
+                      {kw}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
-        </div>
-      )}
+        ))}
+      </div>
     </div>
   );
-}
-
-/** ✅ Googleトレンド自動保存後更新 */
-async function handleAnalyzeGoogleAfterSave(kw: string) {
-  try {
-    // ✅ Netlify Functions経由に変更
-    const response = await fetch("/.netlify/functions/google-trends", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        keyword: kw,
-        timeRange: "now 7-d", // 過去7日
-        geo: "JP", // 日本
-      }),
-    });
-
-    if (!response.ok) throw new Error("Googleトレンド分析に失敗しました");
-
-    const result = await response.json();
-
-    // ✅ Supabaseに保存
-    const { error } = await supabase
-      .from("trend_keywords")
-      .update({
-        trend_score: result.trend_score,
-        rising_keywords: result.rising,
-        source: "hybrid",
-      })
-      .eq("keyword", kw);
-
-    if (error) throw error;
-
-    console.log("✅ Googleトレンド更新完了:", kw);
-  } catch (err) {
-    console.error("❌ Googleトレンド自動分析エラー:", err);
-  }
 }
