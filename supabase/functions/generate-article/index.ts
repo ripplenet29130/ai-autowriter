@@ -4,10 +4,9 @@ import { createClient } from "npm:@supabase/supabase-js@2.57.4";
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
+  "Access-Control-Allow-Headers": "*",
   "Access-Control-Max-Age": "86400",
 };
-
 
 interface RequestBody {
   ai_config_id: string;
@@ -154,18 +153,26 @@ function parseArticle(rawText: string): { title: string; content: string } {
 }
 
 Deno.serve(async (req: Request) => {
-  if (req.method === "OPTIONS") {
-  return new Response("ok", {
-    status: 200,
-    headers: {
-      ...corsHeaders,
-      "Content-Type": "application/json",
-    },
-  });
-}
 
+  // ---------------------------
+  // 🔥 必須：プリフライト CORS
+  // ---------------------------
+  if (req.method === "OPTIONS") {
+    return new Response("ok", {
+      status: 200,
+      headers: {
+        ...corsHeaders,
+        "Content-Type": "application/json",
+      },
+    });
+  }
+
+  // ---------------------------
+  // ここから通常処理
+  // ---------------------------
   try {
-    const { ai_config_id, keyword, related_keywords = [] }: RequestBody = await req.json();
+    const { ai_config_id, keyword, related_keywords = [] }: RequestBody =
+      await req.json();
 
     if (!keyword || !ai_config_id) {
       return new Response(
@@ -181,7 +188,6 @@ Deno.serve(async (req: Request) => {
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
     const { data: aiConfig, error: configError } = await supabase
@@ -191,58 +197,22 @@ Deno.serve(async (req: Request) => {
       .single();
 
     if (configError || !aiConfig) {
-      console.error(`❌ AI設定取得エラー:`, configError);
-      return new Response(
-        JSON.stringify({ error: "AI設定が見つかりません" }),
-        {
-          status: 404,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        }
-      );
+      console.error("❌ AI設定取得エラー:", configError);
+      return new Response(JSON.stringify({ error: "AI設定が見つかりません" }), {
+        status: 404,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
-    if (!aiConfig.api_key) {
-      return new Response(
-        JSON.stringify({ error: "APIキーが設定されていません" }),
-        {
-          status: 400,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        }
-      );
-    }
-
-    console.log(`🤖 AI設定: ${aiConfig.provider} - ${aiConfig.model}`);
-
+    // 中心テーマの抽選
     const center =
       Array.isArray(related_keywords) && related_keywords.length > 0
         ? related_keywords[Math.floor(Math.random() * related_keywords.length)]
         : keyword;
 
-    console.log(`🎯 中心テーマ: ${center}`);
-
     const prompt = buildUnifiedPrompt(center, aiConfig);
-
-    console.log("🧠 送信プロンプト:");
-    console.log(prompt);
-
     const rawOutput = await callAI(aiConfig, prompt);
-
-    console.log("📝 AI生出力:");
-    console.log(rawOutput.substring(0, 500));
-
     const article = parseArticle(rawOutput);
-
-    if (!article.title || !article.content) {
-      return new Response(
-        JSON.stringify({ error: "タイトルまたは本文が生成されませんでした" }),
-        {
-          status: 500,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        }
-      );
-    }
-
-    console.log(`✅ 記事生成成功: ${article.title}`);
 
     return new Response(
       JSON.stringify({
@@ -256,15 +226,12 @@ Deno.serve(async (req: Request) => {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       }
     );
-  } catch (err: unknown) {
-    const errorMessage = err instanceof Error ? err.message : String(err);
-    console.error(`❌ 関数エラー:`, errorMessage);
-    return new Response(
-      JSON.stringify({ error: errorMessage }),
-      {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      }
-    );
+
+  } catch (err) {
+    console.error("❌ 関数エラー:", err);
+    return new Response(JSON.stringify({ error: String(err) }), {
+      status: 500,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
   }
 });
