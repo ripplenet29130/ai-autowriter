@@ -485,6 +485,8 @@ export default function Scheduler() {
 
                       {/* 投稿情報 */}
                       <div className="col-span-2 mt-4 p-4 bg-gray-50 rounded-lg grid grid-cols-2 gap-4">
+                        
+                          {/* 投稿時刻 */}
                         <div>
                           <p className="font-medium mb-1">投稿時刻</p>
                           <p className="flex items-center gap-1">
@@ -492,12 +494,14 @@ export default function Scheduler() {
                             {schedule.post_time}
                           </p>
                         </div>
-
+                        
+  {/* 頻度 */}
                         <div>
                           <p className="font-medium mb-1">頻度</p>
                           <p>{schedule.frequency}</p>
                         </div>
-
+                        
+  {/* サイクル期間 */}
                         <div className="col-span-2">
                           <p className="font-medium mb-1">サイクル期間</p>
                           <p>
@@ -508,6 +512,15 @@ export default function Scheduler() {
                               : '未設定'}
                           </p>
                         </div>
+
+                        {/* 投稿状態 */}
+                        <div>
+                          <p className="font-medium text-gray-700 mb-1">投稿状態</p>
+                          <p className="text-gray-600 text-sm">
+                            {schedule.post_status === "publish" ? "公開" : "下書き"}
+                          </p>
+                        </div>
+
 
                         <div>
                           <p className="font-medium mb-1">前回投稿日時</p>
