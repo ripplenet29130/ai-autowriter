@@ -54,7 +54,12 @@ async function postToWordPress(wp: any, article: { title: string; content: strin
       categoryId = await getCategoryIdByName(wp.default_category);
     }
   }
-
+  
+  // JST投稿日時（必須）
+  const jstDate = new Date(
+    `${now.toISOString().split("T")[0]}T${schedule.post_time}:00+09:00`
+  ).toISOString();
+  
   // ✅ 投稿リクエスト
   const response = await fetch(endpoint, {
     method: "POST",
@@ -68,6 +73,7 @@ async function postToWordPress(wp: any, article: { title: string; content: strin
       content: article.content,
       categories: [categoryId],
       status: schedule.post_status || "publish",
+      date: jstDate,
     }),
   });
 
