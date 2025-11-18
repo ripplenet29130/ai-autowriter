@@ -461,8 +461,8 @@ const fetchMainKeywords = async () => {
 )}
 
 
- {/* === 投稿時刻・頻度 === */}
-<div className="grid grid-cols-2 gap-4 col-span-2">
+{/* === 投稿情報エリア（ここを新しく置き換え） === */}
+<div className="col-span-2 mt-4 p-4 bg-gray-50 rounded-lg grid grid-cols-2 gap-4">
 
   {/* 投稿時刻 */}
   <div>
@@ -479,8 +479,8 @@ const fetchMainKeywords = async () => {
     <p>{schedule.frequency}</p>
   </div>
 
-  {/* === サイクル期間（2カラム横長） === */}
-  <div className="col-span-2 mt-2">
+  {/* サイクル期間（2列） */}
+  <div className="col-span-2">
     <p className="font-medium text-gray-700 mb-1">サイクル期間</p>
     <p>
       {schedule.start_date
@@ -489,8 +489,8 @@ const fetchMainKeywords = async () => {
     </p>
   </div>
 
-  {/* === 前回投稿日時 === */}
-  <div className="mt-2">
+  {/* 前回投稿日時 */}
+  <div>
     <p className="font-medium text-gray-700 mb-1">前回投稿日時</p>
     <p className="text-gray-600 text-sm">
       {schedule.last_run_at
@@ -499,8 +499,8 @@ const fetchMainKeywords = async () => {
     </p>
   </div>
 
-  {/* === 次回投稿予定 === */}
-  <div className="mt-2">
+  {/* 次回投稿予定 */}
+  <div>
     <p className="font-medium text-gray-700 mb-1">次回投稿予定</p>
     <p className="text-gray-600 text-sm">
       {(() => {
@@ -515,7 +515,6 @@ const fetchMainKeywords = async () => {
 
           let nextDate = new Date(today);
 
-          // === 頻度 ===
           switch (schedule.frequency) {
             case "毎日":
               if (now >= today) nextDate.setDate(nextDate.getDate() + 1);
@@ -533,12 +532,10 @@ const fetchMainKeywords = async () => {
               return "未設定";
           }
 
-          // 終了日チェック
           if (schedule.end_date && new Date(schedule.end_date) < nextDate) {
             return "期間終了";
           }
 
-          // フォーマット
           const dateStr = nextDate.toLocaleDateString("ja-JP", {
             year: "numeric",
             month: "2-digit",
