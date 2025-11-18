@@ -870,7 +870,7 @@ export default function Scheduler() {
                           </button>
                         </div>
                       </div> /* 編集エリア終了 */
-                    )} /* ✏️ 編集モード切替 終了 */
+                    )} 
                   </div>
                 </div>
               </div>
