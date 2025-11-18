@@ -820,7 +820,7 @@ const fetchMainKeywords = async () => {
       </button>
     </div>
   </div>
-)}
+))}
 
 </div>
 
