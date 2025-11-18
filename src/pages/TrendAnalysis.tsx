@@ -372,7 +372,7 @@ export default function TrendAnalysis() {
         <div className="flex items-center gap-3 mb-2">
           <TrendingUp className="w-8 h-8 text-blue-600" />
           <h1 className="text-3xl font-bold text-gray-800">
-            トレンド分析
+            キーワード登録
           </h1>
         </div>
         <p className="text-gray-600">
