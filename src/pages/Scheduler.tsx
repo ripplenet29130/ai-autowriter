@@ -825,13 +825,6 @@ const fetchMainKeywords = async () => {
 </div>
 
                   
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
       <div className="mt-8 bg-gray-50 rounded-lg p-6">
         <h3 className="text-lg font-semibold text-gray-800 mb-3">最近の実行ログ</h3>
         <p className="text-sm text-gray-600">実行ログ機能は準備中です。将来のバージョンで追加予定です。</p>
