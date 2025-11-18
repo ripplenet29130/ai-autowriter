@@ -483,105 +483,103 @@ export default function Scheduler() {
                         </div>
                       )}
 
-                      {/* 投稿情報 */}
-                      <div className="col-span-2 mt-4 p-4 bg-gray-50 rounded-lg grid grid-cols-2 gap-4">
-                        
-                          {/* 投稿時刻 */}
-                        <div>
-                          <p className="font-medium mb-1">投稿時刻</p>
-                          <p className="flex items-center gap-1">
-                            <Clock className="w-4 h-4" />
-                            {schedule.post_time}
-                          </p>
-                        </div>
-                        
+                     {/* 投稿情報 */}
+<div className="col-span-2 mt-4 p-4 bg-gray-50 rounded-lg grid grid-cols-2 gap-4">
+  {/* 投稿時刻 */}
+  <div>
+    <p className="font-medium text-gray-700 mb-1">投稿時刻</p>
+    <p className="flex items-center gap-1">
+      <Clock className="w-4 h-4" />
+      {schedule.post_time}
+    </p>
+  </div>
+
   {/* 頻度 */}
-                        <div>
-                          <p className="font-medium mb-1">頻度</p>
-                          <p>{schedule.frequency}</p>
-                        </div>
-                        
-  {/* サイクル期間 */}
-                        <div className="col-span-2">
-                          <p className="font-medium mb-1">サイクル期間</p>
-                          <p>
-                            {schedule.start_date
-                              ? `${schedule.start_date} ～ ${
-                                  schedule.end_date || '未設定'
-                                }`
-                              : '未設定'}
-                          </p>
-                        </div>
+  <div>
+    <p className="font-medium text-gray-700 mb-1">頻度</p>
+    <p>{schedule.frequency}</p>
+  </div>
 
-                        {/* 投稿状態 */}
-                        <div>
-                          <p className="font-medium text-gray-700 mb-1">投稿状態</p>
-                          <p className="text-gray-600 text-sm">
-                            {schedule.post_status === "publish" ? "公開" : "下書き"}
-                          </p>
-                        </div>
+  {/* サイクル期間（左） */}
+  <div>
+    <p className="font-medium text-gray-700 mb-1">サイクル期間</p>
+    <p>
+      {schedule.start_date
+        ? `${schedule.start_date} ～ ${schedule.end_date || "未設定"}`
+        : "未設定"}
+    </p>
+  </div>
 
+  {/* 投稿状態（右） */}
+  <div>
+    <p className="font-medium text-gray-700 mb-1">投稿状態</p>
+    <p className="text-gray-600 text-sm">
+      {schedule.post_status === "publish" ? "公開" : "下書き"}
+    </p>
+  </div>
 
-                        <div>
-                          <p className="font-medium mb-1">前回投稿日時</p>
-                          <p>
-                            {schedule.last_run_at
-                              ? new Date(schedule.last_run_at).toLocaleString('ja-JP')
-                              : '未投稿'}
-                          </p>
-                        </div>
+  {/* 前回投稿日時 */}
+  <div>
+    <p className="font-medium text-gray-700 mb-1">前回投稿日時</p>
+    <p className="text-gray-600 text-sm">
+      {schedule.last_run_at
+        ? new Date(schedule.last_run_at).toLocaleString("ja-JP")
+        : "未投稿"}
+    </p>
+  </div>
 
-                        {/* 次回予定 */}
-                        <div>
-                          <p className="font-medium mb-1">次回投稿予定</p>
-                          <p>
-                            {(() => {
-                              try {
-                                if (!schedule.status) return '停止中';
-                                if (!schedule.post_time || !schedule.frequency) return '未設定';
+  {/* 次回投稿予定 */}
+  <div>
+    <p className="font-medium text-gray-700 mb-1">次回投稿予定</p>
+    <p className="text-gray-600 text-sm">
+      {(() => {
+        try {
+          if (!schedule.status) return "停止中";
+          if (!schedule.post_time || !schedule.frequency) return "未設定";
 
-                                const now = new Date();
-                                const today = new Date();
-                                const [hour, minute] = schedule.post_time.split(':').map(Number);
-                                today.setHours(hour, minute, 0, 0);
+          const now = new Date();
+          const today = new Date();
+          const [hour, minute] = schedule.post_time.split(":").map(Number);
+          today.setHours(hour, minute, 0, 0);
 
-                                let nextDate = new Date(today);
+          let nextDate = new Date(today);
 
-                                switch (schedule.frequency) {
-                                  case '毎日':
-                                    if (now >= today) nextDate.setDate(nextDate.getDate() + 1);
-                                    break;
-                                  case '毎週':
-                                    nextDate.setDate(nextDate.getDate() + 7);
-                                    break;
-                                  case '隔週':
-                                    nextDate.setDate(nextDate.getDate() + 14);
-                                    break;
-                                  case '月一':
-                                    nextDate.setMonth(nextDate.getMonth() + 1);
-                                    break;
-                                  default:
-                                    return '未設定';
-                                }
+          switch (schedule.frequency) {
+            case "毎日":
+              if (now >= today) nextDate.setDate(nextDate.getDate() + 1);
+              break;
+            case "毎週":
+              nextDate.setDate(nextDate.getDate() + 7);
+              break;
+            case "隔週":
+              nextDate.setDate(nextDate.getDate() + 14);
+              break;
+            case "月一":
+              nextDate.setMonth(nextDate.getMonth() + 1);
+              break;
+            default:
+              return "未設定";
+          }
 
-                                if (schedule.end_date && new Date(schedule.end_date) < nextDate) {
-                                  return '期間終了';
-                                }
+          if (schedule.end_date && new Date(schedule.end_date) < nextDate) {
+            return "期間終了";
+          }
 
-                                const dateStr = nextDate.toLocaleDateString('ja-JP', {
-                                  year: 'numeric',
-                                  month: '2-digit',
-                                  day: '2-digit',
-                                });
+          const dateStr = nextDate.toLocaleDateString("ja-JP", {
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit",
+          });
 
-                                return `${dateStr} ${schedule.post_time}`;
-                              } catch {
-                                return '未設定';
-                              }
-                            })()}
-                          </p>
-                        </div>
-                      </div>
+          return `${dateStr} ${schedule.post_time}`;
+        } catch {
+          return "未設定";
+        }
+      })()}
+    </p>
+  </div>
+</div>
+
 
                       {/* 最終実行 */}
                       {schedule.last_run_at && (
