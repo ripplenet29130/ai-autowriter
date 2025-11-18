@@ -461,7 +461,10 @@ const fetchMainKeywords = async () => {
 )}
 
 
-  {/* ✅ 投稿時刻と頻度 */}
+ {/* === 投稿時刻・頻度 === */}
+<div className="grid grid-cols-2 gap-4 col-span-2">
+
+  {/* 投稿時刻 */}
   <div>
     <p className="font-medium text-gray-700 mb-1">投稿時刻</p>
     <p className="flex items-center gap-1">
@@ -470,13 +473,14 @@ const fetchMainKeywords = async () => {
     </p>
   </div>
 
+  {/* 頻度 */}
   <div>
     <p className="font-medium text-gray-700 mb-1">頻度</p>
     <p>{schedule.frequency}</p>
   </div>
 
-  {/* ✅ サイクル期間 */}
-  <div className="col-span-2">
+  {/* === サイクル期間（2カラム横長） === */}
+  <div className="col-span-2 mt-2">
     <p className="font-medium text-gray-700 mb-1">サイクル期間</p>
     <p>
       {schedule.start_date
@@ -485,71 +489,72 @@ const fetchMainKeywords = async () => {
     </p>
   </div>
 
-        {/* ✅ 次回投稿予定 */}
-<div className="col-span-2">
-  <p className="font-medium text-gray-700 mb-1">次回投稿予定</p>
-  <p>
-    {(() => {
-      try {
-        // 必要情報がない場合
-        if (!schedule.status) return "停止中";
-        if (!schedule.post_time || !schedule.frequency) return "未設定";
+  {/* === 前回投稿日時 === */}
+  <div className="mt-2">
+    <p className="font-medium text-gray-700 mb-1">前回投稿日時</p>
+    <p className="text-gray-600 text-sm">
+      {schedule.last_run_at
+        ? new Date(schedule.last_run_at).toLocaleString("ja-JP")
+        : "未投稿"}
+    </p>
+  </div>
 
-        const now = new Date();
-        const today = new Date();
-        const [hour, minute] = schedule.post_time.split(":").map(Number);
-        today.setHours(hour, minute, 0, 0);
+  {/* === 次回投稿予定 === */}
+  <div className="mt-2">
+    <p className="font-medium text-gray-700 mb-1">次回投稿予定</p>
+    <p className="text-gray-600 text-sm">
+      {(() => {
+        try {
+          if (!schedule.status) return "停止中";
+          if (!schedule.post_time || !schedule.frequency) return "未設定";
 
-        let nextDate = new Date(today);
+          const now = new Date();
+          const today = new Date();
+          const [hour, minute] = schedule.post_time.split(":").map(Number);
+          today.setHours(hour, minute, 0, 0);
 
-        // === 頻度ごとの加算ロジック ===
-        switch (schedule.frequency) {
-          case "毎日":
-            if (now >= today) {
-              // 今日の時間を過ぎていたら翌日に
-              nextDate.setDate(nextDate.getDate() + 1);
-            }
-            break;
+          let nextDate = new Date(today);
 
-          case "毎週":
-            // 今日の時間を過ぎていたら翌週の同じ曜日
-            nextDate.setDate(nextDate.getDate() + 7);
-            break;
+          // === 頻度 ===
+          switch (schedule.frequency) {
+            case "毎日":
+              if (now >= today) nextDate.setDate(nextDate.getDate() + 1);
+              break;
+            case "毎週":
+              nextDate.setDate(nextDate.getDate() + 7);
+              break;
+            case "隔週":
+              nextDate.setDate(nextDate.getDate() + 14);
+              break;
+            case "月一":
+              nextDate.setMonth(nextDate.getMonth() + 1);
+              break;
+            default:
+              return "未設定";
+          }
 
-          case "隔週":
-            nextDate.setDate(nextDate.getDate() + 14);
-            break;
+          // 終了日チェック
+          if (schedule.end_date && new Date(schedule.end_date) < nextDate) {
+            return "期間終了";
+          }
 
-          case "月一":
-            nextDate.setMonth(nextDate.getMonth() + 1);
-            break;
+          // フォーマット
+          const dateStr = nextDate.toLocaleDateString("ja-JP", {
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit",
+          });
 
-          default:
-            return "未設定";
+          return `${dateStr} ${schedule.post_time}`;
+        } catch {
+          return "未設定";
         }
+      })()}
+    </p>
+  </div>
 
-        // サイクル終了日チェック
-        if (schedule.end_date && new Date(schedule.end_date) < nextDate) {
-          return "期間終了";
-        }
-
-        // フォーマット
-        const dateStr = nextDate.toLocaleDateString("ja-JP", {
-          year: "numeric",
-          month: "2-digit",
-          day: "2-digit",
-        });
-        return `${dateStr} ${schedule.post_time}`;
-      } catch (e) {
-        console.error("次回投稿予定の計算エラー:", e);
-        return "未設定";
-      }
-    })()}
-  </p>
 </div>
 
-                      
-</div>
 
 
                     {schedule.last_run_at && (
