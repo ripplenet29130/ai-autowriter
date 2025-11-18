@@ -1,7 +1,7 @@
 // netlify/functions/scheduler.ts
 import type { Handler } from "@netlify/functions";
 import { createClient } from "@supabase/supabase-js";
-import { generateArticleByAI } from "../../src/utils/generateArticle"; // ← ここ重要！
+import { generateArticleByAI } from "../../src/utils/generateArticle";
 
 // Supabase接続
 const supabase = createClient(
@@ -10,11 +10,15 @@ const supabase = createClient(
 );
 
 // WordPress投稿処理
-async function postToWordPress(wp: any, article: { title: string; content: string }) {
+async function postToWordPress(wp: any, article: {
+  title: string;
+  content: string;
+  date: string;
+}) {
   console.log(`🌐 WordPress投稿開始: ${wp.url}`);
   const endpoint = `${wp.url}/wp-json/wp/v2/posts`;
 
-  // ✅ カテゴリ名→ID変換関数
+  // カテゴリID取得
   async function getCategoryIdByName(name: string) {
     try {
       const res = await fetch(`${wp.url}/wp-json/wp/v2/categories?search=${encodeURIComponent(name)}`, {
@@ -24,43 +28,26 @@ async function postToWordPress(wp: any, article: { title: string; content: strin
         },
       });
 
-      if (!res.ok) {
-        console.warn(`⚠️ カテゴリ取得失敗 (${res.status}): ${name}`);
-        return 1; // fallback to 未分類
-      }
+      if (!res.ok) return 1;
 
       const categories = await res.json();
-      if (categories.length > 0) {
-        console.log(`✅ カテゴリ「${name}」のID: ${categories[0].id}`);
-        return categories[0].id;
-      } else {
-        console.warn(`⚠️ カテゴリ「${name}」が見つかりません`);
-        return 1; // fallback
-      }
-    } catch (e) {
-      console.error("❌ カテゴリ取得エラー:", e);
-      return 1; // fallback
+      return categories.length > 0 ? categories[0].id : 1;
+    } catch {
+      return 1;
     }
   }
 
-  // ✅ default_category が数値ならそのまま使う、文字列なら変換
-  let categoryId = 1; // fallback to 未分類
+  // default_categoryの解決
+  let categoryId = 1;
   if (wp.default_category) {
-    if (typeof wp.default_category === "number") {
-      categoryId = wp.default_category;
-    } else if (!isNaN(Number(wp.default_category))) {
+    if (!isNaN(Number(wp.default_category))) {
       categoryId = Number(wp.default_category);
     } else {
       categoryId = await getCategoryIdByName(wp.default_category);
     }
   }
-  
-  // JST投稿日時（必須）
-  const jstDate = new Date(
-    `${now.toISOString().split("T")[0]}T${schedule.post_time}:00+09:00`
-  ).toISOString();
-  
-  // ✅ 投稿リクエスト
+
+  // WordPress投稿
   const response = await fetch(endpoint, {
     method: "POST",
     headers: {
@@ -72,8 +59,8 @@ async function postToWordPress(wp: any, article: { title: string; content: strin
       title: article.title,
       content: article.content,
       categories: [categoryId],
-      status: schedule.post_status || "publish",
-      date: jstDate,
+      status: "publish",
+      date: article.date,       // ← ここで受け取るだけ！
     }),
   });
 
@@ -87,90 +74,37 @@ async function postToWordPress(wp: any, article: { title: string; content: strin
   return result;
 }
 
-
 // メイン処理
 export const handler: Handler = async () => {
   console.log("🕒 スケジューラー起動");
 
-  // 現在時刻をJSTで取得
+  // JSTの現在時刻
   const now = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Tokyo" }));
   const hour = now.getHours().toString().padStart(2, "0");
   const minute = now.getMinutes().toString().padStart(2, "0");
   const currentTime = `${hour}:${minute}`;
 
   // スケジュール取得
-  const { data: schedules, error } = await supabase
+  const { data: schedules } = await supabase
     .from("schedule_settings")
     .select("*")
     .eq("status", true);
 
-  if (error || !schedules?.length) {
-    console.error("❌ スケジュールが見つかりません");
-    return { statusCode: 404, body: "スケジュールなし" };
+  if (!schedules?.length) {
+    console.error("❌ スケジュールなし");
+    return { statusCode: 404, body: "No schedules" };
   }
 
-  // 投稿対象を抽出
-  const targets = schedules.filter((s: any) => {
-    if (s.post_time !== currentTime) return false;
-    const today = now.toISOString().split("T")[0];
+  // 今実行すべきスケジュール
+  const targets = schedules.filter((s: any) => s.post_time === currentTime);
 
-    // 終了日チェック
-    if (s.end_date && today > s.end_date) {
-      console.log(`⏹ 終了日を過ぎたスケジュールを無効化: ${s.id}`);
-      supabase
-        .from("schedule_settings")
-        .update({ status: false })
-        .eq("id", s.id)
-        .then(() => console.log(`✅ ${s.id} を無効化しました`))
-        .catch((err) => console.error("⚠️ 無効化エラー:", err.message));
-      return false;
-    }
-
-    // 開始日前はスキップ
-    if (s.start_date && today < s.start_date) {
-      console.log(`🕓 待機中スケジュール (${s.id}) - ${s.start_date} から開始予定`);
-      return false;
-    }
-
-    // 頻度別チェック
-    switch (s.frequency) {
-      case "毎日":
-        return true;
-      case "毎週": {
-        if (!s.start_date) return false;
-        const diffDays =
-          (now.getTime() - new Date(s.start_date).getTime()) / (1000 * 60 * 60 * 24);
-        return Math.floor(diffDays) % 7 === 0;
-      }
-      case "隔週": {
-        if (!s.start_date) return false;
-        const diffDays =
-          (now.getTime() - new Date(s.start_date).getTime()) / (1000 * 60 * 60 * 24);
-        return Math.floor(diffDays) % 14 === 0;
-      }
-      case "月一": {
-        if (!s.start_date) return false;
-        const startDay = new Date(s.start_date).getDate();
-        const todayDay = now.getDate();
-        return todayDay === startDay || (todayDay >= 28 && startDay > 28);
-      }
-      default:
-        return false;
-    }
-  });
-
-  console.log("📅 現在日付:", now.toISOString().split("T")[0]);
-  console.log("🕒 現在時刻(JST):", currentTime);
   console.log("🎯 対象スケジュール数:", targets.length);
 
-  // ===============================
-  // ここでAI生成＆WordPress投稿
-  // ===============================
   for (const schedule of targets) {
     try {
       console.log(`🚀 投稿開始: ${schedule.id}`);
 
-      // WP設定を取得
+      // WP設定取得
       const { data: wpConfig } = await supabase
         .from("wp_configs")
         .select("*")
@@ -179,29 +113,34 @@ export const handler: Handler = async () => {
 
       if (!wpConfig) continue;
 
-      // ✅ AIで記事を生成（related_keywordsからランダムに1つ選ぶ）
-const relatedList = Array.isArray(schedule.related_keywords)
-  ? schedule.related_keywords
-  : [];
+      // 使用キーワード選択
+      const relatedList = Array.isArray(schedule.related_keywords)
+        ? schedule.related_keywords
+        : [];
+      const selectedKeyword =
+        relatedList.length > 0
+          ? relatedList[Math.floor(Math.random() * relatedList.length)]
+          : schedule.keyword;
 
-const selectedKeyword =
-  relatedList.length > 0
-    ? relatedList[Math.floor(Math.random() * relatedList.length)]
-    : schedule.keyword; // fallback: keyword
+      // AI記事生成
+      const { title, content } = await generateArticleByAI(
+        schedule.ai_config_id,
+        selectedKeyword,
+        relatedList
+      );
 
-console.log(`🧠 使用キーワード: ${selectedKeyword}`);
+      // ★ ここで投稿日時を作成する（JSTで）
+      const today = now.toISOString().split("T")[0];
+      const postDate = `${today}T${schedule.post_time}:00+09:00`;
 
-const { title, content } = await generateArticleByAI(
-  schedule.ai_config_id,
-  selectedKeyword, // ← ここを入れ替え
-  relatedList
-);
+      // WordPress投稿
+      const postResult = await postToWordPress(wpConfig, {
+        title,
+        content,
+        date: postDate,
+      });
 
-
-      // ✅ WordPressへ投稿
-      const postResult = await postToWordPress(wpConfig, { title, content });
-
-      // 実行履歴を更新
+      // 実行履歴
       await supabase
         .from("schedule_settings")
         .update({ last_run_at: new Date().toISOString() })
@@ -215,6 +154,6 @@ const { title, content } = await generateArticleByAI(
 
   return {
     statusCode: 200,
-    body: "Scheduler run complete",
+    body: "Scheduler done",
   };
 };
