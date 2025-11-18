@@ -643,6 +643,7 @@ const fetchMainKeywords = async () => {
   </button>
 ) : (
   <div className="border-t border-gray-200 pt-4 mt-4 space-y-4 text-sm text-gray-700 w-64">
+
     {/* === AI設定 === */}
     <div>
       <label className="block text-xs text-gray-500 mb-1">AI設定</label>
@@ -702,7 +703,6 @@ const fetchMainKeywords = async () => {
         ))}
       </select>
 
-      {/* 関連キーワード表示 */}
       {schedule.related_keywords?.length > 0 && (
         <div className="flex flex-wrap gap-2 mt-2">
           {schedule.related_keywords.map((word: string, i: number) => (
@@ -777,7 +777,7 @@ const fetchMainKeywords = async () => {
       </div>
     </div>
 
-        {/* === 保存・キャンセル === */}
+    {/* 保存・キャンセル */}
     <div className="flex gap-2 mt-4">
       <button
         onClick={async () => {
@@ -819,12 +819,8 @@ const fetchMainKeywords = async () => {
         キャンセル
       </button>
     </div>
-    </div> {/* ← 編集エリアの閉じ */}
-  ) : null} {/* ← 編集モードの条件分岐の閉じ（正しい書き方） */}
-
-</div> {/* ← 左側コンテンツの閉じ */}
-</div> {/* ← スケジュールカード全体の閉じ */}
-))}
+  </div>
+)}
 
 
           </div>
