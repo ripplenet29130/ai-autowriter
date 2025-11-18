@@ -777,7 +777,7 @@ const fetchMainKeywords = async () => {
       </div>
     </div>
 
-    {/* === 保存・キャンセル === */}
+        {/* === 保存・キャンセル === */}
     <div className="flex gap-2 mt-4">
       <button
         onClick={async () => {
@@ -819,12 +819,17 @@ const fetchMainKeywords = async () => {
         キャンセル
       </button>
     </div>
-  </div>
-))}
+  </div> {/* ← 編集エリアの閉じ */}
+)}      {/* ← 編集モードの条件分岐の閉じ */}
 
-</div>
+</div>    {/* ← 左側コンテンツの閉じ */}
+</div>    {/* ← スケジュールカード全体の閉じ */}
+))}       {/* ← ★ schedules.map の閉じ（これが必要） */}
 
-                  
+          </div>
+        </div>
+      )}
+
       <div className="mt-8 bg-gray-50 rounded-lg p-6">
         <h3 className="text-lg font-semibold text-gray-800 mb-3">最近の実行ログ</h3>
         <p className="text-sm text-gray-600">実行ログ機能は準備中です。将来のバージョンで追加予定です。</p>
