@@ -14,7 +14,7 @@ export default function WPSettings() {
     username: '',
     app_password: '',
     default_category: '',
-    post_type: 'post',
+    post_type: 'posts',
     is_active: false,
   });
 
@@ -66,7 +66,7 @@ export default function WPSettings() {
         username: '',
         app_password: '',
         default_category: '',
-        post_type: 'post',
+        post_type: 'posts',
         is_active: false,
       });
     }
@@ -197,7 +197,7 @@ export default function WPSettings() {
               type="text"
               value={formData.post_type}
               onChange={(e) => setFormData({ ...formData, post_type: e.target.value })}
-              placeholder="posts"
+              placeholder="post"
               className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             />
             <p className="mt-1 text-xs text-gray-500">
