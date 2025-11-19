@@ -10,7 +10,7 @@ const supabase = createClient(
 );
 
 // WordPress投稿処理
-async function postToWordPress(wp: any, article: {
+async function postToWordPress(wp: any, schedule: any, article: {
   title: string;
   content: string;
   date: string;
@@ -22,16 +22,12 @@ async function postToWordPress(wp: any, article: {
     `${wp.username}:${wp.app_password}`
   ).toString("base64");
 
-  // カテゴリID取得
   async function getCategoryIdByName(name: string) {
     try {
       const res = await fetch(
         `${wp.url}/wp-json/wp/v2/categories?search=${encodeURIComponent(name)}`,
-        {
-          headers: { Authorization: `Basic ${credential}` },
-        }
+        { headers: { Authorization: `Basic ${credential}` } }
       );
-
       if (!res.ok) return 1;
 
       const categories = await res.json();
@@ -41,7 +37,6 @@ async function postToWordPress(wp: any, article: {
     }
   }
 
-  // default_categoryの解決
   let categoryId = 1;
   if (wp.default_category) {
     if (!isNaN(Number(wp.default_category))) {
@@ -51,7 +46,6 @@ async function postToWordPress(wp: any, article: {
     }
   }
 
-  // WordPress投稿
   const response = await fetch(endpoint, {
     method: "POST",
     headers: {
@@ -72,9 +66,9 @@ async function postToWordPress(wp: any, article: {
     throw new Error(`投稿失敗 (${response.status}): ${text}`);
   }
 
-  const result = await response.json();
-  return result;
+  return await response.json();
 }
+
 
 // ====== メイン処理 ======
 export const handler: Handler = async (event) => {
@@ -181,11 +175,12 @@ export const handler: Handler = async (event) => {
       );
       const iso = jstDate.toISOString().replace("Z", "+09:00");
 
-      const postResult = await postToWordPress(wpConfig, {
+      const postResult = await postToWordPress(wpConfig, schedule, {
         title,
         content,
         date: iso,
       });
+
 
       // 使用済みキーワード記録
       await supabase.from("schedule_used_keywords").insert({
