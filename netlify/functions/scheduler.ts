@@ -4,9 +4,16 @@ export const handler = async (event, context) => {
     body: event.body,
   });
 
+  // 必ず何かを return する必要がある
+  return {
+    statusCode: 200,
+    body: JSON.stringify({ message: "ok" })
+  };
+};
+
 
 // netlify/functions/scheduler.ts
-import { Handler } from "@netlify/functions";
+import type { Handler } from "@netlify/functions";
 import { createClient } from "@supabase/supabase-js";
 import { generateArticleByAI } from "../../src/utils/generateArticle";
 
