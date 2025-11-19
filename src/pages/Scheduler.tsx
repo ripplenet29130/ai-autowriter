@@ -207,31 +207,29 @@ export default function Scheduler() {
     }
   };
 
-  const handleRunNow = async (scheduleId: string) => {
-    setLoading(true);
-    try {
-      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-      const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-
-      const response = await fetch('https://ai-autowriter.netlify.app/.netlify/functions/scheduler', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ schedule_id }),
-      });
-
-      if (!response.ok) {
-        throw new Error('投稿に失敗しました');
+    const handleRunNow = async (scheduleId: string) => {
+      setLoading(true);
+      try {
+        const response = await fetch('https://ai-autowriter.netlify.app/.netlify/functions/scheduler', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ schedule_id: scheduleId }), // ← 修正！
+        });
+    
+        if (!response.ok) {
+          throw new Error('投稿に失敗しました');
+        }
+    
+        await response.json();
+        showMessage('success', '投稿を実行しました');
+        loadSchedules();
+      } catch (error) {
+        showMessage('error', '投稿の実行に失敗しました');
+      } finally {
+        setLoading(false);
       }
+    };
 
-      await response.json();
-      showMessage('success', '投稿を実行しました');
-      loadSchedules();
-    } catch (error) {
-      showMessage('error', '投稿の実行に失敗しました');
-    } finally {
-      setLoading(false);
-    }
-  };
 
   return (
     <div>
