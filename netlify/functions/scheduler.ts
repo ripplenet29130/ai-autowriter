@@ -140,10 +140,13 @@ export const handler: Handler = async () => {
         date: postDate,
       });
 
-      INSERT INTO schedule_used_keywords
-      (schedule_id, keyword)
-      VALUES
-      (schedule.id, selectedKeyword)
+      // ★ 使用済みキーワードを記録する（投稿成功後）
+      await supabase
+        .from("schedule_used_keywords")
+        .insert({
+          schedule_id: schedule.id,
+          keyword: selectedKeyword,
+        });
 
       // 実行履歴
       await supabase
