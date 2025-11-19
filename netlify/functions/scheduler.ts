@@ -82,17 +82,25 @@ export const handler: Handler = async (event) => {
 
   const now = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Tokyo" }));
 
-  // ★ 即時実行モード
-  let forcedScheduleId: string | null = null;
-  if (event.httpMethod === "POST" && event.body) {
+    // ★ 即時実行モード
+    let forcedScheduleId: string | null = null;
+    
     try {
-      const body = JSON.parse(event.body);
-      if (body.schedule_id) {
-        forcedScheduleId = body.schedule_id;
-        console.log("⚡ 即時実行モード:", forcedScheduleId);
+      const bodyText =
+        event.body && event.body.length > 0
+          ? event.body
+          : event.rawBody || null;
+    
+      if (bodyText) {
+        const body = JSON.parse(bodyText);
+        if (body.schedule_id) {
+          forcedScheduleId = body.schedule_id;
+          console.log("⚡ 即時実行モード:", forcedScheduleId);
+        }
       }
-    } catch {}
-  }
+    } catch (e) {
+      console.log("⚠ 即時実行の body パースエラー:", e);
+    }
 
   // スケジュール取得
   let schedules: any[] = [];
