@@ -493,6 +493,9 @@ export default function Scheduler() {
           </h2>
 
           <div className="space-y-4">
+            // 追加：関連キーワードの選択状態
+            const [selectedKeyword, setSelectedKeyword] = useState<string | null>(null);
+
             {schedules.map((schedule) => (
               <div
                 key={schedule.id}
@@ -540,15 +543,17 @@ export default function Scheduler() {
                       {/* 関連ワード */}
                       {schedule.related_keywords?.length > 0 && (
                         <div className="col-span-2">
-                          <p className="font-medium text-gray-700 mb-1">
-                            関連ワード
-                          </p>
+                          <p className="font-medium text-gray-700 mb-1">関連ワード</p>
+                      
                           <SchedulerUsedKeywordsDisplay
                             scheduleId={schedule.id}
                             keywords={schedule.related_keywords}
+                            selectedKeyword={selectedKeyword}
+                            setSelectedKeyword={setSelectedKeyword}
                           />
                         </div>
                       )}
+
 
                       {/* 投稿情報 */}
                       <div className="col-span-2 mt-4 p-4 bg-gray-50 rounded-lg grid grid-cols-2 gap-4">
@@ -743,42 +748,46 @@ export default function Scheduler() {
                     >
                       <Trash2 className="w-5 h-5 inline-block" />削除する
                     </button>
-
-                    {/* 編集ボタン（元のまま / 最小限に手入れ） */}
+                    
+                    {/* 編集ボタン & 使用済み解除ボタン */}
                     {!schedule.isEditing ? (
-                      <button
-                        onClick={() => {
-                          (schedule as any).isEditing = true;
-                          setSchedules([...schedules]);
-                        }}
-                        className="px-4 py-2 border border-blue-300 text-blue-700 rounded-lg hover:bg-blue-50"
-                      >
-                        ✏️ 編集
-                      </button>
-                
-                      {/* 使用済み解除ボタン */}
+                      <div className="flex flex-col gap-2">
+                    
+                        {/* 編集 */}
+                        <button
+                          onClick={() => {
+                            (schedule as any).isEditing = true;
+                            setSchedules([...schedules]);
+                          }}
+                          className="px-4 py-2 border border-blue-300 text-blue-700 rounded-lg hover:bg-blue-50"
+                        >
+                          ✏️ 編集
+                        </button>
+                                    
+
+                      {/* 使用済み解除 */}
                       <button
                         onClick={async () => {
                           if (!selectedKeyword) {
                             showMessage("error", "解除するキーワードを選択してください");
                             return;
                           }
-                      
+                  
                           await supabase
                             .from("schedule_used_keywords")
                             .delete()
                             .eq("schedule_id", schedule.id)
                             .eq("keyword", selectedKeyword);
-                      
+                  
                           showMessage("success", `「${selectedKeyword}」を未使用に戻しました`);
                           setSelectedKeyword(null);
-                          loadSchedules(); // 再読み込み
+                          loadSchedules();
                         }}
                         className="px-4 py-2 border border-purple-300 text-purple-700 rounded-lg hover:bg-purple-50"
                       >
                         🧹 使用済み解除
                       </button>
-                
+                    </div>
                     ) : (
                       <div className="border-t border-gray-200 pt-4 mt-4 space-y-4 text-sm text-gray-700 w-64">
                         {/* 編集：AI設定 */}
