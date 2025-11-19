@@ -4,47 +4,61 @@ import { Play, Pause, Trash2, Clock } from 'lucide-react';
 import Toast from '../components/Toast';
 
 // 使用済みキーワード色分け表示コンポーネント
+// 使用済みキーワード色分け + 選択機能
 function SchedulerUsedKeywordsDisplay({
   scheduleId,
   keywords,
+  selectedKeyword,
+  setSelectedKeyword
 }: {
   scheduleId: string;
   keywords: string[];
+  selectedKeyword: string | null;
+  setSelectedKeyword: (kw: string | null) => void;
 }) {
   const [usedKeywords, setUsedKeywords] = useState<string[]>([]);
 
   useEffect(() => {
-    const loadUsed = async () => {
+    const load = async () => {
       const { data } = await supabase
-        .from('schedule_used_keywords')
-        .select('keyword')
-        .eq('schedule_id', scheduleId);
+        .from("schedule_used_keywords")
+        .select("keyword")
+        .eq("schedule_id", scheduleId);
 
       setUsedKeywords(data?.map((d) => d.keyword) || []);
     };
-
-    loadUsed();
+    load();
   }, [scheduleId]);
 
   const usedSet = new Set(usedKeywords);
 
   return (
     <div className="flex flex-wrap gap-2">
-      {keywords.map((word, i) => (
-        <span
-          key={i}
-          className={
-            usedSet.has(word)
-              ? 'bg-blue-600 text-white text-xs px-2 py-1 rounded-full' // 使用済み（濃い色）
-              : 'bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full' // 未使用（薄い色）
-          }
-        >
-          {word}
-        </span>
-      ))}
+      {keywords.map((word) => {
+        const isUsed = usedSet.has(word);
+        const isSelected = selectedKeyword === word;
+
+        return (
+          <button
+            key={word}
+            onClick={() => setSelectedKeyword(word)}
+            className={
+              `px-3 py-1 rounded-full text-xs border transition ` +
+              (isSelected
+                ? "border-blue-600 bg-blue-100 text-blue-600"
+                : isUsed
+                ? "bg-gray-300 text-gray-600"
+                : "bg-blue-100 text-blue-800 border-transparent")
+            }
+          >
+            {word}
+          </button>
+        );
+      })}
     </div>
   );
 }
+
 
 export default function Scheduler() {
   const [schedules, setSchedules] = useState<
