@@ -579,7 +579,7 @@ export default function Scheduler() {
             day: "2-digit",
           });
     
-          return "TEST: " + nextDate.toLocaleString("ja-JP");
+          return `${dateStr} ${schedule.post_time}`;
 
         } catch {
           return "未設定";
