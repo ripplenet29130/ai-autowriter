@@ -536,41 +536,49 @@ export default function Scheduler() {
         try {
           if (!schedule.status) return "停止中";
           if (!schedule.post_time || !schedule.frequency) return "未設定";
-
+    
           const now = new Date();
-          const today = new Date();
+    
+          // 今日の投稿時刻
           const [hour, minute] = schedule.post_time.split(":").map(Number);
-          today.setHours(hour, minute, 0, 0);
-
-          let nextDate = new Date(today);
-
-          switch (schedule.frequency) {
-            case "毎日":
-              if (now >= today) nextDate.setDate(nextDate.getDate() + 1);
-              break;
-            case "毎週":
-              nextDate.setDate(nextDate.getDate() + 7);
-              break;
-            case "隔週":
-              nextDate.setDate(nextDate.getDate() + 14);
-              break;
-            case "月一":
-              nextDate.setMonth(nextDate.getMonth() + 1);
-              break;
-            default:
-              return "未設定";
+          const nextDate = new Date();
+          nextDate.setHours(hour, minute, 0, 0);
+    
+          // --- 重要ポイント ---
+          // 今日の投稿時刻が未来なら → 今日投稿
+          // すでに過ぎているなら → 次サイクルへ
+          const isTodayStillValid = nextDate >= now;
+    
+          if (!isTodayStillValid) {
+            switch (schedule.frequency) {
+              case "毎日":
+                nextDate.setDate(nextDate.getDate() + 1);
+                break;
+              case "毎週":
+                nextDate.setDate(nextDate.getDate() + 7);
+                break;
+              case "隔週":
+                nextDate.setDate(nextDate.getDate() + 14);
+                break;
+              case "月一":
+                nextDate.setMonth(nextDate.getMonth() + 1);
+                break;
+              default:
+                return "未設定";
+            }
           }
-
+    
+          // 期間終了判定
           if (schedule.end_date && new Date(schedule.end_date) < nextDate) {
             return "期間終了";
           }
-
+    
           const dateStr = nextDate.toLocaleDateString("ja-JP", {
             year: "numeric",
             month: "2-digit",
             day: "2-digit",
           });
-
+    
           return `${dateStr} ${schedule.post_time}`;
         } catch {
           return "未設定";
