@@ -575,6 +575,7 @@ export default function Scheduler() {
                             keywords={schedule.related_keywords}
                             selectedKeyword={selectedKeyword}
                             setSelectedKeyword={setSelectedKeyword}
+                            removedKeyword={removedKeyword}
                           />
                         </div>
                       )}
