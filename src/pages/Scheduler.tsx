@@ -577,11 +577,11 @@ export default function Scheduler() {
                           <p className="font-medium text-gray-700 mb-1">関連ワード</p>
                       
                           <SchedulerUsedKeywordsDisplay
-                            scheduleId={schedule.id}
-                            keywords={schedule.related_keywords}
-                            selectedKeyword={selectedKeyword}
-                            setSelectedKeyword={setSelectedKeyword}
-                            removedKeyword={removedKeyword}
+                          scheduleId={schedule.id}
+                          keywords={schedule.related_keywords}
+                          selectedKeywords={selectedKeywords}
+                          setSelectedKeywords={setSelectedKeywords}
+                          removedKeyword={removedKeyword}
                           />
                         </div>
                       )}
@@ -799,31 +799,35 @@ export default function Scheduler() {
 
                       {/* 使用済み解除 */}
                       <button
-                      onClick={async () => {
-                        if (!selectedKeyword) {
-                          showMessage("error", "解除するキーワードを選択してください");
-                          return;
-                        }
-                    
-                        // Supabaseから削除
-                        await supabase
-                          .from("schedule_used_keywords")
-                          .delete()
-                          .eq("schedule_id", schedule.id)
-                          .eq("keyword", selectedKeyword);
-                    
-                        // UIを即時更新（青色に戻す）
-                        setRemovedKeyword(selectedKeyword);
-                    
-                        // 選択解除
-                        setSelectedKeyword(null);
-                    
-                        showMessage("success", `「${selectedKeyword}」を未使用に戻しました`);
-                      }}
-                      className="px-4 py-2 border border-purple-300 text-purple-700 rounded-lg hover:bg-purple-50"
-                    >
-                      🧹 使用済み解除
-                    </button>
+                        onClick={async () => {
+                          if (selectedKeywords.length === 0) {
+                            showMessage("error", "解除するキーワードを選択してください");
+                            return;
+                          }
+                      
+                          // Supabaseで複数一括削除
+                          await Promise.all(
+                            selectedKeywords.map((kw) =>
+                              supabase
+                                .from("schedule_used_keywords")
+                                .delete()
+                                .eq("schedule_id", schedule.id)
+                                .eq("keyword", kw)
+                            )
+                          );
+                      
+                          // UI即時反映
+                          selectedKeywords.forEach((kw) => setRemovedKeyword(kw));
+                      
+                          showMessage("success", `${selectedKeywords.length}件のキーワードを未使用に戻しました`);
+                      
+                          setSelectedKeywords([]); // 全選択解除
+                        }}
+                        className="px-4 py-2 border border-purple-300 text-purple-700 rounded-lg hover:bg-purple-50"
+                      >
+                        🧹 使用済み解除
+                      </button>
+
 
                     </div>
                     ) : (
