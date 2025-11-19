@@ -10,14 +10,17 @@ function SchedulerUsedKeywordsDisplay({
   keywords,
   selectedKeyword,
   setSelectedKeyword,
+  removedKeyword,
 }: {
   scheduleId: string;
   keywords: string[];
   selectedKeyword: string | null;
   setSelectedKeyword: (kw: string | null) => void;
+  removedKeyword: string | null; // ★追加
 }) {
   const [usedKeywords, setUsedKeywords] = useState<string[]>([]);
 
+  // 初期読み込み
   useEffect(() => {
     const load = async () => {
       const { data } = await supabase
@@ -30,6 +33,13 @@ function SchedulerUsedKeywordsDisplay({
     load();
   }, [scheduleId]);
 
+  // ★ 使用済み解除されたら、その場で即座に UI 更新
+  useEffect(() => {
+    if (removedKeyword) {
+      setUsedKeywords((prev) => prev.filter((k) => k !== removedKeyword));
+    }
+  }, [removedKeyword]);
+
   const usedSet = new Set(usedKeywords);
 
   return (
@@ -38,7 +48,6 @@ function SchedulerUsedKeywordsDisplay({
         const isUsed = usedSet.has(word);
         const isSelected = selectedKeyword === word;
 
-        // 未使用 → 青 / 押せない
         if (!isUsed) {
           return (
             <span
@@ -50,7 +59,6 @@ function SchedulerUsedKeywordsDisplay({
           );
         }
 
-        // 使用済み → 押せる（選択可能）
         return (
           <button
             key={word}
@@ -74,6 +82,7 @@ function SchedulerUsedKeywordsDisplay({
 
 
 
+
 export default function Scheduler() {
   const [schedules, setSchedules] = useState<
     (ScheduleSetting & { ai_config?: AIConfig; wp_config?: WPConfig })[]
@@ -88,6 +97,7 @@ export default function Scheduler() {
   const [mainKeywords, setMainKeywords] = useState<any[]>([]);
   const [selectedMainKeyword, setSelectedMainKeyword] = useState<string | null>(null);
   const [relatedKeywords, setRelatedKeywords] = useState<string[]>([]);
+  const [removedKeyword, setRemovedKeyword] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     ai_config_id: '',
     wp_config_id: '',
