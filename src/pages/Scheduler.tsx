@@ -16,9 +16,9 @@ function SchedulerUsedKeywordsDisplay({
   useEffect(() => {
     const loadUsed = async () => {
       const { data } = await supabase
-        .from("schedule_used_keywords")
-        .select("keyword")
-        .eq("schedule_id", scheduleId);
+        .from('schedule_used_keywords')
+        .select('keyword')
+        .eq('schedule_id', scheduleId);
 
       setUsedKeywords(data?.map((d) => d.keyword) || []);
     };
@@ -35,8 +35,8 @@ function SchedulerUsedKeywordsDisplay({
           key={i}
           className={
             usedSet.has(word)
-              ? "bg-blue-600 text-white text-xs px-2 py-1 rounded-full" // 使用済み（濃い色）
-              : "bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full" // 未使用（薄い色）
+              ? 'bg-blue-600 text-white text-xs px-2 py-1 rounded-full' // 使用済み（濃い色）
+              : 'bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full' // 未使用（薄い色）
           }
         >
           {word}
@@ -46,13 +46,16 @@ function SchedulerUsedKeywordsDisplay({
   );
 }
 
-
 export default function Scheduler() {
-  const [schedules, setSchedules] = useState<(ScheduleSetting & { ai_config?: AIConfig; wp_config?: WPConfig })[]>([]);
+  const [schedules, setSchedules] = useState<
+    (ScheduleSetting & { ai_config?: AIConfig; wp_config?: WPConfig })[]
+  >([]);
   const [aiConfigs, setAiConfigs] = useState<AIConfig[]>([]);
   const [wpConfigs, setWpConfigs] = useState<WPConfig[]>([]);
   const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(
+    null
+  );
   const [mainKeywords, setMainKeywords] = useState<any[]>([]);
   const [selectedMainKeyword, setSelectedMainKeyword] = useState<string | null>(null);
   const [relatedKeywords, setRelatedKeywords] = useState<string[]>([]);
@@ -66,6 +69,80 @@ export default function Scheduler() {
     post_status: 'draft',
     status: true,
   });
+
+  const showMessage = (type: 'success' | 'error', text: string) => {
+    setMessage({ type, text });
+    setTimeout(() => setMessage(null), 3000);
+  };
+
+  const fetchMainKeywords = async () => {
+    const { data, error } = await supabase
+      .from('trend_keywords')
+      .select('id, keyword, related_keywords');
+    if (!error) setMainKeywords(data || []);
+  };
+
+  const loadSchedules = async () => {
+    const { data, error } = await supabase
+      .from('schedule_settings')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      showMessage('error', 'スケジュールの読み込みに失敗しました');
+    } else if (data) {
+      const aiConfigsData = await supabase.from('ai_configs').select('*');
+      const wpConfigsData = await supabase.from('wp_configs').select('*');
+
+      const enrichedSchedules = data.map((schedule) => ({
+        ...schedule,
+        ai_config: aiConfigsData.data?.find((c) => c.id === schedule.ai_config_id),
+        wp_config: wpConfigsData.data?.find((c) => c.id === schedule.wp_config_id),
+      }));
+
+      setSchedules(enrichedSchedules);
+    }
+  };
+
+  const loadAiConfigs = async () => {
+    const { data, error } = await supabase
+      .from('ai_configs')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (!error && data) {
+      setAiConfigs(data);
+      if (data.length > 0 && !formData.ai_config_id) {
+        setFormData((prev) => ({ ...prev, ai_config_id: data[0].id }));
+      }
+    }
+  };
+
+  const loadWpConfigs = async () => {
+    const { data, error } = await supabase
+      .from('wp_configs')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (!error && data) {
+      setWpConfigs(data);
+      if (data.length > 0 && !formData.wp_config_id) {
+        setFormData((prev) => ({ ...prev, wp_config_id: data[0].id }));
+      }
+    }
+  };
+
+  const loadData = async () => {
+    await Promise.all([loadSchedules(), loadAiConfigs(), loadWpConfigs()]);
+  };
+
+  useEffect(() => {
+    fetchMainKeywords();
+  }, []);
+
+  useEffect(() => {
+    loadData();
+  }, []);
 
   const handleSave = async () => {
     if (!formData.ai_config_id || !formData.wp_config_id || !selectedMainKeyword) {
@@ -92,7 +169,7 @@ export default function Scheduler() {
     setLoading(false);
 
     if (error) {
-      console.error("❌ Supabase insert error:", error);
+      console.error('❌ Supabase insert error:', error);
       showMessage('error', 'スケジュールの追加に失敗しました');
     } else {
       showMessage('success', 'スケジュールを追加しました');
@@ -100,87 +177,10 @@ export default function Scheduler() {
     }
   };
 
-  useEffect(() => {
-    fetchMainKeywords();
-  }, []);
-
-  const fetchMainKeywords = async () => {
-    const { data, error } = await supabase
-      .from("trend_keywords")
-      .select("id, keyword, related_keywords");
-    if (!error) setMainKeywords(data || []);
-  };
-
-  useEffect(() => {
-    loadData();
-  }, []);
-
-  const loadData = async () => {
-    await Promise.all([loadSchedules(), loadAiConfigs(), loadWpConfigs()]);
-  };
-
-  const loadSchedules = async () => {
-    const { data, error } = await supabase
-      .from('schedule_settings')
-      .select('*')
-      .order('created_at', { ascending: false });
-
-    if (error) {
-      showMessage('error', 'スケジュールの読み込みに失敗しました');
-    } else if (data) {
-      const aiConfigsData = await supabase.from('ai_configs').select('*');
-      const wpConfigsData = await supabase.from('wp_configs').select('*');
-
-      const enrichedSchedules = data.map(schedule => ({
-        ...schedule,
-        ai_config: aiConfigsData.data?.find(c => c.id === schedule.ai_config_id),
-        wp_config: wpConfigsData.data?.find(c => c.id === schedule.wp_config_id),
-      }));
-
-      setSchedules(enrichedSchedules);
-    }
-  };
-
-  const loadAiConfigs = async () => {
-    const { data, error } = await supabase
-      .from('ai_configs')
-      .select('*')
-      .order('created_at', { ascending: false });
-
-    if (!error && data) {
-      setAiConfigs(data);
-      if (data.length > 0 && !formData.ai_config_id) {
-        setFormData(prev => ({ ...prev, ai_config_id: data[0].id }));
-      }
-    }
-  };
-
-  const loadWpConfigs = async () => {
-    const { data, error } = await supabase
-      .from('wp_configs')
-      .select('*')
-      .order('created_at', { ascending: false });
-
-    if (!error && data) {
-      setWpConfigs(data);
-      if (data.length > 0 && !formData.wp_config_id) {
-        setFormData(prev => ({ ...prev, wp_config_id: data[0].id }));
-      }
-    }
-  };
-
-  const showMessage = (type: 'success' | 'error', text: string) => {
-    setMessage({ type, text });
-    setTimeout(() => setMessage(null), 3000);
-  };
-
   const handleDelete = async (id: string) => {
     if (!confirm('このスケジュールを削除してもよろしいですか？')) return;
 
-    const { error } = await supabase
-      .from('schedule_settings')
-      .delete()
-      .eq('id', id);
+    const { error } = await supabase.from('schedule_settings').delete().eq('id', id);
 
     if (error) {
       showMessage('error', '削除に失敗しました');
@@ -207,29 +207,44 @@ export default function Scheduler() {
     }
   };
 
-    const handleRunNow = async (scheduleId: string) => {
-      setLoading(true);
-      try {
-        const response = await fetch('https://ai-autowriter.netlify.app/.netlify/functions/scheduler', {
+  // ★ 今すぐ実行（Netlify Functions /scheduler を叩く）
+  const handleRunNow = async (scheduleId: string) => {
+    setLoading(true);
+    try {
+      const res = await fetch(
+        'https://ai-autowriter.netlify.app/.netlify/functions/scheduler',
+        {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ schedule_id: scheduleId }), // ← 修正！
-        });
-    
-        if (!response.ok) {
-          throw new Error('投稿に失敗しました');
+          body: JSON.stringify({ schedule_id: scheduleId }),
         }
-    
-        await response.json();
-        showMessage('success', '投稿を実行しました');
-        loadSchedules();
-      } catch (error) {
-        showMessage('error', '投稿の実行に失敗しました');
-      } finally {
-        setLoading(false);
-      }
-    };
+      );
 
+      let data: any = null;
+      try {
+        data = await res.json();
+      } catch {
+        // HTMLが返ってきた場合などはここに来る
+      }
+
+      if (!res.ok) {
+        console.error('❌ 今すぐ実行エラー:', res.status, data);
+        showMessage(
+          'error',
+          `投稿エラー: ${data?.error || data?.message || `status ${res.status}`}`
+        );
+        return;
+      }
+
+      showMessage('success', '投稿を実行しました');
+      loadSchedules();
+    } catch (error) {
+      console.error('❌ 今すぐ実行中に例外:', error);
+      showMessage('error', '投稿の実行に失敗しました');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <div>
@@ -258,8 +273,7 @@ export default function Scheduler() {
           </div>
         ) : (
           <div className="space-y-6">
-
-                        {/* AI設定 */}
+            {/* AI設定 */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 AI設定
@@ -273,8 +287,7 @@ export default function Scheduler() {
               >
                 {aiConfigs.map((config) => (
                   <option key={config.id} value={config.id}>
-                    {config.name ||
-                      `${config.provider} - ${config.model}`}
+                    {config.name || `${config.provider} - ${config.model}`}
                   </option>
                 ))}
               </select>
@@ -311,9 +324,7 @@ export default function Scheduler() {
                 onChange={(e) => {
                   const selected = e.target.value;
                   setSelectedMainKeyword(selected);
-                  const found = mainKeywords.find(
-                    (k) => k.keyword === selected
-                  );
+                  const found = mainKeywords.find((k) => k.keyword === selected);
                   setRelatedKeywords(found?.related_keywords || []);
                 }}
               >
@@ -322,8 +333,7 @@ export default function Scheduler() {
                 </option>
                 {mainKeywords.map((k) => (
                   <option key={k.id} value={k.keyword}>
-                    {k.keyword}（
-                    {k.related_keywords?.length || 0}件の関連ワード）
+                    {k.keyword}（{k.related_keywords?.length || 0}件の関連ワード）
                   </option>
                 ))}
               </select>
@@ -384,7 +394,7 @@ export default function Scheduler() {
               </div>
             </div>
 
-               {/* サイクル期間 + 投稿状態 */}
+            {/* サイクル期間 + 投稿状態 */}
             <div className="grid grid-cols-3 gap-6 mt-6">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -470,13 +480,17 @@ export default function Scheduler() {
 
           <div className="space-y-4">
             {schedules.map((schedule) => (
-              <div key={schedule.id} className="bg-white rounded-lg border p-6 shadow-sm">
+              <div
+                key={schedule.id}
+                className="bg-white rounded-lg border p-6 shadow-sm"
+              >
                 <div className="flex items-start justify-between">
-                  
                   {/* 左側 */}
                   <div className="flex-1">
                     <div className="flex items-center gap-3 mb-3">
-                      <h3 className="text-lg font-semibold">{schedule.wp_config?.name}</h3>
+                      <h3 className="text-lg font-semibold">
+                        {schedule.wp_config?.name}
+                      </h3>
                       <span
                         className={`px-3 py-1 text-sm rounded-full ${
                           schedule.status
@@ -495,137 +509,175 @@ export default function Scheduler() {
                       </div>
 
                       <div>
-                        <p className="font-medium text-gray-700 mb-1">WordPress</p>
+                        <p className="font-medium text-gray-700 mb-1">
+                          WordPress
+                        </p>
                         <p>{schedule.wp_config?.url}</p>
                       </div>
 
                       {/* メインキーワード */}
                       <div className="col-span-2">
-                        <p className="font-medium text-gray-700 mb-1">メインキーワード</p>
+                        <p className="font-medium text-gray-700 mb-1">
+                          メインキーワード
+                        </p>
                         <p>{schedule.keyword || '未設定'}</p>
                       </div>
 
                       {/* 関連ワード */}
-                        {schedule.related_keywords?.length > 0 && (
-                          <div className="col-span-2">
-                            <p className="font-medium text-gray-700 mb-1">関連ワード</p>
-                            <SchedulerUsedKeywordsDisplay scheduleId={schedule.id} keywords={schedule.related_keywords} />
-                          </div>
-                        )}
-                        
+                      {schedule.related_keywords?.length > 0 && (
+                        <div className="col-span-2">
+                          <p className="font-medium text-gray-700 mb-1">
+                            関連ワード
+                          </p>
+                          <SchedulerUsedKeywordsDisplay
+                            scheduleId={schedule.id}
+                            keywords={schedule.related_keywords}
+                          />
+                        </div>
+                      )}
 
-{/* 投稿情報 */}
-<div className="col-span-2 mt-4 p-4 bg-gray-50 rounded-lg grid grid-cols-2 gap-4">
-  {/* 投稿時刻 */}
-  <div>
-    <p className="font-medium text-gray-700 mb-1">投稿時刻</p>
-    <p className="flex items-center gap-1">
-      <Clock className="w-4 h-4" />
-      {schedule.post_time}
-    </p>
-  </div>
+                      {/* 投稿情報 */}
+                      <div className="col-span-2 mt-4 p-4 bg-gray-50 rounded-lg grid grid-cols-2 gap-4">
+                        {/* 投稿時刻 */}
+                        <div>
+                          <p className="font-medium text-gray-700 mb-1">
+                            投稿時刻
+                          </p>
+                          <p className="flex items-center gap-1">
+                            <Clock className="w-4 h-4" />
+                            {schedule.post_time}
+                          </p>
+                        </div>
 
-  {/* 頻度 */}
-  <div>
-    <p className="font-medium text-gray-700 mb-1">頻度</p>
-    <p>{schedule.frequency}</p>
-  </div>
+                        {/* 頻度 */}
+                        <div>
+                          <p className="font-medium text-gray-700 mb-1">頻度</p>
+                          <p>{schedule.frequency}</p>
+                        </div>
 
-  {/* サイクル期間（左） */}
-  <div>
-    <p className="font-medium text-gray-700 mb-1">サイクル期間</p>
-    <p>
-      {schedule.start_date
-        ? `${schedule.start_date} ～ ${schedule.end_date || "未設定"}`
-        : "未設定"}
-    </p>
-  </div>
+                        {/* サイクル期間 */}
+                        <div>
+                          <p className="font-medium text-gray-700 mb-1">
+                            サイクル期間
+                          </p>
+                          <p>
+                            {schedule.start_date
+                              ? `${schedule.start_date} ～ ${
+                                  schedule.end_date || '未設定'
+                                }`
+                              : '未設定'}
+                          </p>
+                        </div>
 
-  {/* 投稿状態（右） */}
-  <div>
-    <p className="font-medium text-gray-700 mb-1">投稿状態</p>
-    <p className="text-gray-600 text-sm">
-      {schedule.post_status === "publish" ? "公開" : "下書き"}
-    </p>
-  </div>
+                        {/* 投稿状態 */}
+                        <div>
+                          <p className="font-medium text-gray-700 mb-1">
+                            投稿状態
+                          </p>
+                          <p className="text-gray-600 text-sm">
+                            {schedule.post_status === 'publish'
+                              ? '公開'
+                              : '下書き'}
+                          </p>
+                        </div>
 
-  {/* 前回投稿日時 */}
-  <div>
-    <p className="font-medium text-gray-700 mb-1">前回投稿日時</p>
-    <p className="text-gray-600 text-sm">
-      {schedule.last_run_at
-        ? new Date(schedule.last_run_at).toLocaleString("ja-JP")
-        : "未投稿"}
-    </p>
-  </div>
+                        {/* 前回投稿日時 */}
+                        <div>
+                          <p className="font-medium text-gray-700 mb-1">
+                            前回投稿日時
+                          </p>
+                          <p className="text-gray-600 text-sm">
+                            {schedule.last_run_at
+                              ? new Date(
+                                  schedule.last_run_at
+                                ).toLocaleString('ja-JP')
+                              : '未投稿'}
+                          </p>
+                        </div>
 
-  {/* 次回投稿予定 */}
-  <div>
-    <p className="font-medium text-gray-700 mb-1">次回投稿予定</p>
-    <p className="text-gray-600 text-sm">
-      {(() => {
-        try {
-          if (!schedule.status) return "停止中";
-          if (!schedule.post_time || !schedule.frequency) return "未設定";
-    
-          const now = new Date();
-    
-          // 今日の投稿時刻
-          const [hour, minute] = schedule.post_time.split(":").map(Number);
-          const nextDate = new Date();
-          nextDate.setHours(hour, minute, 0, 0);
-    
-          // --- 重要ポイント ---
-          // 今日の投稿時刻が未来なら → 今日投稿
-          // すでに過ぎているなら → 次サイクルへ
-          const isTodayStillValid = nextDate >= now;
-    
-          if (!isTodayStillValid) {
-            switch (schedule.frequency) {
-              case "毎日":
-                nextDate.setDate(nextDate.getDate() + 1);
-                break;
-              case "毎週":
-                nextDate.setDate(nextDate.getDate() + 7);
-                break;
-              case "隔週":
-                nextDate.setDate(nextDate.getDate() + 14);
-                break;
-              case "月一":
-                nextDate.setMonth(nextDate.getMonth() + 1);
-                break;
-              default:
-                return "未設定";
-            }
-          }
-    
-          // 期間終了判定
-          if (schedule.end_date && new Date(schedule.end_date) < nextDate) {
-            return "期間終了";
-          }
-    
-          const dateStr = nextDate.toLocaleDateString("ja-JP", {
-            year: "numeric",
-            month: "2-digit",
-            day: "2-digit",
-          });
-    
-          return `${dateStr} ${schedule.post_time}`;
+                        {/* 次回投稿予定 */}
+                        <div>
+                          <p className="font-medium text-gray-700 mb-1">
+                            次回投稿予定
+                          </p>
+                          <p className="text-gray-600 text-sm">
+                            {(() => {
+                              try {
+                                if (!schedule.status) return '停止中';
+                                if (
+                                  !schedule.post_time ||
+                                  !schedule.frequency
+                                )
+                                  return '未設定';
 
-        } catch {
-          return "未設定";
-        }
-      })()}
-    </p>
-  </div>
-</div>
+                                const now = new Date();
 
+                                const [hour, minute] =
+                                  schedule.post_time.split(':').map(Number);
+                                const nextDate = new Date();
+                                nextDate.setHours(hour, minute, 0, 0);
+
+                                const isTodayStillValid = nextDate >= now;
+
+                                if (!isTodayStillValid) {
+                                  switch (schedule.frequency) {
+                                    case '毎日':
+                                      nextDate.setDate(
+                                        nextDate.getDate() + 1
+                                      );
+                                      break;
+                                    case '毎週':
+                                      nextDate.setDate(
+                                        nextDate.getDate() + 7
+                                      );
+                                      break;
+                                    case '隔週':
+                                      nextDate.setDate(
+                                        nextDate.getDate() + 14
+                                      );
+                                      break;
+                                    case '月一':
+                                      nextDate.setMonth(
+                                        nextDate.getMonth() + 1
+                                      );
+                                      break;
+                                    default:
+                                      return '未設定';
+                                  }
+                                }
+
+                                if (
+                                  schedule.end_date &&
+                                  new Date(schedule.end_date) < nextDate
+                                ) {
+                                  return '期間終了';
+                                }
+
+                                const dateStr = nextDate.toLocaleDateString(
+                                  'ja-JP',
+                                  {
+                                    year: 'numeric',
+                                    month: '2-digit',
+                                    day: '2-digit',
+                                  }
+                                );
+
+                                return `${dateStr} ${schedule.post_time}`;
+                              } catch {
+                                return '未設定';
+                              }
+                            })()}
+                          </p>
+                        </div>
+                      </div>
 
                       {/* 最終実行 */}
                       {schedule.last_run_at && (
                         <p className="text-xs text-gray-400 mt-3">
                           最終実行:{' '}
-                          {new Date(schedule.last_run_at).toLocaleString('ja-JP')}
+                          {new Date(
+                            schedule.last_run_at
+                          ).toLocaleString('ja-JP')}
                         </p>
                       )}
                     </div>
@@ -633,7 +685,6 @@ export default function Scheduler() {
 
                   {/* 右側ボタン群 */}
                   <div className="flex flex-col gap-2 items-stretch">
-                    
                     {/* 停止・再開 */}
                     <button
                       onClick={() =>
@@ -660,34 +711,7 @@ export default function Scheduler() {
 
                     {/* 今すぐ実行 */}
                     <button
-                      onClick={async () => {
-                        setLoading(true);
-                        showMessage('success', '🕒 投稿を実行中です...');
-
-                        try {
-                          const res = await fetch('https://ai-autowriter.netlify.app/.netlify/functions/scheduler', {
-                          method: 'POST',
-                          headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify({ schedule_id: schedule.id }),
-                        });
-
-
-                          const data = await res.json();
-
-                          if (res.ok) {
-                            showMessage('success', '✅ 投稿が完了しました！');
-                          } else {
-                            showMessage(
-                              'error',
-                              `❌ 投稿エラー: ${data.error || '不明なエラー'}`
-                            );
-                          }
-                        } catch (err) {
-                          showMessage('error', '⚠️ 実行中にエラーが発生');
-                        } finally {
-                          setLoading(false);
-                        }
-                      }}
+                      onClick={() => handleRunNow(schedule.id)}
                       disabled={loading}
                       className={`px-4 py-2 border rounded-lg ${
                         loading
@@ -706,11 +730,11 @@ export default function Scheduler() {
                       <Trash2 className="w-5 h-5 inline-block" />
                     </button>
 
-                    {/* 編集ボタン */}
+                    {/* 編集ボタン（元のまま / 最小限に手入れ） */}
                     {!schedule.isEditing ? (
                       <button
                         onClick={() => {
-                          schedule.isEditing = true;
+                          (schedule as any).isEditing = true;
                           setSchedules([...schedules]);
                         }}
                         className="px-4 py-2 border border-blue-300 text-blue-700 rounded-lg hover:bg-blue-50"
@@ -719,8 +743,7 @@ export default function Scheduler() {
                       </button>
                     ) : (
                       <div className="border-t border-gray-200 pt-4 mt-4 space-y-4 text-sm text-gray-700 w-64">
-
-                        {/* === 編集エリア：AI設定 === */}
+                        {/* 編集：AI設定 */}
                         <div>
                           <label className="block text-xs text-gray-500 mb-1">
                             AI設定
@@ -735,14 +758,13 @@ export default function Scheduler() {
                           >
                             {aiConfigs.map((ai) => (
                               <option key={ai.id} value={ai.id}>
-                                {ai.name ||
-                                  `${ai.provider} - ${ai.model}`}
+                                {ai.name || `${ai.provider} - ${ai.model}`}
                               </option>
                             ))}
                           </select>
                         </div>
 
-                        {/* === 編集：WordPress設定 === */}
+                        {/* 編集：WordPress設定 */}
                         <div>
                           <label className="block text-xs text-gray-500 mb-1">
                             WordPress設定
@@ -763,7 +785,7 @@ export default function Scheduler() {
                           </select>
                         </div>
 
-                        {/* === 編集：キーワード設定 === */}
+                        {/* 編集：キーワード設定 */}
                         <div>
                           <label className="block text-xs text-gray-500 mb-1">
                             キーワード設定
@@ -897,7 +919,7 @@ export default function Scheduler() {
                                 showMessage('error', '更新に失敗しました');
                               } else {
                                 showMessage('success', 'スケジュールを更新しました');
-                                schedule.isEditing = false;
+                                (schedule as any).isEditing = false;
                                 loadSchedules();
                               }
                             }}
@@ -908,7 +930,7 @@ export default function Scheduler() {
 
                           <button
                             onClick={() => {
-                              schedule.isEditing = false;
+                              (schedule as any).isEditing = false;
                               setSchedules([...schedules]);
                             }}
                             className="flex-1 px-4 py-2 border rounded hover:bg-gray-100"
@@ -916,8 +938,8 @@ export default function Scheduler() {
                             キャンセル
                           </button>
                         </div>
-                      </div> /* 編集エリア終了 */
-                    )} 
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -934,4 +956,3 @@ export default function Scheduler() {
     </div>
   );
 }
-         
