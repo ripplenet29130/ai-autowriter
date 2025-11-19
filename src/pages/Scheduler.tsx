@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+kimport { useState, useEffect } from 'react';
 import { supabase, ScheduleSetting, AIConfig, WPConfig } from '../lib/supabase';
 import { Play, Pause, Trash2, Clock } from 'lucide-react';
 import Toast from '../components/Toast';
@@ -739,9 +739,9 @@ export default function Scheduler() {
                     {/* 削除 */}
                     <button
                       onClick={() => handleDelete(schedule.id)}
-                      className="px-4 py-2 text-red-600 hover:bg-red-50 rounded-lg"
+                      className="px-4 py-2 border border-red-300 text-red-700 hover:bg-red-50 rounded-lg"
                     >
-                      <Trash2 className="w-5 h-5 inline-block" />
+                      <Trash2 className="w-5 h-5 inline-block" />削除する
                     </button>
 
                     {/* 編集ボタン（元のまま / 最小限に手入れ） */}
@@ -755,6 +755,30 @@ export default function Scheduler() {
                       >
                         ✏️ 編集
                       </button>
+                
+                      {/* 使用済み解除ボタン */}
+                      <button
+                        onClick={async () => {
+                          if (!selectedKeyword) {
+                            showMessage("error", "解除するキーワードを選択してください");
+                            return;
+                          }
+                      
+                          await supabase
+                            .from("schedule_used_keywords")
+                            .delete()
+                            .eq("schedule_id", schedule.id)
+                            .eq("keyword", selectedKeyword);
+                      
+                          showMessage("success", `「${selectedKeyword}」を未使用に戻しました`);
+                          setSelectedKeyword(null);
+                          loadSchedules(); // 再読み込み
+                        }}
+                        className="px-4 py-2 border border-purple-300 text-purple-700 rounded-lg hover:bg-purple-50"
+                      >
+                        🧹 使用済み解除
+                      </button>
+                
                     ) : (
                       <div className="border-t border-gray-200 pt-4 mt-4 space-y-4 text-sm text-gray-700 w-64">
                         {/* 編集：AI設定 */}
