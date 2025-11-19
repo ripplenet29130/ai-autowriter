@@ -579,7 +579,8 @@ export default function Scheduler() {
             day: "2-digit",
           });
     
-          return `${dateStr} ${schedule.post_time}`;
+          return "TEST: " + nextDate.toLocaleString("ja-JP");
+
         } catch {
           return "未設定";
         }
