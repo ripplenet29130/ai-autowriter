@@ -8,19 +8,19 @@ import Toast from '../components/Toast';
 function SchedulerUsedKeywordsDisplay({
   scheduleId,
   keywords,
-  selectedKeyword,
-  setSelectedKeyword,
+  selectedKeywords,
+  setSelectedKeywords,
   removedKeyword,
 }: {
   scheduleId: string;
   keywords: string[];
-  selectedKeyword: string | null;
-  setSelectedKeyword: (kw: string | null) => void;
-  removedKeyword: string | null; // ★追加
+  selectedKeywords: string[];
+  setSelectedKeywords: (kw: string[]) => void;
+  removedKeyword: string | null;
 }) {
   const [usedKeywords, setUsedKeywords] = useState<string[]>([]);
 
-  // 初期読み込み
+  // 初期
   useEffect(() => {
     const load = async () => {
       const { data } = await supabase
@@ -33,7 +33,7 @@ function SchedulerUsedKeywordsDisplay({
     load();
   }, [scheduleId]);
 
-  // ★ 使用済み解除されたら、その場で即座に UI 更新
+  // 解除されたワードは即反映
   useEffect(() => {
     if (removedKeyword) {
       setUsedKeywords((prev) => prev.filter((k) => k !== removedKeyword));
@@ -42,12 +42,23 @@ function SchedulerUsedKeywordsDisplay({
 
   const usedSet = new Set(usedKeywords);
 
+  const toggleSelect = (word: string) => {
+    if (selectedKeywords.includes(word)) {
+      // すでに選択 → 外す
+      setSelectedKeywords(selectedKeywords.filter((w) => w !== word));
+    } else {
+      // 新しく選択
+      setSelectedKeywords([...selectedKeywords, word]);
+    }
+  };
+
   return (
     <div className="flex flex-wrap gap-2">
       {keywords.map((word) => {
         const isUsed = usedSet.has(word);
-        const isSelected = selectedKeyword === word;
+        const isSelected = selectedKeywords.includes(word);
 
+        // 未使用 → 青、クリック不可
         if (!isUsed) {
           return (
             <span
@@ -59,17 +70,16 @@ function SchedulerUsedKeywordsDisplay({
           );
         }
 
+        // 使用済み → 複数選択対応
         return (
           <button
             key={word}
-            onClick={() =>
-              setSelectedKeyword(isSelected ? null : word)
-            }
+            onClick={() => toggleSelect(word)}
             className={
               `px-3 py-1 rounded-full text-xs transition ` +
               (isSelected
-                ? "bg-gray-500 text-white"
-                : "bg-gray-300 text-gray-600")
+                ? "bg-gray-600 text-white"
+                : "bg-gray-300 text-gray-700")
             }
           >
             {word}
@@ -79,8 +89,6 @@ function SchedulerUsedKeywordsDisplay({
     </div>
   );
 }
-
-
 
 
 export default function Scheduler() {
@@ -93,7 +101,7 @@ export default function Scheduler() {
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(
     null
   );
-  const [selectedKeyword, setSelectedKeyword] = useState<string | null>(null);
+  const [selectedKeywords, setSelectedKeywords] = useState<string[]>([]);
   const [mainKeywords, setMainKeywords] = useState<any[]>([]);
   const [selectedMainKeyword, setSelectedMainKeyword] = useState<string | null>(null);
   const [relatedKeywords, setRelatedKeywords] = useState<string[]>([]);
