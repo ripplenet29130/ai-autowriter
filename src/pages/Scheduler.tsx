@@ -213,13 +213,10 @@ export default function Scheduler() {
       const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
       const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-      const response = await fetch(`${supabaseUrl}/functions/v1/auto-post`, {
+      const response = await fetch('https://ai-autowriter.netlify.app/.netlify/functions/scheduler', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${supabaseAnonKey}`,
-        },
-        body: JSON.stringify({ schedule_id: scheduleId }),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ schedule_id }),
       });
 
       if (!response.ok) {
