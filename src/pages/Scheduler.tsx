@@ -493,8 +493,8 @@ export default function Scheduler() {
           </h2>
 
           <div className="space-y-4">
+
             // 追加：関連キーワードの選択状態
-            const [selectedKeyword, setSelectedKeyword] = useState<string | null>(null);
 
             {schedules.map((schedule) => (
               <div
