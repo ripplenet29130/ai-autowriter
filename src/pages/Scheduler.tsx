@@ -793,26 +793,32 @@ export default function Scheduler() {
 
                       {/* 使用済み解除 */}
                       <button
-                        onClick={async () => {
-                          if (!selectedKeyword) {
-                            showMessage("error", "解除するキーワードを選択してください");
-                            return;
-                          }
-                  
-                          await supabase
-                            .from("schedule_used_keywords")
-                            .delete()
-                            .eq("schedule_id", schedule.id)
-                            .eq("keyword", selectedKeyword);
-                  
-                          showMessage("success", `「${selectedKeyword}」を未使用に戻しました`);
-                          setSelectedKeyword(null);
-                          loadSchedules();
-                        }}
-                        className="px-4 py-2 border border-purple-300 text-purple-700 rounded-lg hover:bg-purple-50"
-                      >
-                        🧹 使用済み解除
-                      </button>
+                      onClick={async () => {
+                        if (!selectedKeyword) {
+                          showMessage("error", "解除するキーワードを選択してください");
+                          return;
+                        }
+                    
+                        // Supabaseから削除
+                        await supabase
+                          .from("schedule_used_keywords")
+                          .delete()
+                          .eq("schedule_id", schedule.id)
+                          .eq("keyword", selectedKeyword);
+                    
+                        // UIを即時更新（青色に戻す）
+                        setRemovedKeyword(selectedKeyword);
+                    
+                        // 選択解除
+                        setSelectedKeyword(null);
+                    
+                        showMessage("success", `「${selectedKeyword}」を未使用に戻しました`);
+                      }}
+                      className="px-4 py-2 border border-purple-300 text-purple-700 rounded-lg hover:bg-purple-50"
+                    >
+                      🧹 使用済み解除
+                    </button>
+
                     </div>
                     ) : (
                       <div className="border-t border-gray-200 pt-4 mt-4 space-y-4 text-sm text-gray-700 w-64">
