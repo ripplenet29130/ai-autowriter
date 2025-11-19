@@ -28,9 +28,7 @@ export async function generateArticleByAI(
   keyword: string,
   related_keywords: string[] = []
 ) {
-  // ------------------------------------------------------
-  // ① AI設定を取得
-  // ------------------------------------------------------
+  // ① AI設定取得
   const { data: aiConfig, error: aiError } = await supabase
     .from("ai_configs")
     .select("*")
@@ -41,33 +39,21 @@ export async function generateArticleByAI(
     throw new Error("AI設定の取得に失敗しました");
   }
 
-  // ------------------------------------------------------
-  // ② 中心テーマを抽出（related_keywords → fallback keyword）
-  // ------------------------------------------------------
-  const center =
-    Array.isArray(related_keywords) && related_keywords.length > 0
-      ? related_keywords[Math.floor(Math.random() * related_keywords.length)]
-      : keyword;
+  // 🚫【バグの原因】related_keywords から再抽選 → 廃止する
+  // const center = related_keywords.length > 0
+  //   ? related_keywords[Math.floor(Math.random() * related_keywords.length)]
+  //   : keyword;
 
-  // ------------------------------------------------------
-  // ③ プロンプト生成（共通）
-  // ------------------------------------------------------
+  // ✅ scheduler から渡された "keyword" をそのまま使う
+  const center = keyword;
+
+  // ③ プロンプト生成
   const prompt = buildUnifiedPrompt(center, aiConfig);
 
-  console.log("=== プレビュー用プロンプト ===");
-  console.log(prompt);
-
-  // ------------------------------------------------------
-  // ④ AIモデル呼び出し（共通）
-  // ------------------------------------------------------
+  // ④ AI呼び出し
   const raw = await callAI(aiConfig, prompt);
 
-  console.log("=== プレビュー用 AI 生出力 ===");
-  console.log(raw);
-
-  // ------------------------------------------------------
-  // ⑤ JSON解析（共通）
-  // ------------------------------------------------------
+  // ⑤ JSON解析
   const article = parseArticle(raw);
 
   return {
@@ -76,3 +62,4 @@ export async function generateArticleByAI(
     center_keyword: center,
   };
 }
+
