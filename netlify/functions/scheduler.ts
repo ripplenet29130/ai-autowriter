@@ -1,17 +1,3 @@
-export const handler = async (event, context) => {
-  console.log("🟣 scheduler invoked", {
-    method: event.httpMethod,
-    body: event.body,
-  });
-
-  // 必ず何かを return する必要がある
-  return {
-    statusCode: 200,
-    body: JSON.stringify({ message: "ok" })
-  };
-};
-
-
 // netlify/functions/scheduler.ts
 import type { Handler } from "@netlify/functions";
 import { createClient } from "@supabase/supabase-js";
