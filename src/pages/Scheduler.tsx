@@ -519,8 +519,6 @@ export default function Scheduler() {
 
           <div className="space-y-4">
 
-            // 追加：関連キーワードの選択状態
-
             {schedules.map((schedule) => (
               <div
                 key={schedule.id}
