@@ -671,7 +671,7 @@ export default function Scheduler() {
 
                         try {
                           const res = await fetch(
-                            '/.netlify/functions/post-now',
+                            '/.netlify/functions/scheduler',
                             {
                               method: 'POST',
                               headers: { 'Content-Type': 'application/json' },
