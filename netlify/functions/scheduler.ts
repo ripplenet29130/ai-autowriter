@@ -16,17 +16,21 @@ async function postToWordPress(wp: any, article: {
   date: string;
 }) {
   console.log(`🌐 WordPress投稿開始: ${wp.url}`);
-  const endpoint = `${wp.url}/wp-json/wp/v2/posts`;
+  const endpoint = `${wp.url.replace(/\/$/, "")}/wp-json/wp/v2/posts`;
+
+  const credential = Buffer.from(
+    `${wp.username}:${wp.app_password}`
+  ).toString("base64");
 
   // カテゴリID取得
   async function getCategoryIdByName(name: string) {
     try {
-      const res = await fetch(`${wp.url}/wp-json/wp/v2/categories?search=${encodeURIComponent(name)}`, {
-        headers: {
-          Authorization:
-            "Basic " + Buffer.from(`${wp.username}:${wp.app_password}`).toString("base64"),
-        },
-      });
+      const res = await fetch(
+        `${wp.url}/wp-json/wp/v2/categories?search=${encodeURIComponent(name)}`,
+        {
+          headers: { Authorization: `Basic ${credential}` },
+        }
+      );
 
       if (!res.ok) return 1;
 
@@ -52,15 +56,14 @@ async function postToWordPress(wp: any, article: {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization:
-        "Basic " + Buffer.from(`${wp.username}:${wp.app_password}`).toString("base64"),
+      Authorization: `Basic ${credential}`,
     },
     body: JSON.stringify({
       title: article.title,
       content: article.content,
       categories: [categoryId],
       status: "publish",
-      date: article.date,       
+      date: article.date,
     }),
   });
 
@@ -70,37 +73,63 @@ async function postToWordPress(wp: any, article: {
   }
 
   const result = await response.json();
-  console.log(`✅ 投稿完了: ${result.link}`);
   return result;
 }
 
-// メイン処理
-export const handler: Handler = async () => {
+// ====== メイン処理 ======
+export const handler: Handler = async (event) => {
   console.log("🕒 スケジューラー起動");
 
-  // JSTの現在時刻
   const now = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Tokyo" }));
-  const hour = now.getHours().toString().padStart(2, "0");
-  const minute = now.getMinutes().toString().padStart(2, "0");
-  const currentTime = `${hour}:${minute}`;
 
-  // スケジュール取得
-  const { data: schedules } = await supabase
-    .from("schedule_settings")
-    .select("*")
-    .eq("status", true);
-
-  if (!schedules?.length) {
-    console.error("❌ スケジュールなし");
-    return { statusCode: 404, body: "No schedules" };
+  // ★ 即時実行モード
+  let forcedScheduleId: string | null = null;
+  if (event.httpMethod === "POST" && event.body) {
+    try {
+      const body = JSON.parse(event.body);
+      if (body.schedule_id) {
+        forcedScheduleId = body.schedule_id;
+        console.log("⚡ 即時実行モード:", forcedScheduleId);
+      }
+    } catch {}
   }
 
-  // 今実行すべきスケジュール
-  const targets = schedules.filter((s: any) => s.post_time === currentTime);
+  // スケジュール取得
+  let schedules: any[] = [];
 
-  console.log("🎯 対象スケジュール数:", targets.length);
+  if (forcedScheduleId) {
+    // ★ 即時実行用：schedule_id だけ取得
+    const { data } = await supabase
+      .from("schedule_settings")
+      .select("*")
+      .eq("id", forcedScheduleId)
+      .eq("status", true)
+      .single();
 
-  for (const schedule of targets) {
+    if (!data) {
+      return { statusCode: 404, body: "Schedule not found" };
+    }
+
+    schedules = [data];
+
+  } else {
+    // ★ 通常スケジュール処理（時間で自動）
+    const hour = now.getHours().toString().padStart(2, "0");
+    const minute = now.getMinutes().toString().padStart(2, "0");
+    const currentTime = `${hour}:${minute}`;
+
+    const { data } = await supabase
+      .from("schedule_settings")
+      .select("*")
+      .eq("status", true);
+
+    schedules = (data || []).filter((s) => s.post_time === currentTime);
+  }
+
+  console.log("🎯 実行対象数:", schedules.length);
+
+  // ====== スケジュール実行 ======
+  for (const schedule of schedules) {
     try {
       console.log(`🚀 投稿開始: ${schedule.id}`);
 
@@ -113,33 +142,23 @@ export const handler: Handler = async () => {
 
       if (!wpConfig) continue;
 
-      // 使用キーワード選択
-      // 🔍 スケジュールの使用済みキーワードを取得
-      const { data: usedKeywordsData } = await supabase
+      // 使用済みキーワード取得
+      const { data: usedWords } = await supabase
         .from("schedule_used_keywords")
         .select("keyword")
         .eq("schedule_id", schedule.id);
-      
-      const usedKeywords = usedKeywordsData?.map((u) => u.keyword) || [];
-      const usedSet = new Set(usedKeywords);
-      
-      // 🔍 このスケジュールのキーワードリスト（trend_keywords）を取得
-      // ※ schedule.related_keywords はすでに配列として持っている前提
-      const relatedList = Array.isArray(schedule.related_keywords)
-        ? schedule.related_keywords
-        : [];
-      
-      // 🔍 使用済みを除外した未使用キーワード
-      const unusedKeywords = relatedList.filter((kw) => !usedSet.has(kw));
-      
-      // 🟢 次に使うキーワードを決定
-      // 1. 未使用がある → 未使用からランダム選択
-      // 2. 未使用ゼロ → メインキーワードにフォールバック
-      const selectedKeyword =
-        unusedKeywords.length > 0
-          ? unusedKeywords[Math.floor(Math.random() * unusedKeywords.length)]
-          : schedule.keyword;
 
+      const usedSet = new Set((usedWords || []).map((u) => u.keyword));
+
+      const relatedList: string[] =
+        Array.isArray(schedule.related_keywords) ? schedule.related_keywords : [];
+
+      const unused = relatedList.filter((kw) => !usedSet.has(kw));
+
+      const selectedKeyword =
+        unused.length > 0
+          ? unused[Math.floor(Math.random() * unused.length)]
+          : schedule.keyword;
 
       // AI記事生成
       const { title, content } = await generateArticleByAI(
@@ -148,32 +167,32 @@ export const handler: Handler = async () => {
         relatedList
       );
 
-      // ★ ここで投稿日時を作成する（JSTで）
-      const today = now.toISOString().split("T")[0];
-      const postDate = `${today}T${schedule.post_time}:00+09:00`;
+      // 投稿日時（即時）
+      const jstDate = new Date(
+        new Date().toLocaleString("en-US", { timeZone: "Asia/Tokyo" })
+      );
+      const iso = jstDate.toISOString().replace("Z", "+09:00");
 
-      // WordPress投稿
       const postResult = await postToWordPress(wpConfig, {
         title,
         content,
-        date: postDate,
+        date: iso,
       });
 
-      // ★ 使用済みキーワードを記録する（投稿成功後）
-      await supabase
-        .from("schedule_used_keywords")
-        .insert({
-          schedule_id: schedule.id,
-          keyword: selectedKeyword,
-        });
+      // 使用済みキーワード記録
+      await supabase.from("schedule_used_keywords").insert({
+        schedule_id: schedule.id,
+        keyword: selectedKeyword,
+      });
 
-      // 実行履歴
+      // 実行日時保存
       await supabase
         .from("schedule_settings")
         .update({ last_run_at: new Date().toISOString() })
         .eq("id", schedule.id);
 
       console.log(`✅ 投稿成功: ${postResult.link}`);
+
     } catch (err: any) {
       console.error("❌ 投稿エラー:", err.message);
     }
