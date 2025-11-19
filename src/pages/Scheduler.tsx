@@ -670,16 +670,12 @@ export default function Scheduler() {
                         showMessage('success', '🕒 投稿を実行中です...');
 
                         try {
-                          const res = await fetch(
-                            '/.netlify/functions/scheduler',
-                            {
-                              method: 'POST',
-                              headers: { 'Content-Type': 'application/json' },
-                              body: JSON.stringify({
-                                schedule_id: schedule.id,
-                              }),
-                            }
-                          );
+                          const res = await fetch('https://ai-autowriter.netlify.app/.netlify/functions/scheduler', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ schedule_id: schedule.id }),
+                        });
+
 
                           const data = await res.json();
 
