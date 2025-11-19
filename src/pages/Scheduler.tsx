@@ -3,6 +3,50 @@ import { supabase, ScheduleSetting, AIConfig, WPConfig } from '../lib/supabase';
 import { Play, Pause, Trash2, Clock } from 'lucide-react';
 import Toast from '../components/Toast';
 
+// 使用済みキーワード色分け表示コンポーネント
+function SchedulerUsedKeywordsDisplay({
+  scheduleId,
+  keywords,
+}: {
+  scheduleId: string;
+  keywords: string[];
+}) {
+  const [usedKeywords, setUsedKeywords] = useState<string[]>([]);
+
+  useEffect(() => {
+    const loadUsed = async () => {
+      const { data } = await supabase
+        .from("schedule_used_keywords")
+        .select("keyword")
+        .eq("schedule_id", scheduleId);
+
+      setUsedKeywords(data?.map((d) => d.keyword) || []);
+    };
+
+    loadUsed();
+  }, [scheduleId]);
+
+  const usedSet = new Set(usedKeywords);
+
+  return (
+    <div className="flex flex-wrap gap-2">
+      {keywords.map((word, i) => (
+        <span
+          key={i}
+          className={
+            usedSet.has(word)
+              ? "bg-blue-600 text-white text-xs px-2 py-1 rounded-full" // 使用済み（濃い色）
+              : "bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full" // 未使用（薄い色）
+          }
+        >
+          {word}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+
 export default function Scheduler() {
   const [schedules, setSchedules] = useState<(ScheduleSetting & { ai_config?: AIConfig; wp_config?: WPConfig })[]>([]);
   const [aiConfigs, setAiConfigs] = useState<AIConfig[]>([]);
@@ -467,23 +511,17 @@ export default function Scheduler() {
                       </div>
 
                       {/* 関連ワード */}
-                      {schedule.related_keywords?.length > 0 && (
-                        <div className="col-span-2">
-                          <p className="font-medium text-gray-700 mb-1">関連ワード</p>
-                          <div className="flex flex-wrap gap-2">
-                            {schedule.related_keywords.map((word, i) => (
-                              <span
-                                key={i}
-                                className="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full"
-                              >
-                                {word}
-                              </span>
-                            ))}
+                        {schedule.related_keywords?.length > 0 && (
+                          <div className="col-span-2">
+                            <p className="font-medium text-gray-700 mb-1">関連ワード</p>
+                            <SchedulerUsedKeywordsDisplay scheduleId={schedule.id} keywords={schedule.related_keywords} />
                           </div>
+                        )}
+                          
                         </div>
                       )}
 
-                     {/* 投稿情報 */}
+{/* 投稿情報 */}
 <div className="col-span-2 mt-4 p-4 bg-gray-50 rounded-lg grid grid-cols-2 gap-4">
   {/* 投稿時刻 */}
   <div>
