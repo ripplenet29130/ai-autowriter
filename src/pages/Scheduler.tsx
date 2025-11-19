@@ -517,9 +517,7 @@ export default function Scheduler() {
                             <SchedulerUsedKeywordsDisplay scheduleId={schedule.id} keywords={schedule.related_keywords} />
                           </div>
                         )}
-                          
-                        </div>
-                      )}
+                        
 
 {/* 投稿情報 */}
 <div className="col-span-2 mt-4 p-4 bg-gray-50 rounded-lg grid grid-cols-2 gap-4">
