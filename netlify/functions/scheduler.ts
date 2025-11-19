@@ -140,6 +140,11 @@ export const handler: Handler = async () => {
         date: postDate,
       });
 
+      INSERT INTO schedule_used_keywords
+      (schedule_id, keyword)
+      VALUES
+      (schedule.id, selectedKeyword)
+
       // 実行履歴
       await supabase
         .from("schedule_settings")
