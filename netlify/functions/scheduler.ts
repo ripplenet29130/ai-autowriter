@@ -62,7 +62,7 @@ async function postToWordPress(wp: any, article: {
       title: article.title,
       content: article.content,
       categories: [categoryId],
-      status: "publish",
+      status: schedule.post_status === "draft" ? "draft" : "publish",
       date: article.date,
     }),
   });
