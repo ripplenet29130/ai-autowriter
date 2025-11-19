@@ -70,6 +70,7 @@ export default function Scheduler() {
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(
     null
   );
+  const [selectedKeyword, setSelectedKeyword] = useState<string | null>(null);
   const [mainKeywords, setMainKeywords] = useState<any[]>([]);
   const [selectedMainKeyword, setSelectedMainKeyword] = useState<string | null>(null);
   const [relatedKeywords, setRelatedKeywords] = useState<string[]>([]);
