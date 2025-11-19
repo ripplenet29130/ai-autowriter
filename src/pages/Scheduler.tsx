@@ -9,7 +9,7 @@ function SchedulerUsedKeywordsDisplay({
   scheduleId,
   keywords,
   selectedKeyword,
-  setSelectedKeyword
+  setSelectedKeyword,
 }: {
   scheduleId: string;
   keywords: string[];
@@ -38,17 +38,30 @@ function SchedulerUsedKeywordsDisplay({
         const isUsed = usedSet.has(word);
         const isSelected = selectedKeyword === word;
 
+        // 未使用 → 青 / 押せない
+        if (!isUsed) {
+          return (
+            <span
+              key={word}
+              className="px-3 py-1 rounded-full text-xs bg-blue-100 text-blue-800"
+            >
+              {word}
+            </span>
+          );
+        }
+
+        // 使用済み → 押せる（選択可能）
         return (
           <button
             key={word}
-            onClick={() => setSelectedKeyword(word)}
+            onClick={() =>
+              setSelectedKeyword(isSelected ? null : word)
+            }
             className={
-              `px-3 py-1 rounded-full text-xs border transition ` +
+              `px-3 py-1 rounded-full text-xs transition ` +
               (isSelected
-                ? "border-blue-600 bg-blue-100 text-blue-600"
-                : isUsed
-                ? "bg-gray-300 text-gray-600"
-                : "bg-blue-100 text-blue-800 border-transparent")
+                ? "bg-gray-500 text-white"
+                : "bg-gray-300 text-gray-600")
             }
           >
             {word}
@@ -58,6 +71,7 @@ function SchedulerUsedKeywordsDisplay({
     </div>
   );
 }
+
 
 
 export default function Scheduler() {
