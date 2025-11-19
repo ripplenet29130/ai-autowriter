@@ -1,4 +1,4 @@
-kimport { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { supabase, ScheduleSetting, AIConfig, WPConfig } from '../lib/supabase';
 import { Play, Pause, Trash2, Clock } from 'lucide-react';
 import Toast from '../components/Toast';
