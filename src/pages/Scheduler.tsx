@@ -15,11 +15,11 @@ export default function Scheduler() {
   const [formData, setFormData] = useState({
     ai_config_id: '',
     wp_config_id: '',
-    time: '17:00',
+    time: '13:00',
     frequency: '毎日',
     start_date: '',
     end_date: '',
-    post_status: 'publish',
+    post_status: 'draft',
     status: true,
   });
 
