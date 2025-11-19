@@ -60,7 +60,7 @@ async function postToWordPress(wp: any, article: {
       content: article.content,
       categories: [categoryId],
       status: "publish",
-      date: article.date,       // ← ここで受け取るだけ！
+      date: article.date,       
     }),
   });
 
@@ -114,13 +114,32 @@ export const handler: Handler = async () => {
       if (!wpConfig) continue;
 
       // 使用キーワード選択
+      // 🔍 スケジュールの使用済みキーワードを取得
+      const { data: usedKeywordsData } = await supabase
+        .from("schedule_used_keywords")
+        .select("keyword")
+        .eq("schedule_id", schedule.id);
+      
+      const usedKeywords = usedKeywordsData?.map((u) => u.keyword) || [];
+      const usedSet = new Set(usedKeywords);
+      
+      // 🔍 このスケジュールのキーワードリスト（trend_keywords）を取得
+      // ※ schedule.related_keywords はすでに配列として持っている前提
       const relatedList = Array.isArray(schedule.related_keywords)
         ? schedule.related_keywords
         : [];
+      
+      // 🔍 使用済みを除外した未使用キーワード
+      const unusedKeywords = relatedList.filter((kw) => !usedSet.has(kw));
+      
+      // 🟢 次に使うキーワードを決定
+      // 1. 未使用がある → 未使用からランダム選択
+      // 2. 未使用ゼロ → メインキーワードにフォールバック
       const selectedKeyword =
-        relatedList.length > 0
-          ? relatedList[Math.floor(Math.random() * relatedList.length)]
+        unusedKeywords.length > 0
+          ? unusedKeywords[Math.floor(Math.random() * unusedKeywords.length)]
           : schedule.keyword;
+
 
       // AI記事生成
       const { title, content } = await generateArticleByAI(
