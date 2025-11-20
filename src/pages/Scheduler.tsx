@@ -613,11 +613,14 @@ export default function Scheduler() {
                           </p>
                           <p>
                             {schedule.start_date
-                              ? `${schedule.start_date} ～ ${
-                                  schedule.end_date || '未設定'
+                              ? `${new Date(schedule.start_date).toLocaleDateString("ja-JP")} ～ ${
+                                  schedule.end_date
+                                    ? new Date(schedule.end_date).toLocaleDateString("ja-JP")
+                                    : "未設定"
                                 }`
-                              : '未設定'}
+                              : "未設定"}
                           </p>
+
                         </div>
 
                         {/* 投稿状態 */}
