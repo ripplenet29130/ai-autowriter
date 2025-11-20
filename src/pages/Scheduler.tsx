@@ -727,10 +727,8 @@ export default function Scheduler() {
                       {/* 最終実行 */}
                       {schedule.last_run_at && (
                         <p className="text-xs text-gray-400 mt-3">
-                          最終実行:{' '}
-                          {new Date(
-                            schedule.last_run_at
-                          ).toLocaleString('ja-JP')}
+                          スケジュール作成:{' '}
+                          {new Date(schedule.created_at).toLocaleString('ja-JP')}
                         </p>
                       )}
                     </div>
