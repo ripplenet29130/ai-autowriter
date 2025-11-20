@@ -270,18 +270,34 @@ const normalize = (str: string) =>
   
   // 🔹 新規リストの追加
   const handleAddNewKeyword = () => {
-    if (!newKeywordInput.trim()) return;
+  if (!newKeywordInput.trim()) return;
 
   const arr = normalize(newKeywordInput)
     .split(/[,、]/)
     .map((x) => normalize(x))
     .filter((x) => x.length > 0);
 
-    const newOnes = arr.filter((x) => !newListKeywords.includes(x));
+  // 既存と重複しているキーワードをチェック
+  const duplicates = arr.filter((x) => newListKeywords.includes(x));
 
-    setNewListKeywords([...newListKeywords, ...newOnes]);
-    setNewKeywordInput("");
+  if (duplicates.length > 0) {
+    showMessage("error", `重複しています: ${duplicates.join(", ")}`);
+    return; // 登録処理を止める
+  }
+
+  const newOnes = arr.filter((x) => !newListKeywords.includes(x));
+
+  if (newOnes.length === 0) {
+    showMessage("error", "新しいキーワードがありません");
+    return;
+  }
+
+  setNewListKeywords([...newListKeywords, ...newOnes]);
+  setNewKeywordInput("");
+
+  showMessage("success", `${newOnes.length}件のキーワードを追加しました`);
   };
+
 
   const handleRemoveNewKeyword = (i: number) => {
     setNewListKeywords(newListKeywords.filter((_, idx) => idx !== i));
@@ -337,10 +353,25 @@ const normalize = (str: string) =>
     .map((x) => normalize(x))
     .filter((x) => x.length > 0);
 
+    // 既存の重複チェック
+    const duplicates = arr.filter((x) => editListKeywords.includes(x));
+  
+    if (duplicates.length > 0) {
+      showMessage("error", `重複しています: ${duplicates.join(", ")}`);
+      return;
+    }
+
     const newOnes = arr.filter((x) => !editListKeywords.includes(x));
+
+    if (newOnes.length === 0) {
+    showMessage("error", "新しいキーワードがありません");
+    return;
+    }
 
     setEditListKeywords([...editListKeywords, ...newOnes]);
     setEditKeywordInput("");
+
+    showMessage("success", `${newOnes.length}件を追加しました`);
   };
 
   const handleRemoveEditKeyword = (i: number) => {
