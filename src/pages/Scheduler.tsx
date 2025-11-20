@@ -722,10 +722,7 @@ export default function Scheduler() {
     })()}
   </p>
 </div>
-
-
-                        </div>
-                      </div>
+                </div>
 
                       {/* 最終実行 */}
                       {schedule.last_run_at && (
