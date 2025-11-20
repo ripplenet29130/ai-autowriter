@@ -267,6 +267,17 @@ const normalize = (str: string) =>
     .replace(/\u3000/g, " ")   // 全角スペースを半角へ
     .replace(/\s+/g, " ")      // 連続スペースを圧縮
     .trim();
+
+  // 🔍 全体リストから重複キーワードがあるか検索する
+const findDuplicateInAllLists = (kw: string): string | null => {
+  for (const item of savedKeywords) {
+    if (item.related_keywords.includes(kw)) {
+      return item.keyword; // そのリスト名を返す
+    }
+  }
+  return null;
+};
+
   
   // 🔹 新規リストの追加
 const handleAddNewKeyword = () => {
