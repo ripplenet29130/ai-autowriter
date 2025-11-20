@@ -647,79 +647,82 @@ export default function Scheduler() {
                         </div>
 
                       {/* 次回投稿予定 */}
-                      <p className="text-gray-600 text-sm">
-                        {(() => {
-                          try {
-                            if (!schedule.status) return "停止中";
-                            if (!schedule.post_time || !schedule.frequency) return "未設定";
-                            if (!schedule.start_date) return "未設定";
-                      
-                            const start = new Date(schedule.start_date + "T00:00:00");
-                            const now = new Date();
-                      
-                            const [hour, minute] = schedule.post_time.split(":").map(Number);
-                      
-                            // start_date が未来 → その日が初回投稿日
-                            if (start > now) {
-                              start.setHours(hour, minute, 0, 0);
-                              return start.toLocaleString("ja-JP");
-                            }
-                      
-                            // 今日以降で、初回となる nextDate を計算
-                            let next = new Date(start);
-                            next.setHours(hour, minute, 0, 0);
-                      
-                            const diffDays = Math.floor((now - start) / (1000 * 60 * 60 * 24));
-                      
-                            switch (schedule.frequency) {
-                              case "毎日":
-                                // start_date 当日を過ぎていたら today or tomorrow 判定
-                                if (now <= next) {
-                                  // 今日の post_time が未来
-                                  return next.toLocaleString("ja-JP");
-                                } else {
-                                  // 明日
-                                  next.setDate(now.getDate() + 1);
-                                  return next.toLocaleString("ja-JP");
-                                }
-                      
-                              case "毎週":
-                                {
-                                  // start_date + n*7 日を today 以降になるまで進める
-                                  let n = Math.ceil(diffDays / 7);
-                                  next.setDate(start.getDate() + n * 7);
-                                  return next.toLocaleString("ja-JP");
-                                }
-                      
-                              case "隔週":
-                                {
-                                  let n = Math.ceil(diffDays / 14);
-                                  next.setDate(start.getDate() + n * 14);
-                                  return next.toLocaleString("ja-JP");
-                                }
-                      
-                              case "月一":
-                                {
-                                  // 月一 → start_date と同じ日付の翌月
-                                  next = new Date(start);
-                                  next.setMonth(start.getMonth() + 1);
-                      
-                                  // 今日以降になるまで+1月を繰り返す
-                                  while (next < now) {
-                                    next.setMonth(next.getMonth() + 1);
-                                  }
-                                  next.setHours(hour, minute, 0, 0);
-                                  return next.toLocaleString("ja-JP");
-                                }
-                      
-                              default:
-                                return "未設定";
-                            }
-                          } catch (e) {
-                            return "未設定";
-                          }
-                        })()}
-                      </p>
+{/* 次回投稿予定 */}
+<div>
+  <p className="font-medium text-gray-700 mb-1">次回投稿予定</p>
+  <p className="text-gray-600 text-sm">
+    {(() => {
+      try {
+        if (!schedule.status) return "停止中";
+        if (!schedule.post_time || !schedule.frequency) return "未設定";
+        if (!schedule.start_date) return "未設定";
+
+        const start = new Date(schedule.start_date + "T00:00:00");
+        const now = new Date();
+
+        const [hour, minute] = schedule.post_time.split(":").map(Number);
+
+        // start_date が未来 → その日が初回投稿日
+        if (start > now) {
+          let s = new Date(start);
+          s.setHours(hour, minute, 0, 0);
+          return s.toLocaleString("ja-JP");
+        }
+
+        // 今日以降で、初回となる nextDate を計算
+        let next = new Date(start);
+        next.setHours(hour, minute, 0, 0);
+
+        const diffDays = Math.floor((now - start) / (1000 * 60 * 60 * 24));
+
+        switch (schedule.frequency) {
+          case "毎日":
+            if (now <= next) {
+              return next.toLocaleString("ja-JP");
+            } else {
+              next = new Date(now);
+              next.setHours(hour, minute, 0, 0);
+              next.setDate(next.getDate() + 1);
+              return next.toLocaleString("ja-JP");
+            }
+
+          case "毎週":
+            {
+              let n = Math.ceil(diffDays / 7);
+              next.setDate(start.getDate() + n * 7);
+              return next.toLocaleString("ja-JP");
+            }
+
+          case "隔週":
+            {
+              let n = Math.ceil(diffDays / 14);
+              next.setDate(start.getDate() + n * 14);
+              return next.toLocaleString("ja-JP");
+            }
+
+          case "月一":
+            {
+              next = new Date(start);
+              next.setMonth(start.getMonth() + 1);
+
+              while (next < now) {
+                next.setMonth(next.getMonth() + 1);
+              }
+              next.setHours(hour, minute, 0, 0);
+
+              return next.toLocaleString("ja-JP");
+            }
+
+          default:
+            return "未設定";
+        }
+      } catch {
+        return "未設定";
+      }
+    })()}
+  </p>
+</div>
+
 
                         </div>
                       </div>
