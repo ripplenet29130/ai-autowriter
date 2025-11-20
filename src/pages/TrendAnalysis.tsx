@@ -339,8 +339,8 @@ const normalize = (str: string) =>
   };
 
   // 🔹 編集キーワード追加
-  const handleAddEditKeyword = () => {
-    if (!editKeywordInput.trim()) return;
+const handleAddEditKeyword = () => {
+  if (!editKeywordInput.trim()) return;
 
   const normalize = (str: string) =>
     str
@@ -353,26 +353,44 @@ const normalize = (str: string) =>
     .map((x) => normalize(x))
     .filter((x) => x.length > 0);
 
-    // 既存の重複チェック
-    const duplicates = arr.filter((x) => editListKeywords.includes(x));
-  
-    if (duplicates.length > 0) {
-      showMessage("error", `重複しています: ${duplicates.join(", ")}`);
-      return;
+  // ① 編集しているリスト内の重複チェック（従来の動作）
+  const duplicatesInThisList = arr.filter((x) =>
+    editListKeywords.includes(x)
+  );
+
+  if (duplicatesInThisList.length > 0) {
+    showMessage("error", `重複しています: ${duplicatesInThisList.join(", ")}`);
+    return; // 編集リスト内の重複は即中止
+  }
+
+  // ② 他のリストで重複しているかのチェック
+  for (const kw of arr) {
+    const existingListName = findDuplicateInAllLists(kw);
+
+    // 「他のリスト」に存在 → 確認を出す
+    if (existingListName && existingListName !== editListName) {
+      const confirmAdd = confirm(
+        `すでに「${existingListName}」に登録されています。\nこのまま追加しますか？`
+      );
+      if (!confirmAdd) return; // キャンセルされたら追加しない
     }
+  }
 
-    const newOnes = arr.filter((x) => !editListKeywords.includes(x));
+  // 追加対象キーワード
+  const newOnes = arr.filter((x) => !editListKeywords.includes(x));
 
-    if (newOnes.length === 0) {
+  if (newOnes.length === 0) {
     showMessage("error", "新しいキーワードがありません");
     return;
-    }
+  }
 
-    setEditListKeywords([...editListKeywords, ...newOnes]);
-    setEditKeywordInput("");
+  // 追加処理
+  setEditListKeywords([...editListKeywords, ...newOnes]);
+  setEditKeywordInput("");
 
-    showMessage("success", `${newOnes.length}件を追加しました`);
-  };
+  showMessage("success", `${newOnes.length}件を追加しました`);
+};
+
 
   const handleRemoveEditKeyword = (i: number) => {
     setEditListKeywords(editListKeywords.filter((_, idx) => idx !== i));
