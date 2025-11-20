@@ -248,6 +248,34 @@ export const handler: Handler = async (event) => {
         date: isoDate,
       });
 
+      // ChatWork 通知
+      // 残りキーワード数
+      const remaining = unused.length;
+      
+      // 3つ以下なら警告表示
+      const warningMessage =
+        remaining <= 3
+          ? `[warning]残りキーワード数が少なくなっています（残り ${remaining} 個）  
+      キーワード補充またはスケジュール設定の見直しをお願いします。[/warning]\n`
+          : "";
+      
+      // ChatWork 通知
+      await sendChatWorkMessage(
+        `[info][title]自動投稿が実行されました[/title]
+      サイト：${wpConfig.name}
+      記事タイトル：${title}
+      キーワード：${selectedKeyword}
+      投稿URL：${postResult.link}
+      
+      残りの未使用キーワード数：${remaining} 個
+      
+      ${warningMessage}
+      日時：${now.toLocaleString('ja-JP')}
+      [/info]`
+      );
+
+
+
       // 使用済み追加
       await supabase.from("schedule_used_keywords").insert({
         schedule_id: schedule.id,
@@ -272,3 +300,22 @@ export const handler: Handler = async (event) => {
     body: "Scheduler done",
   };
 };
+
+async function sendChatWorkMessage(text: string) {
+  const token = process.env.CHATWORK_API_TOKEN;
+  const roomId = process.env.CHATWORK_ROOM_ID;
+
+  const res = await fetch(`https://api.chatwork.com/v2/rooms/${roomId}/messages`, {
+    method: 'POST',
+    headers: {
+      'X-ChatWorkToken': token,
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: new URLSearchParams({ body: text })
+  });
+
+  if (!res.ok) {
+    console.error("ChatWork送信エラー:", await res.text());
+  }
+}
+
