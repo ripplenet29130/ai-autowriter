@@ -3,8 +3,7 @@ import { supabase, ScheduleSetting, AIConfig, WPConfig } from '../lib/supabase';
 import { Play, Pause, Trash2, Clock } from 'lucide-react';
 import Toast from '../components/Toast';
 
-const [refreshTrigger, setRefreshTrigger] = useState(0);
-
+// 使用済みキーワード色分け表示コンポーネント
 // 使用済みキーワード色分け + 選択機能
 function SchedulerUsedKeywordsDisplay({
   scheduleId,
@@ -32,8 +31,7 @@ function SchedulerUsedKeywordsDisplay({
       setUsedKeywords(data?.map((d) => d.keyword) || []);
     };
     load();
-  }, [scheduleId, refreshTrigger]);
-
+  }, [scheduleId]);
 
   // 解除されたワードは即反映
   useEffect(() => {
@@ -584,7 +582,6 @@ export default function Scheduler() {
                           selectedKeywords={selectedKeywords}
                           setSelectedKeywords={setSelectedKeywords}
                           removedKeyword={removedKeyword}
-                          refreshTrigger={refreshTrigger}
                           />
                         </div>
                       )}
@@ -829,9 +826,7 @@ export default function Scheduler() {
                     
                             // UI反映（選択されたものだけ元に戻す）
                             selectedKeywords.forEach((kw) => setRemovedKeyword(kw));
-
-                            setRefreshTrigger(prev => prev + 1);
-                            
+                    
                             showMessage(
                               "success",
                               `${selectedKeywords.length} 件のキーワードを未使用に戻しました`
@@ -859,8 +854,6 @@ export default function Scheduler() {
                           schedule.related_keywords.forEach((kw: string) =>
                             setRemovedKeyword(kw)
                           );
-
-                          setRefreshTrigger(prev => prev + 1);
                     
                           showMessage("success", "すべての使用済みキーワードを解除しました");
                           setSelectedKeywords([]);
