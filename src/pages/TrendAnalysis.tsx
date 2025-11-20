@@ -269,7 +269,7 @@ const normalize = (str: string) =>
     .trim();
   
   // 🔹 新規リストの追加
-  const handleAddNewKeyword = () => {
+const handleAddNewKeyword = () => {
   if (!newKeywordInput.trim()) return;
 
   const arr = normalize(newKeywordInput)
@@ -277,14 +277,28 @@ const normalize = (str: string) =>
     .map((x) => normalize(x))
     .filter((x) => x.length > 0);
 
-  // 既存と重複しているキーワードをチェック
-  const duplicates = arr.filter((x) => newListKeywords.includes(x));
+  // ① 新規リスト内での重複チェック（必須）
+  const duplicatesInThisList = arr.filter((x) =>
+    newListKeywords.includes(x)
+  );
 
-  if (duplicates.length > 0) {
-    showMessage("error", `重複しています: ${duplicates.join(", ")}`);
-    return; // 登録処理を止める
+  if (duplicatesInThisList.length > 0) {
+    showMessage("error", `重複しています: ${duplicatesInThisList.join(", ")}`);
+    return;
   }
 
+  // ② 全体リストとの重複チェック
+  for (const kw of arr) {
+    const existingListName = findDuplicateInAllLists(kw);
+    if (existingListName) {
+      const confirmAdd = confirm(
+        `すでに「${existingListName}」に登録されています。\nこのまま追加しますか？`
+      );
+      if (!confirmAdd) return; // ユーザーが中止を選んだ
+    }
+  }
+
+  // 追加要素の抽出
   const newOnes = arr.filter((x) => !newListKeywords.includes(x));
 
   if (newOnes.length === 0) {
@@ -296,7 +310,8 @@ const normalize = (str: string) =>
   setNewKeywordInput("");
 
   showMessage("success", `${newOnes.length}件のキーワードを追加しました`);
-  };
+};
+
 
 
   const handleRemoveNewKeyword = (i: number) => {
