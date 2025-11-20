@@ -176,6 +176,13 @@ export const handler: Handler = async (event) => {
       .eq("status", true);
 
     schedules = (data || []).filter((s) => {
+      
+      // ==========================================
+      // last_run_at（最後の投稿日）を取得
+      // ==========================================
+      const last = s.last_run_at ? new Date(s.last_run_at) : null;
+      const lastStr = last ? formatDate(last) : null;
+
       // ===============================
       // 時刻判定（Netlify遅延対策）
       // ===============================
