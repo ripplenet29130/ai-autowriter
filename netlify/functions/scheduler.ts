@@ -3,13 +3,29 @@ import type { Handler } from "@netlify/functions";
 import { createClient } from "@supabase/supabase-js";
 import { generateArticleByAI } from "../../src/utils/generateArticle";
 
-// Supabase接続
 const supabase = createClient(
   process.env.SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_KEY!
 );
 
-// WordPress投稿処理
+// ============================
+// Utility: JST date helpers
+// ============================
+function getJSTDate(): Date {
+  return new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Tokyo" }));
+}
+
+function formatDate(date: Date): string {
+  return date.toISOString().split("T")[0];
+}
+
+function daysBetween(a: Date, b: Date): number {
+  return Math.floor((b.getTime() - a.getTime()) / (1000 * 60 * 60 * 24));
+}
+
+// ===================================================
+// WordPress 投稿処理
+// ===================================================
 async function postToWordPress(wp: any, schedule: any, article: {
   title: string;
   content: string;
@@ -69,43 +85,82 @@ async function postToWordPress(wp: any, schedule: any, article: {
   return await response.json();
 }
 
+// ===================================================
+// Frequency 判定ロジック
+// ===================================================
+function shouldRunByFrequency(schedule: any, today: Date): boolean {
+  const start = new Date(schedule.start_date);
+  const diffDays = daysBetween(start, today);
 
-// ====== メイン処理 ======
+  if (diffDays < 0) return false; // start_date前
+
+  const last = schedule.last_run_at ? new Date(schedule.last_run_at) : null;
+
+  const todayStr = formatDate(today);
+  const lastStr = last ? formatDate(last) : null;
+
+  switch (schedule.frequency) {
+    case "daily":
+      return lastStr !== todayStr;
+
+    case "weekly":
+      if (diffDays % 7 !== 0) return false;
+      return lastStr !== todayStr;
+
+    case "biweekly":
+      if (diffDays % 14 !== 0) return false;
+      return lastStr !== todayStr;
+
+    case "monthly":
+      if (today.getDate() !== start.getDate()) return false;
+      // 月に1回だけ
+      if (!last) return true;
+      return today.getMonth() !== last.getMonth();
+
+    default:
+      return false;
+  }
+}
+
+// ===================================================
+// 投稿処理メイン
+// ===================================================
 export const handler: Handler = async (event) => {
   console.log("🕒 スケジューラー起動");
 
-  const now = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Tokyo" }));
+  const now = getJSTDate();
+  const currentTime = `${now.getHours().toString().padStart(2, "0")}:${now
+    .getMinutes()
+    .toString()
+    .padStart(2, "0")}`;
+  const todayStr = formatDate(now);
 
-    // ★ 即時実行モード
-    let forcedScheduleId: string | null = null;
-    
-    try {
-      const bodyText =
-        event.body && event.body.length > 0
-          ? event.body
-          : event.rawBody || null;
-    
-      if (bodyText) {
-        const body = JSON.parse(bodyText);
-        if (body.schedule_id) {
-          forcedScheduleId = body.schedule_id;
-          console.log("⚡ 即時実行モード:", forcedScheduleId);
-        }
+  // ------------------------------
+  // 即時実行チェック
+  // ------------------------------
+  let forcedScheduleId: string | null = null;
+  try {
+    const bodyText =
+      event.body && event.body.length > 0 ? event.body : event.rawBody || null;
+
+    if (bodyText) {
+      const body = JSON.parse(bodyText);
+      if (body.schedule_id) {
+        forcedScheduleId = body.schedule_id;
+        console.log("⚡ 即時実行モード:", forcedScheduleId);
       }
-    } catch (e) {
-      console.log("⚠ 即時実行の body パースエラー:", e);
     }
+  } catch (e) {
+    console.log("⚠ 即時実行 body パースエラー:", e);
+  }
 
-  // スケジュール取得
   let schedules: any[] = [];
 
   if (forcedScheduleId) {
-    // ★ 即時実行用：schedule_id だけ取得
     const { data } = await supabase
       .from("schedule_settings")
       .select("*")
       .eq("id", forcedScheduleId)
-      .eq("status", true)
       .single();
 
     if (!data) {
@@ -115,27 +170,34 @@ export const handler: Handler = async (event) => {
     schedules = [data];
 
   } else {
-    // ★ 通常スケジュール処理（時間で自動）
-    const hour = now.getHours().toString().padStart(2, "0");
-    const minute = now.getMinutes().toString().padStart(2, "0");
-    const currentTime = `${hour}:${minute}`;
-
     const { data } = await supabase
       .from("schedule_settings")
       .select("*")
       .eq("status", true);
 
-    schedules = (data || []).filter((s) => s.post_time === currentTime);
+    schedules = (data || []).filter((s) => {
+      // time match
+      if (s.post_time !== currentTime) return false;
+
+      // start_date & end_date
+      if (s.start_date && todayStr < s.start_date) return false;
+      if (s.end_date && todayStr > s.end_date) return false;
+
+      // frequency 判定
+      return shouldRunByFrequency(s, now);
+    });
   }
 
   console.log("🎯 実行対象数:", schedules.length);
 
-  // ====== スケジュール実行 ======
+  // ===========================
+  // 各スケジュール実行
+  // ===========================
   for (const schedule of schedules) {
     try {
       console.log(`🚀 投稿開始: ${schedule.id}`);
 
-      // WP設定取得
+      // WP設定
       const { data: wpConfig } = await supabase
         .from("wp_configs")
         .select("*")
@@ -144,58 +206,62 @@ export const handler: Handler = async (event) => {
 
       if (!wpConfig) continue;
 
-      // 使用済みキーワード取得
+      // 未使用キーワード計算
       const { data: usedWords } = await supabase
         .from("schedule_used_keywords")
         .select("keyword")
         .eq("schedule_id", schedule.id);
 
       const usedSet = new Set((usedWords || []).map((u) => u.keyword));
-
-      const relatedList: string[] =
-        Array.isArray(schedule.related_keywords) ? schedule.related_keywords : [];
+      const relatedList: string[] = Array.isArray(schedule.related_keywords)
+        ? schedule.related_keywords
+        : [];
 
       const unused = relatedList.filter((kw) => !usedSet.has(kw));
 
-      const selectedKeyword =
-        unused.length > 0
-          ? unused[Math.floor(Math.random() * unused.length)]
-          : schedule.keyword;
+      // ⚠ 未使用キーワードなし → 自動停止
+      if (unused.length === 0) {
+        console.log("🛑 未使用キーワードなし → 自動停止:", schedule.id);
+        await supabase
+          .from("schedule_settings")
+          .update({ status: false })
+          .eq("id", schedule.id);
 
-      // AI記事生成
+        continue;
+      }
+
+      const selectedKeyword =
+        unused[Math.floor(Math.random() * unused.length)];
+
+      // 記事生成
       const { title, content } = await generateArticleByAI(
         schedule.ai_config_id,
         selectedKeyword,
         relatedList
       );
 
-      // 投稿日時（即時）
-      const jstDate = new Date(
-        new Date().toLocaleString("en-US", { timeZone: "Asia/Tokyo" })
-      );
-      const iso = jstDate.toISOString().replace("Z", "+09:00");
+      const isoDate = now.toISOString().replace("Z", "+09:00");
 
       const postResult = await postToWordPress(wpConfig, schedule, {
         title,
         content,
-        date: iso,
+        date: isoDate,
       });
 
-
-      // 使用済みキーワード記録
+      // 使用済み追加
       await supabase.from("schedule_used_keywords").insert({
         schedule_id: schedule.id,
         keyword: selectedKeyword,
       });
 
-      // 実行日時保存
+      // last_run_at 更新
       await supabase
         .from("schedule_settings")
-        .update({ last_run_at: new Date().toISOString() })
+        .update({ last_run_at: now.toISOString() })
         .eq("id", schedule.id);
 
       console.log(`✅ 投稿成功: ${postResult.link}`);
-
+      
     } catch (err: any) {
       console.error("❌ 投稿エラー:", err.message);
     }
