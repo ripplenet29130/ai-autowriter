@@ -262,14 +262,20 @@ export default function TrendAnalysis() {
     loadSavedKeywords();
   };
 
+const normalize = (str: string) =>
+  str
+    .replace(/\u3000/g, " ")   // 全角スペースを半角へ
+    .replace(/\s+/g, " ")      // 連続スペースを圧縮
+    .trim();
+  
   // 🔹 新規リストの追加
   const handleAddNewKeyword = () => {
     if (!newKeywordInput.trim()) return;
 
-    const arr = newKeywordInput
-      .split(",")
-      .map((x) => x.trim())
-      .filter((x) => x.length > 0);
+  const arr = normalize(newKeywordInput)
+    .split(/[,、]/)
+    .map((x) => normalize(x))
+    .filter((x) => x.length > 0);
 
     const newOnes = arr.filter((x) => !newListKeywords.includes(x));
 
@@ -320,10 +326,16 @@ export default function TrendAnalysis() {
   const handleAddEditKeyword = () => {
     if (!editKeywordInput.trim()) return;
 
-    const arr = editKeywordInput
-      .split(",")
-      .map((x) => x.trim())
-      .filter((x) => x.length > 0);
+  const normalize = (str: string) =>
+    str
+      .replace(/\u3000/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+
+  const arr = normalize(editKeywordInput)
+    .split(/[,、]/)
+    .map((x) => normalize(x))
+    .filter((x) => x.length > 0);
 
     const newOnes = arr.filter((x) => !editListKeywords.includes(x));
 
