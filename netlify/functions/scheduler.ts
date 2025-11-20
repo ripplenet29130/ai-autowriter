@@ -176,8 +176,19 @@ export const handler: Handler = async (event) => {
       .eq("status", true);
 
     schedules = (data || []).filter((s) => {
-      // time match
-      if (s.post_time !== currentTime) return false;
+      // ===============================
+      // 時刻判定（Netlify遅延対策）
+      // ===============================
+      const [th, tm] = s.post_time.split(":").map(Number);
+      const [ch, cm] = currentTime.split(":").map(Number);
+      
+      const nowMinutes = ch * 60 + cm;
+      const targetMinutes = th * 60 + tm;
+      
+      // 今日まだ投稿していない ＋ 現在時刻が投稿時刻を過ぎていればOK
+      if (!(lastStr !== todayStr && nowMinutes >= targetMinutes)) {
+        return false;
+      }
 
       // start_date & end_date
       if (s.start_date && todayStr < s.start_date) return false;
