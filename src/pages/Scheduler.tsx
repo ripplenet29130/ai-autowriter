@@ -803,33 +803,64 @@ export default function Scheduler() {
                       {/* 使用済み解除 */}
                       <button
                         onClick={async () => {
-                          if (selectedKeywords.length === 0) {
-                            showMessage("error", "解除するキーワードを選択してください");
-                            return;
-                          }
+                          try {
+                            // ============================
+                            // ① 何も選択していない → 全解除
+                            // ============================
+                            if (selectedKeywords.length === 0) {
+                              const ok = confirm(
+                                "使用済みキーワードをすべて解除しますか？\n（元に戻せません）"
+                              );
+                              if (!ok) return;
                       
-                          // Supabaseで複数一括削除
-                          await Promise.all(
-                            selectedKeywords.map((kw) =>
-                              supabase
+                              // DBから全部削除
+                              await supabase
                                 .from("schedule_used_keywords")
                                 .delete()
-                                .eq("schedule_id", schedule.id)
-                                .eq("keyword", kw)
-                            )
-                          );
+                                .eq("schedule_id", schedule.id);
                       
-                          // UI即時反映
-                          selectedKeywords.forEach((kw) => setRemovedKeyword(kw));
+                              // UI反映（全部未使用に）
+                              schedule.related_keywords.forEach((kw: string) =>
+                                setRemovedKeyword(kw)
+                              );
                       
-                          showMessage("success", `${selectedKeywords.length}件のキーワードを未使用に戻しました`);
+                              showMessage("success", "すべての使用済みキーワードを解除しました");
+                              setSelectedKeywords([]);
+                              return;
+                            }
                       
-                          setSelectedKeywords([]); // 全選択解除
+                            // ============================
+                            // ② 選択されている → 個別解除
+                            // ============================
+                            await Promise.all(
+                              selectedKeywords.map((kw) =>
+                                supabase
+                                  .from("schedule_used_keywords")
+                                  .delete()
+                                  .eq("schedule_id", schedule.id)
+                                  .eq("keyword", kw)
+                              )
+                            );
+                      
+                            // UI側にも即反映
+                            selectedKeywords.forEach((kw) => setRemovedKeyword(kw));
+                      
+                            showMessage(
+                              "success",
+                              `${selectedKeywords.length}件のキーワードを未使用に戻しました`
+                            );
+                      
+                            setSelectedKeywords([]);
+                          } catch (err) {
+                            console.error(err);
+                            showMessage("error", "解除中にエラーが発生しました");
+                          }
                         }}
                         className="px-4 py-2 border border-purple-300 text-purple-700 rounded-lg hover:bg-purple-50"
                       >
                         🧹 使用済み解除
                       </button>
+
 
 
                     </div>
