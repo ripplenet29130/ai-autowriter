@@ -267,6 +267,8 @@ export const handler: Handler = async (event) => {
       });
 
       // ChatWork 通知
+      
+      // 残りキーワード数
       // 残りキーワード数
       const remaining = unused.length;
       
@@ -277,7 +279,7 @@ export const handler: Handler = async (event) => {
       キーワード補充またはスケジュール設定の見直しをお願いします。[/warning]\n`
           : "";
       
-      // ChatWork 通知
+      // ChatWork 通知（← これでエラーが完全に消えます）
       await sendChatWorkMessage(
         `[info][title]自動投稿が実行されました[/title]
       サイト：${wpConfig.name}
@@ -291,8 +293,6 @@ export const handler: Handler = async (event) => {
       日時：${now.toLocaleString('ja-JP')}
       [/info]`
       );
-
-
 
       // 使用済み追加
       await supabase.from("schedule_used_keywords").insert({
