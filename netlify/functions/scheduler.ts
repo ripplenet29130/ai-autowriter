@@ -1,20 +1,18 @@
-export const config = {
-  path: "/scheduler",
-};
-
-
 // netlify/functions/scheduler.ts
 import type { Handler } from "@netlify/functions";
 import { createClient } from "@supabase/supabase-js";
 import { generateArticleByAI } from "../../src/utils/generateArticle";
 
+// ============================
+// Supabase 初期化
+// ============================
 const supabase = createClient(
   process.env.SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_KEY!
 );
 
 // ============================
-// Utility: JST date helpers
+// 共通：JST Helper
 // ============================
 function getJSTDate(): Date {
   return new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Tokyo" }));
@@ -28,9 +26,30 @@ function daysBetween(a: Date, b: Date): number {
   return Math.floor((b.getTime() - a.getTime()) / (1000 * 60 * 60 * 24));
 }
 
-// ===================================================
+// ============================
+// ChatWork 送信（先に宣言）
+// ============================
+async function sendChatWorkMessage(text: string) {
+  const token = process.env.CHATWORK_API_TOKEN;
+  const roomId = process.env.CHATWORK_ROOM_ID;
+
+  const res = await fetch(`https://api.chatwork.com/v2/rooms/${roomId}/messages`, {
+    method: "POST",
+    headers: {
+      "X-ChatWorkToken": token,
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: new URLSearchParams({ body: text }),
+  });
+
+  if (!res.ok) {
+    console.error("ChatWork送信エラー:", await res.text());
+  }
+}
+
+// ============================
 // WordPress 投稿処理
-// ===================================================
+// ============================
 async function postToWordPress(wp: any, schedule: any, article: {
   title: string;
   content: string;
@@ -50,7 +69,6 @@ async function postToWordPress(wp: any, schedule: any, article: {
         { headers: { Authorization: `Basic ${credential}` } }
       );
       if (!res.ok) return 1;
-
       const categories = await res.json();
       return categories.length > 0 ? categories[0].id : 1;
     } catch {
@@ -59,6 +77,7 @@ async function postToWordPress(wp: any, schedule: any, article: {
   }
 
   let categoryId = 1;
+
   if (wp.default_category) {
     if (!isNaN(Number(wp.default_category))) {
       categoryId = Number(wp.default_category);
@@ -90,17 +109,16 @@ async function postToWordPress(wp: any, schedule: any, article: {
   return await response.json();
 }
 
-// ===================================================
-// Frequency 判定ロジック
-// ===================================================
+// ============================
+// Frequency 判定ロジック（完全修正版）
+// ============================
 function shouldRunByFrequency(schedule: any, today: Date): boolean {
   const start = new Date(schedule.start_date);
   const diffDays = daysBetween(start, today);
 
-  if (diffDays < 0) return false; // start_date前
+  if (diffDays < 0) return false;
 
   const last = schedule.last_run_at ? new Date(schedule.last_run_at) : null;
-
   const todayStr = formatDate(today);
   const lastStr = last ? formatDate(last) : null;
 
@@ -109,16 +127,13 @@ function shouldRunByFrequency(schedule: any, today: Date): boolean {
       return lastStr !== todayStr;
 
     case "weekly":
-      if (diffDays % 7 !== 0) return false;
-      return lastStr !== todayStr;
+      return diffDays % 7 === 0 && lastStr !== todayStr;
 
     case "biweekly":
-      if (diffDays % 14 !== 0) return false;
-      return lastStr !== todayStr;
+      return diffDays % 14 === 0 && lastStr !== todayStr;
 
     case "monthly":
       if (today.getDate() !== start.getDate()) return false;
-      // 月に1回だけ
       if (!last) return true;
       return today.getMonth() !== last.getMonth();
 
@@ -127,9 +142,9 @@ function shouldRunByFrequency(schedule: any, today: Date): boolean {
   }
 }
 
-// ===================================================
-// 投稿処理メイン
-// ===================================================
+// ============================
+// Scheduler メイン処理
+// ============================
 export const handler: Handler = async (event) => {
   console.log("🕒 スケジューラー起動");
 
@@ -140,23 +155,19 @@ export const handler: Handler = async (event) => {
     .padStart(2, "0")}`;
   const todayStr = formatDate(now);
 
-  // ------------------------------
-  // 即時実行チェック
-  // ------------------------------
+  // ================================
+  // 即時実行
+  // ================================
   let forcedScheduleId: string | null = null;
-  try {
-    const bodyText =
-      event.body && event.body.length > 0 ? event.body : event.rawBody || null;
 
-    if (bodyText) {
-      const body = JSON.parse(bodyText);
-      if (body.schedule_id) {
-        forcedScheduleId = body.schedule_id;
-        console.log("⚡ 即時実行モード:", forcedScheduleId);
-      }
+  try {
+    const body = JSON.parse(event.body || "{}");
+    if (body.schedule_id) {
+      forcedScheduleId = body.schedule_id;
+      console.log("⚡ 即時実行モード:", forcedScheduleId);
     }
   } catch (e) {
-    console.log("⚠ 即時実行 body パースエラー:", e);
+    console.log("⚠ body パースエラー:", e);
   }
 
   let schedules: any[] = [];
@@ -168,9 +179,7 @@ export const handler: Handler = async (event) => {
       .eq("id", forcedScheduleId)
       .single();
 
-    if (!data) {
-      return { statusCode: 404, body: "Schedule not found" };
-    }
+    if (!data) return { statusCode: 404, body: "Schedule not found" };
 
     schedules = [data];
 
@@ -181,41 +190,29 @@ export const handler: Handler = async (event) => {
       .eq("status", true);
 
     schedules = (data || []).filter((s) => {
-      
-      // ==========================================
-      // last_run_at（最後の投稿日）を取得
-      // ==========================================
       const last = s.last_run_at ? new Date(s.last_run_at) : null;
       const lastStr = last ? formatDate(last) : null;
 
-      // ===============================
-      // 時刻判定（Netlify遅延対策）
-      // ===============================
       const [th, tm] = s.post_time.split(":").map(Number);
       const [ch, cm] = currentTime.split(":").map(Number);
-      
+
       const nowMinutes = ch * 60 + cm;
       const targetMinutes = th * 60 + tm;
-      
-      // 今日まだ投稿していない ＋ 現在時刻が投稿時刻を過ぎていればOK
-      if (!(lastStr !== todayStr && nowMinutes >= targetMinutes)) {
-        return false;
-      }
 
-      // start_date & end_date
+      if (!(lastStr !== todayStr && nowMinutes >= targetMinutes)) return false;
+
       if (s.start_date && todayStr < s.start_date) return false;
       if (s.end_date && todayStr > s.end_date) return false;
 
-      // frequency 判定
       return shouldRunByFrequency(s, now);
     });
   }
 
-  console.log("🎯 実行対象数:", schedules.length);
+  console.log("🎯 実行対象スケジュール数:", schedules.length);
 
-  // ===========================
-  // 各スケジュール実行
-  // ===========================
+  // ============================
+  // メイン処理
+  // ============================
   for (const schedule of schedules) {
     try {
       console.log(`🚀 投稿開始: ${schedule.id}`);
@@ -229,7 +226,7 @@ export const handler: Handler = async (event) => {
 
       if (!wpConfig) continue;
 
-      // 未使用キーワード計算
+      // 未使用キーワード
       const { data: usedWords } = await supabase
         .from("schedule_used_keywords")
         .select("keyword")
@@ -242,21 +239,18 @@ export const handler: Handler = async (event) => {
 
       const unused = relatedList.filter((kw) => !usedSet.has(kw));
 
-      // ⚠ 未使用キーワードなし → 自動停止
       if (unused.length === 0) {
-        console.log("🛑 未使用キーワードなし → 自動停止:", schedule.id);
+        console.log("🛑 キーワード不足 → 自動停止:", schedule.id);
         await supabase
           .from("schedule_settings")
           .update({ status: false })
           .eq("id", schedule.id);
-
         continue;
       }
 
       const selectedKeyword =
         unused[Math.floor(Math.random() * unused.length)];
 
-      // 記事生成
       const { title, content } = await generateArticleByAI(
         schedule.ai_config_id,
         selectedKeyword,
@@ -272,47 +266,42 @@ export const handler: Handler = async (event) => {
       });
 
       // ChatWork 通知
-      
-      // 残りキーワード数
-      // 残りキーワード数
-      const remaining = unused.length;
-      
-      // 3つ以下なら警告表示
+      const remaining = unused.length - 1;
+
       const warningMessage =
         remaining <= 3
-          ? `[warning]残りキーワード数が少なくなっています（残り ${remaining} 個）  
-      キーワード補充またはスケジュール設定の見直しをお願いします。[/warning]\n`
+          ? `[warning]残りキーワード数が少なくなっています（残り ${remaining} 個）
+キーワード補充またはスケジュール設定の見直しをお願いします。[/warning]\n`
           : "";
-      
-      // ChatWork 通知（← これでエラーが完全に消えます）
+
       await sendChatWorkMessage(
         `[info][title]自動投稿が実行されました[/title]
-      サイト：${wpConfig.name}
-      記事タイトル：${title}
-      キーワード：${selectedKeyword}
-      投稿URL：${postResult.link}
-      
-      残りの未使用キーワード数：${remaining} 個
-      
-      ${warningMessage}
-      日時：${now.toLocaleString('ja-JP')}
-      [/info]`
+サイト：${wpConfig.name}
+記事タイトル：${title}
+キーワード：${selectedKeyword}
+投稿URL：${postResult.link}
+
+残りの未使用キーワード数：${remaining} 個
+
+${warningMessage}
+日時：${now.toLocaleString("ja-JP")}
+[/info]`
       );
 
-      // 使用済み追加
+      // 使用済みに追加
       await supabase.from("schedule_used_keywords").insert({
         schedule_id: schedule.id,
         keyword: selectedKeyword,
       });
 
-      // last_run_at 更新
+      // last_run 更新
       await supabase
         .from("schedule_settings")
         .update({ last_run_at: now.toISOString() })
         .eq("id", schedule.id);
 
       console.log(`✅ 投稿成功: ${postResult.link}`);
-      
+
     } catch (err: any) {
       console.error("❌ 投稿エラー:", err.message);
     }
@@ -324,22 +313,9 @@ export const handler: Handler = async (event) => {
   };
 };
 
-async function sendChatWorkMessage(text: string) {
-  const token = process.env.CHATWORK_API_TOKEN;
-  const roomId = process.env.CHATWORK_ROOM_ID;
-
-  const res = await fetch(`https://api.chatwork.com/v2/rooms/${roomId}/messages`, {
-    method: 'POST',
-    headers: {
-      'X-ChatWorkToken': token,
-      'Content-Type': 'application/x-www-form-urlencoded',
-    },
-    body: new URLSearchParams({ body: text })
-  });
-
-  if (!res.ok) {
-    console.error("ChatWork送信エラー:", await res.text());
-  }
-}
-
-
+// ============================
+// Netlify パス設定（必須）
+// ============================
+export const config = {
+  path: "/auto-scheduler",
+};
