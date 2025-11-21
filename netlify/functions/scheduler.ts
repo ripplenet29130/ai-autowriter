@@ -1,3 +1,8 @@
+export const config = {
+  path: "/scheduler",
+};
+
+
 // netlify/functions/scheduler.ts
 import type { Handler } from "@netlify/functions";
 import { createClient } from "@supabase/supabase-js";
