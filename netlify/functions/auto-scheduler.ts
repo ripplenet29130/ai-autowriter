@@ -279,6 +279,7 @@ export const handler: Handler = async (event) => {
 サイト：${wpConfig.name}
 記事タイトル：${title}
 キーワード：${selectedKeyword}
+投稿状態：${statusLabel}
 投稿URL：${postResult.link}
 
 残りの未使用キーワード数：${remaining} 個
