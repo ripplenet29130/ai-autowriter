@@ -259,7 +259,7 @@ export default function Scheduler() {
     setLoading(true);
     try {
       const res = await fetch(
-        'https://ai-autowriter.netlify.app/.netlify/functions/scheduler',
+        'https://ai-autowriter.netlify.app/.netlify/functions/run-scheduler',
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
