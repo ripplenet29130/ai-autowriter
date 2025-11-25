@@ -185,19 +185,35 @@ export const handler: Handler = async (event) => {
 キーワード補充またはスケジュール設定の見直しをお願いします。[/warning]\n`
       : "";
 
-  await sendChatWorkMessage(
-    `[info][title]即時実行（run-scheduler）が実行されました[/title]
-サイト：${wpConfig.name}
-記事タイトル：${title}
-キーワード：${selectedKeyword}
-投稿URL：${postResult.link}
+await sendChatWorkMessage(
+`いつもお世話になっております。
+即時実行システムにて、記事の投稿が完了しましたのでご連絡いたします。
 
-残りの未使用キーワード数：${remaining} 個
+■ サイト名
+${wpConfig.name}
+
+■ 記事タイトル
+${title}
+
+■ キーワード
+${selectedKeyword}
+
+■ 投稿URL
+${postResult.link}
+
+■ 投稿状態
+${schedule.post_status === "publish" ? "公開" : "下書き"}
+
+■ 未使用キーワードの残数
+${remaining} 個
 
 ${warningMessage}
-日時：${now.toLocaleString("ja-JP")}
-[/info]`
-  );
+
+実行日時：${now.toLocaleString("ja-JP")}
+
+引き続きよろしくお願いいたします。`
+);
+
 
   // 使用済みに追加
   await supabase.from("schedule_used_keywords").insert({
