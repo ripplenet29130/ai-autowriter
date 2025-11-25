@@ -142,19 +142,36 @@ function shouldRunByFrequency(schedule: any, today: Date): boolean {
   }
 }
 
-// ============================
-// Scheduler メイン処理
-// ============================
 export const handler: Handler = async (event) => {
-  console.log("🕒 スケジューラー起動");
-
   const now = getJSTDate();
-  const currentTime = `${now.getHours().toString().padStart(2, "0")}:${now
-    .getMinutes()
-    .toString()
-    .padStart(2, "0")}`;
   const todayStr = formatDate(now);
+  const nowMinutes = now.getHours() * 60 + now.getMinutes();
 
+  // ============================
+  // スケジュール取得
+  // ============================
+  const { data } = await supabase
+    .from("schedule_settings")
+    .select("*")
+    .eq("status", true);
+
+  let schedules = (data || []).filter((s) => {
+    const lastStr = s.last_run_at ? formatDate(new Date(s.last_run_at)) : null;
+
+    const [th, tm] = s.post_time.split(":").map(Number);
+    const targetMinutes = th * 60 + tm;
+
+    // 投稿予定時刻の前後10分以内
+    const diff = Math.abs(nowMinutes - targetMinutes);
+    if (diff > 10) return false;
+
+    if (lastStr === todayStr) return false;
+    if (s.start_date && todayStr < s.start_date) return false;
+    if (s.end_date && todayStr > s.end_date) return false;
+
+    return shouldRunByFrequency(s, now);
+  });
+  
   // ============================
   // メイン処理
   // ============================
