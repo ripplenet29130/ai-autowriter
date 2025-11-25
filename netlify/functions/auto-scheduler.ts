@@ -155,61 +155,6 @@ export const handler: Handler = async (event) => {
     .padStart(2, "0")}`;
   const todayStr = formatDate(now);
 
-  // ================================
-  // 即時実行
-  // ================================
-  let forcedScheduleId: string | null = null;
-
-  try {
-    const body = JSON.parse(event.body || "{}");
-    if (body.schedule_id) {
-      forcedScheduleId = body.schedule_id;
-      console.log("⚡ 即時実行モード:", forcedScheduleId);
-    }
-  } catch (e) {
-    console.log("⚠ body パースエラー:", e);
-  }
-
-  let schedules: any[] = [];
-
-  if (forcedScheduleId) {
-    const { data } = await supabase
-      .from("schedule_settings")
-      .select("*")
-      .eq("id", forcedScheduleId)
-      .single();
-
-    if (!data) return { statusCode: 404, body: "Schedule not found" };
-
-    schedules = [data];
-
-  } else {
-    const { data } = await supabase
-      .from("schedule_settings")
-      .select("*")
-      .eq("status", true);
-
-    schedules = (data || []).filter((s) => {
-      const last = s.last_run_at ? new Date(s.last_run_at) : null;
-      const lastStr = last ? formatDate(last) : null;
-
-      const [th, tm] = s.post_time.split(":").map(Number);
-      const [ch, cm] = currentTime.split(":").map(Number);
-
-      const nowMinutes = ch * 60 + cm;
-      const targetMinutes = th * 60 + tm;
-
-      if (!(lastStr !== todayStr && nowMinutes >= targetMinutes)) return false;
-
-      if (s.start_date && todayStr < s.start_date) return false;
-      if (s.end_date && todayStr > s.end_date) return false;
-
-      return shouldRunByFrequency(s, now);
-    });
-  }
-
-  console.log("🎯 実行対象スケジュール数:", schedules.length);
-
   // ============================
   // メイン処理
   // ============================
