@@ -7,8 +7,11 @@ import { generateArticleByAI } from "../../src/utils/generateArticle";
 // JST Helper
 // ============================
 function getJSTDate(): Date {
-  return new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Tokyo" }));
+  const utc = new Date();
+  const jst = new Date(utc.getTime() + (9 * 60 * 60 * 1000));
+  return jst;
 }
+
 
 function formatDate(date: Date): string {
   return date.toISOString().split("T")[0];
