@@ -224,6 +224,35 @@ export const handler: Handler = async (event) => {
   // メイン処理
   // ============================
   for (const schedule of schedules) {
+
+    // ============================
+// 排他ロック（同時実行防止）
+// ============================
+const lockNow = new Date();
+
+const { data: lock } = await supabase
+  .from("scheduler_lock")
+  .select("*")
+  .eq("schedule_id", schedule.id)
+  .single();
+
+// ロックがあり、2分以内なら実行中扱い → スキップ
+if (lock) {
+  const diff = (lockNow.getTime() - new Date(lock.locked_at).getTime()) / 1000;
+  if (diff < 120) {
+    console.log("⏳ すでに実行中 → スキップ:", schedule.id);
+    continue;
+  }
+}
+
+// ロック獲得
+await supabase
+  .from("scheduler_lock")
+  .upsert({
+    schedule_id: schedule.id,
+    locked_at: lockNow.toISOString(),
+  });
+    
     try {
       console.log(`🚀 投稿開始: ${schedule.id}`);
 
@@ -338,7 +367,7 @@ ${warningMessage}
       console.log(`✅ 投稿成功: ${postResult.link}`);
     } catch (err: any) {
       console.error("❌ 投稿エラー:", err?.message || err);
-    }
+    } 
   }
 
   return {
