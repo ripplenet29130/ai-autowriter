@@ -238,10 +238,7 @@ ${schedule.post_status === "publish" ? "公開" : "下書き"}
 
 ■ 未使用キーワードの残数
 ${remaining} 個
-
 ${warningMessage}
-
-実行日時：${now.toLocaleString("ja-JP")}
 
 引き続きよろしくお願いいたします。`
 );
