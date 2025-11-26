@@ -14,12 +14,11 @@ const supabase = createClient(
 // ============================
 // 共通：JST Helper
 // ============================
-// ※ 今まで通り「Asia/Tokyo」でローカル時間を取る
 function getJSTDate(): Date {
-  return new Date(
-    new Date().toLocaleString("en-US", { timeZone: "Asia/Tokyo" })
-  );
+  const utc = new Date();
+  return new Date(utc.getTime() + 9 * 60 * 60 * 1000);
 }
+
 
 function formatDate(date: Date): string {
   return date.toISOString().split("T")[0]; // YYYY-MM-DD
