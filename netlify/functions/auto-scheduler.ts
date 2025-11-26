@@ -174,10 +174,15 @@ function shouldRunByFrequency(schedule: any, today: Date): boolean {
 export const handler: Handler = async () => {
   console.log("🕒 auto-scheduler 起動");
 
+  // ❌ 今の now は削除
+  // const now = getJSTDate();
+  // const todayStr = formatDate(now);
+  // const nowMinutes = now.getHours() * 60 + now.getMinutes();
+
+  // ここで毎回 now を取り直す
   const now = getJSTDate();
   const todayStr = formatDate(now);
   const nowMinutes = now.getHours() * 60 + now.getMinutes();
-
   // ============================
   // スケジュール取得
   // ============================
