@@ -3,20 +3,22 @@ import type { Handler } from "@netlify/functions";
 import { createClient } from "@supabase/supabase-js";
 import { generateArticleByAI } from "../../src/utils/generateArticle";
 
-/* ============================================
-   Supabase 初期化
-============================================ */
+// ============================
+// Supabase 初期化
+// ============================
 const supabase = createClient(
   process.env.SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_KEY!
 );
 
-/* ============================================
-   JST Helper（run-scheduler と完全統一）
-============================================ */
+// ============================
+// 共通：JST Helper
+// ============================
+// ※ 今まで通り「Asia/Tokyo」でローカル時間を取る
 function getJSTDate(): Date {
-  const utc = new Date();
-  return new Date(utc.getTime() + 9 * 60 * 60 * 1000);
+  return new Date(
+    new Date().toLocaleString("en-US", { timeZone: "Asia/Tokyo" })
+  );
 }
 
 function formatDate(date: Date): string {
@@ -27,15 +29,15 @@ function daysBetween(a: Date, b: Date): number {
   return Math.floor((b.getTime() - a.getTime()) / (1000 * 60 * 60 * 24));
 }
 
-/* ============================================
-   ChatWork 送信
-============================================ */
+// ============================
+// ChatWork 送信
+// ============================
 async function sendChatWorkMessage(text: string) {
   const token = process.env.CHATWORK_API_TOKEN;
   const roomId = process.env.CHATWORK_ROOM_ID;
 
   if (!token || !roomId) {
-    console.error("ChatWork 環境変数が未設定");
+    console.error("ChatWork 環境変数が設定されていません");
     return;
   }
 
@@ -45,7 +47,7 @@ async function sendChatWorkMessage(text: string) {
       method: "POST",
       headers: {
         "X-ChatWorkToken": token,
-        "Content-Type": "application/x-www-form-urlencoded`,
+        "Content-Type": "application/x-www-form-urlencoded",
       },
       body: new URLSearchParams({ body: text }),
     }
@@ -56,9 +58,9 @@ async function sendChatWorkMessage(text: string) {
   }
 }
 
-/* ============================================
-   WordPress 投稿処理（run-scheduler と統一）
-============================================ */
+// ============================
+// WordPress 投稿処理
+// ============================
 async function postToWordPress(
   wp: any,
   schedule: any,
@@ -95,8 +97,10 @@ async function postToWordPress(
 
   if (wp.default_category) {
     if (!isNaN(Number(wp.default_category))) {
+      // 数値ID
       categoryId = Number(wp.default_category);
     } else {
+      // カテゴリ名
       categoryId = await getCategoryIdByName(wp.default_category);
     }
   }
@@ -112,46 +116,49 @@ async function postToWordPress(
       content: article.content,
       categories: [categoryId],
       status: schedule.post_status === "draft" ? "draft" : "publish",
-      date: article.date, // JST で投稿
+      date: article.date,
     }),
   });
 
   if (!response.ok) {
-    throw new Error(`投稿失敗 (${response.status}): ${await response.text()}`);
+    const text = await response.text();
+    throw new Error(`投稿失敗 (${response.status}): ${text}`);
   }
 
   return await response.json();
 }
 
-/* ============================================
-   Frequency 判定（JSTベース）
-============================================ */
+// ============================
+// Frequency 判定ロジック
+// （UIの値: 「毎日」「毎週」「隔週」「月一」に対応）
+// ============================
 function shouldRunByFrequency(schedule: any, today: Date): boolean {
   if (!schedule.start_date) return false;
 
-  const start = new Date(schedule.start_date + "T00:00:00+09:00");
+  const start = new Date(schedule.start_date + "T00:00:00");
   const diffDays = daysBetween(start, today);
 
   if (diffDays < 0) return false;
 
-  const last = schedule.last_run_at
-    ? new Date(schedule.last_run_at)
-    : null;
-
+  const last = schedule.last_run_at ? new Date(schedule.last_run_at) : null;
   const todayStr = formatDate(today);
   const lastStr = last ? formatDate(last) : null;
 
   switch (schedule.frequency) {
     case "毎日":
+      // その日 1回だけ
       return lastStr !== todayStr;
 
     case "毎週":
+      // 開始日から7の倍数の日だけ
       return diffDays % 7 === 0 && lastStr !== todayStr;
 
     case "隔週":
+      // 開始日から14の倍数の日だけ
       return diffDays % 14 === 0 && lastStr !== todayStr;
 
     case "月一":
+      // 開始日の「日付」と同じ日だけ & 前回実行月とは違う
       if (today.getDate() !== start.getDate()) return false;
       if (!last) return true;
       return today.getMonth() !== last.getMonth();
@@ -161,9 +168,9 @@ function shouldRunByFrequency(schedule: any, today: Date): boolean {
   }
 }
 
-/* ============================================
-   Scheduler メイン処理
-============================================ */
+// ============================
+// Scheduler メイン処理
+// ============================
 export const handler: Handler = async () => {
   console.log("🕒 auto-scheduler 起動");
 
@@ -171,15 +178,20 @@ export const handler: Handler = async () => {
   const todayStr = formatDate(now);
   const nowMinutes = now.getHours() * 60 + now.getMinutes();
 
-  /* ---- スケジュール取得 ---- */
+  // ============================
+  // スケジュール取得
+  // ============================
   const { data, error } = await supabase
     .from("schedule_settings")
     .select("*")
     .eq("status", true);
 
   if (error) {
-    console.error("❌ schedule_settings 読み込みエラー", error);
-    return { statusCode: 500, body: "Failed to load schedules" };
+    console.error("❌ schedule_settings 取得エラー:", error);
+    return {
+      statusCode: 500,
+      body: "Failed to load schedules",
+    };
   }
 
   const schedules = (data || []).filter((s) => {
@@ -189,25 +201,33 @@ export const handler: Handler = async () => {
       ? formatDate(new Date(s.last_run_at))
       : null;
 
-    // 今日実行済み → スキップ
+    // すでに今日 1回実行済みならスキップ
     if (lastStr === todayStr) return false;
 
-    // 投稿時刻を分に変換
+    // 投稿時刻（JST）を分に変換
     const [th, tm] = s.post_time.split(":").map(Number);
     const targetMinutes = th * 60 + tm;
 
+    // まだ予定時刻に達していない場合はスキップ
     if (nowMinutes < targetMinutes) return false;
 
+    // サイクル開始・終了日のチェック
     if (s.start_date && todayStr < s.start_date) return false;
     if (s.end_date && todayStr > s.end_date) return false;
 
+    // 頻度条件の判定（毎日/毎週/隔週/月一）
     return shouldRunByFrequency(s, now);
   });
 
-  console.log("🎯 実行対象:", schedules.length);
+  console.log("🎯 実行対象スケジュール数:", schedules.length);
 
-  /* ---- 実行処理 ---- */
+  // ============================
+  // メイン処理
+  // ============================
   for (const schedule of schedules) {
+    // ============================
+    // 排他ロック（同時実行防止）
+    // ============================
     const lockNow = new Date();
 
     const { data: lock } = await supabase
@@ -216,14 +236,17 @@ export const handler: Handler = async () => {
       .eq("schedule_id", schedule.id)
       .single();
 
+    // ロックがあり、2分以内なら実行中扱い → スキップ
     if (lock) {
-      const diff = (lockNow.getTime() - new Date(lock.locked_at).getTime()) / 1000;
+      const diff =
+        (lockNow.getTime() - new Date(lock.locked_at).getTime()) / 1000;
       if (diff < 120) {
-        console.log("⏳ 実行中 → スキップ", schedule.id);
+        console.log("⏳ すでに実行中 → スキップ:", schedule.id);
         continue;
       }
     }
 
+    // ロック獲得
     await supabase
       .from("scheduler_lock")
       .upsert({
@@ -234,28 +257,38 @@ export const handler: Handler = async () => {
     try {
       console.log(`🚀 投稿開始: ${schedule.id}`);
 
-      const { data: wpConfig } = await supabase
+      // WP設定取得
+      const { data: wpConfig, error: wpError } = await supabase
         .from("wp_configs")
         .select("*")
         .eq("id", schedule.wp_config_id)
         .single();
 
-      if (!wpConfig) {
-        console.error("❌ WP設定なし");
+      if (wpError || !wpConfig) {
+        console.error("❌ wp_configs 取得エラー:", wpError);
         continue;
       }
 
-      const { data: usedWords } = await supabase
+      // 未使用キーワード計算
+      const { data: usedWords, error: usedError } = await supabase
         .from("schedule_used_keywords")
         .select("keyword")
         .eq("schedule_id", schedule.id);
 
+      if (usedError) {
+        console.error("❌ schedule_used_keywords 取得エラー:", usedError);
+        continue;
+      }
+
       const usedSet = new Set((usedWords || []).map((u) => u.keyword));
-      const relatedList: string[] = schedule.related_keywords || [];
+      const relatedList: string[] = Array.isArray(schedule.related_keywords)
+        ? schedule.related_keywords
+        : [];
+
       const unused = relatedList.filter((kw) => !usedSet.has(kw));
 
       if (unused.length === 0) {
-        console.log("🛑 キーワード枯渇 → 停止:", schedule.id);
+        console.log("🛑 キーワード不足 → 自動停止:", schedule.id);
         await supabase
           .from("schedule_settings")
           .update({ status: false })
@@ -266,25 +299,35 @@ export const handler: Handler = async () => {
       const selectedKeyword =
         unused[Math.floor(Math.random() * unused.length)];
 
+      // 記事生成
       const { title, content } = await generateArticleByAI(
         schedule.ai_config_id,
         selectedKeyword,
         relatedList
       );
 
-      // WordPress に渡す JST の ISO
+      // WordPress 日付は JST に合わせた ISO
       const isoDate = now.toISOString().replace("Z", "+09:00");
 
+      // 投稿
       const postResult = await postToWordPress(wpConfig, schedule, {
         title,
         content,
         date: isoDate,
       });
 
+      // ChatWork 通知
       const remaining = unused.length - 1;
 
+      const warningMessage =
+        remaining <= 3
+          ? `[warning]残りキーワード数が少なくなっています（残り ${remaining} 個）
+キーワード補充またはスケジュール設定の見直しをお願いします。[/warning]\n`
+          : "";
+
       await sendChatWorkMessage(
-        `記事が自動投稿されました。
+        `いつもお世話になっております。
+自動投稿システムにて、記事の投稿が完了しましたのでご連絡いたします。
 
 ■ サイト名
 ${wpConfig.name}
@@ -301,16 +344,21 @@ ${postResult.link}
 ■ 投稿状態
 ${schedule.post_status === "publish" ? "公開" : "下書き"}
 
-■ 未使用キーワード残数
-${remaining} 個`
+■ 未使用キーワードの残数
+${remaining} 個
+
+${warningMessage}
+
+引き続きよろしくお願いいたします。`
       );
 
+      // 使用済みキーワードに登録
       await supabase.from("schedule_used_keywords").insert({
         schedule_id: schedule.id,
         keyword: selectedKeyword,
       });
 
-      // JST をそのまま保存（run-scheduler と統一）
+      // last_run_at 更新（JST文字列を保存：run-scheduler と揃えるならここを合わせる）
       await supabase
         .from("schedule_settings")
         .update({ last_run_at: isoDate })
@@ -320,6 +368,7 @@ ${remaining} 個`
     } catch (err: any) {
       console.error("❌ 投稿エラー:", err?.message || err);
     } finally {
+      // 💡 投稿成功・失敗に関わらず必ずロック解除
       await supabase
         .from("scheduler_lock")
         .delete()
@@ -329,12 +378,15 @@ ${remaining} 個`
     }
   }
 
-  return { statusCode: 200, body: "Scheduler done" };
+  return {
+    statusCode: 200,
+    body: "Scheduler done",
+  };
 };
 
-/* ============================================
-   Netlify パス設定
-============================================ */
+// ============================
+// Netlify パス設定
+// ============================
 export const config = {
   path: "/auto-scheduler",
 };
