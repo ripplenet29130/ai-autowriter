@@ -641,12 +641,14 @@ export default function Scheduler() {
                             前回投稿日時
                           </p>
                           <p className="text-gray-600 text-sm">
-                            {schedule.last_run_at
-                              ? new Date(
-                                  schedule.last_run_at
-                                ).toLocaleString('ja-JP')
-                              : '未投稿'}
-                          </p>
+                          {schedule.last_run_at
+                            ? (() => {
+                                const dt = new Date(schedule.last_run_at);
+                                const jst = new Date(dt.getTime() + 9 * 60 * 60 * 1000);
+                                return jst.toLocaleString("ja-JP");
+                              })()
+                            : "未投稿"}
+                        </p>
                         </div>
 
                       {/* 次回投稿予定 */}
