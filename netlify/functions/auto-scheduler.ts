@@ -299,15 +299,16 @@ export const handler: Handler = async () => {
       const selectedKeyword =
         unused[Math.floor(Math.random() * unused.length)];
 
-      // 記事生成
-      const { title, content } = await generateArticleByAI(
-        schedule.ai_config_id,
-        selectedKeyword,
-        relatedList
-      );
+// 記事生成
+const { title, content } = await generateArticleByAI(
+  schedule.ai_config_id,
+  selectedKeyword,
+  relatedList
+);
 
-      // WordPress 日付は JST に合わせた ISO
-      const isoDate = now.toISOString().replace("Z", "+09:00");
+// 💥 投稿直前に必ず JST を生成しなおす！
+const jstNow = getJSTDate();
+const isoDate = jstNow.toISOString().replace("Z", "+09:00");
 
       // 投稿
       const postResult = await postToWordPress(wpConfig, schedule, {
