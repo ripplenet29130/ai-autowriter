@@ -161,6 +161,37 @@ export const handler: Handler = async (event) => {
 
   const selectedKeyword = unused[Math.floor(Math.random() * unused.length)];
 
+  // ============================
+  // 🛑 排他ロック（同時実行防止）
+  // ============================
+  const lockNow = new Date();
+  
+  const { data: lock } = await supabase
+    .from("scheduler_lock")
+    .select("*")
+    .eq("schedule_id", schedule.id)
+    .single();
+  
+  if (lock) {
+    const diff = (lockNow.getTime() - new Date(lock.locked_at).getTime()) / 1000;
+    if (diff < 120) {
+      console.log("⏳ 他の実行が進行中 → スキップ:", schedule.id);
+      return {
+        statusCode: 200,
+        body: "スキップ（ロック中）",
+      };
+    }
+  }
+  
+  // ロック獲得
+  await supabase
+    .from("scheduler_lock")
+    .upsert({
+      schedule_id: schedule.id,
+      locked_at: lockNow.toISOString(),
+    });
+
+  
   // 記事生成
   const { title, content } = await generateArticleByAI(
     schedule.ai_config_id,
@@ -227,6 +258,15 @@ ${warningMessage}
     .from("schedule_settings")
     .update({ last_run_at: now.toISOString() })
     .eq("id", schedule.id);
+
+  // ============================
+  // 🔓 ロック解除（必ず実行）
+  // ============================
+  await supabase
+    .from("scheduler_lock")
+    .delete()
+    .eq("schedule_id", schedule.id);
+
 
   return {
     statusCode: 200,
