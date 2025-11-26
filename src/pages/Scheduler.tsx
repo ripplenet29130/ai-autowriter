@@ -641,7 +641,9 @@ export default function Scheduler() {
                             前回投稿日時
                           </p>
                           <p className="text-gray-600 text-sm">
-                            {schedule.last_run_at ?? "未投稿"}
+                            {schedule.last_run_at
+                              ? schedule.last_run_at.replace("T", " ").replace("+09:00", "")
+                              : "未投稿"}
                           </p>
 
 
