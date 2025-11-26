@@ -347,7 +347,6 @@ ${schedule.post_status === "publish" ? "公開" : "下書き"}
 ${remaining} 個
 
 ${warningMessage}
-実行日時：${now.toLocaleString("ja-JP")}
 
 引き続きよろしくお願いいたします。`
       );
