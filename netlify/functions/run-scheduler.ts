@@ -4,57 +4,40 @@ import { createClient } from "@supabase/supabase-js";
 import { generateArticleByAI } from "../../src/utils/generateArticle";
 
 // ============================
-// JST Helper
+// JST Helper（JST 文字列を返す）
 // ============================
-function getJSTDate(): Date {
+
+// JST を Date 型として返す
+function getJST(): Date {
   const utc = new Date();
-  const jst = new Date(utc.getTime() + (9 * 60 * 60 * 1000));
-  return jst;
+  return new Date(utc.getTime() + 9 * 60 * 60 * 1000);
 }
 
+// JST Date → WordPress 用 +09:00 形式
+function toWordPressDate(jstDate: Date): string {
+  return jstDate.toISOString().replace("Z", "+09:00");
+}
 
-function formatDate(date: Date): string {
-  return date.toISOString().split("T")[0];
+// JST Date → Supabase 保存用
+function toJSTString(jstDate: Date): string {
+  // 例: "2025-11-26T14:00:08+09:00"
+  return jstDate.toISOString().replace("Z", "+09:00");
 }
 
 // ============================
-// WordPress 投稿処理（scheduler.ts から複製）
+// WordPress 投稿処理
 // ============================
-async function postToWordPress(wp: any, schedule: any, article: {
-  title: string;
-  content: string;
-  date: string;
-}) {
+async function postToWordPress(
+  wp: any,
+  schedule: any,
+  article: { title: string; content: string; date: string }
+) {
   console.log(`🌐 WordPress投稿開始: ${wp.url}`);
   const endpoint = `${wp.url.replace(/\/$/, "")}/wp-json/wp/v2/posts`;
 
   const credential = Buffer.from(
     `${wp.username}:${wp.app_password}`
   ).toString("base64");
-
-  async function getCategoryIdByName(name: string) {
-    try {
-      const res = await fetch(
-        `${wp.url}/wp-json/wp/v2/categories?search=${encodeURIComponent(name)}`,
-        { headers: { Authorization: `Basic ${credential}` } }
-      );
-      if (!res.ok) return 1;
-
-      const categories = await res.json();
-      return categories.length > 0 ? categories[0].id : 1;
-    } catch {
-      return 1;
-    }
-  }
-
-  let categoryId = 1;
-  if (wp.default_category) {
-    if (!isNaN(Number(wp.default_category))) {
-      categoryId = Number(wp.default_category);
-    } else {
-      categoryId = await getCategoryIdByName(wp.default_category);
-    }
-  }
 
   const response = await fetch(endpoint, {
     method: "POST",
@@ -65,9 +48,8 @@ async function postToWordPress(wp: any, schedule: any, article: {
     body: JSON.stringify({
       title: article.title,
       content: article.content,
-      categories: [categoryId],
       status: schedule.post_status === "draft" ? "draft" : "publish",
-      date: article.date,
+      date: article.date, // JST(+09:00)
     }),
   });
 
@@ -86,7 +68,7 @@ async function sendChatWorkMessage(text: string) {
   const token = process.env.CHATWORK_API_TOKEN;
   const roomId = process.env.CHATWORK_ROOM_ID;
 
-  const res = await fetch(`https://api.chatwork.com/v2/rooms/${roomId}/messages`, {
+  await fetch(`https://api.chatwork.com/v2/rooms/${roomId}/messages`, {
     method: "POST",
     headers: {
       "X-ChatWorkToken": token,
@@ -94,10 +76,6 @@ async function sendChatWorkMessage(text: string) {
     },
     body: new URLSearchParams({ body: text }),
   });
-
-  if (!res.ok) {
-    console.error("ChatWork送信エラー:", await res.text());
-  }
 }
 
 // ============================
@@ -113,8 +91,6 @@ export const handler: Handler = async (event) => {
     return { statusCode: 400, body: "schedule_id が必要です" };
   }
 
-  console.log("🎯 即時実行対象:", scheduleId);
-
   const supabase = createClient(
     process.env.SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_KEY!
@@ -127,22 +103,19 @@ export const handler: Handler = async (event) => {
     .eq("id", scheduleId)
     .single();
 
-  if (!schedule) {
-    return { statusCode: 404, body: "Schedule not found" };
-  }
+  if (!schedule) return { statusCode: 404, body: "Schedule not found" };
 
-  // WP設定
+  // WP設定取得
   const { data: wpConfig } = await supabase
     .from("wp_configs")
     .select("*")
     .eq("id", schedule.wp_config_id)
     .single();
 
-  if (!wpConfig) {
+  if (!wpConfig)
     return { statusCode: 500, body: "WP設定が見つかりません" };
-  }
 
-  // 使用済みキーワード
+  // 使用済みキーワード取得
   const { data: usedWords } = await supabase
     .from("schedule_used_keywords")
     .select("keyword")
@@ -154,76 +127,48 @@ export const handler: Handler = async (event) => {
     : [];
 
   const unused = relatedList.filter((kw) => !usedSet.has(kw));
-
   if (unused.length === 0) {
-    return {
-      statusCode: 400,
-      body: "未使用キーワードがありません",
-    };
+    return { statusCode: 400, body: "未使用キーワードがありません" };
   }
 
-  const selectedKeyword = unused[Math.floor(Math.random() * unused.length)];
+  const selectedKeyword =
+    unused[Math.floor(Math.random() * unused.length)];
 
   // ============================
-  // 🛑 排他ロック（同時実行防止）
-  // ============================
-  const lockNow = new Date();
-  
-  const { data: lock } = await supabase
-    .from("scheduler_lock")
-    .select("*")
-    .eq("schedule_id", schedule.id)
-    .single();
-  
-  if (lock) {
-    const diff = (lockNow.getTime() - new Date(lock.locked_at).getTime()) / 1000;
-    if (diff < 120) {
-      console.log("⏳ 他の実行が進行中 → スキップ:", schedule.id);
-      return {
-        statusCode: 200,
-        body: "スキップ（ロック中）",
-      };
-    }
-  }
-  
-  // ロック獲得
-  await supabase
-    .from("scheduler_lock")
-    .upsert({
-      schedule_id: schedule.id,
-      locked_at: lockNow.toISOString(),
-    });
-
-  
   // 記事生成
+  // ============================
   const { title, content } = await generateArticleByAI(
     schedule.ai_config_id,
     selectedKeyword,
     relatedList
   );
 
-  const now = getJSTDate();
-  const isoDate = now.toISOString().replace("Z", "+09:00");
+  // ============================
+  // JST の正しい作成
+  // ============================
+  const nowJST = getJST();
 
+  // WordPress投稿用
+  const wpDate = toWordPressDate(nowJST);
 
+  // Supabase保存用
+  const jstString = toJSTString(nowJST);
+
+  // ============================
+  // WordPressに投稿
+  // ============================
   const postResult = await postToWordPress(wpConfig, schedule, {
     title,
     content,
-    date: isoDate,
+    date: wpDate,
   });
 
-  // ChatWork 通知
+  // ============================
+  // ChatWork通知
+  // ============================
   const remaining = unused.length;
-  const warningMessage =
-    remaining <= 3
-      ? `[warning]残りキーワード数が少なくなっています（残り ${remaining} 個）  
-キーワード補充またはスケジュール設定の見直しをお願いします。[/warning]\n`
-      : "";
-
-await sendChatWorkMessage(
-`いつもお世話になっております。
-
-記事の投稿が完了しましたのでご連絡いたします。
+  await sendChatWorkMessage(
+`記事投稿が完了しました。
 
 ■ サイト名
 ${wpConfig.name}
@@ -240,34 +185,24 @@ ${postResult.link}
 ■ 投稿状態
 ${schedule.post_status === "publish" ? "公開" : "下書き"}
 
-■ 未使用キーワードの残数
+■ 未使用キーワード残数
 ${remaining} 個
-${warningMessage}
+`
+  );
 
-引き続きよろしくお願いいたします。`
-);
-
-
-  // 使用済みに追加
+  // 使用済みに登録
   await supabase.from("schedule_used_keywords").insert({
     schedule_id: schedule.id,
     keyword: selectedKeyword,
   });
 
-  // last_run_at 更新
+  // ============================
+  // last_run_at を JST のまま保存
+  // ============================
   await supabase
     .from("schedule_settings")
-    .update({ last_run_at: now.toISOString() })
+    .update({ last_run_at: jstString })
     .eq("id", schedule.id);
-
-  // ============================
-  // 🔓 ロック解除（必ず実行）
-  // ============================
-  await supabase
-    .from("scheduler_lock")
-    .delete()
-    .eq("schedule_id", schedule.id);
-
 
   return {
     statusCode: 200,
