@@ -642,9 +642,12 @@ export default function Scheduler() {
                           </p>
                           <p className="text-gray-600 text-sm">
                             {schedule.last_run_at
-                              ? schedule.last_run_at.replace("T", " ").replace("+09:00", "")
+                              ? new Date(schedule.last_run_at).toLocaleString("ja-JP", {
+                                  timeZone: "Asia/Tokyo",
+                                })
                               : "未投稿"}
                           </p>
+
 
 
                         </div>
