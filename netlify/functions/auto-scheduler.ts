@@ -306,7 +306,8 @@ await supabase
       );
 
       // WordPress 日付は JST に合わせた ISO
-      const isoDate = now.toISOString();
+      const isoDate = now.toISOString().replace("Z", "+09:00");
+
 
       // 投稿
       const postResult = await postToWordPress(wpConfig, schedule, {
