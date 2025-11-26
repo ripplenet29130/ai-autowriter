@@ -367,7 +367,15 @@ ${warningMessage}
       console.log(`✅ 投稿成功: ${postResult.link}`);
     } catch (err: any) {
       console.error("❌ 投稿エラー:", err?.message || err);
-    } 
+    } finally {
+  // 💡 投稿成功・失敗に関わらず必ずロック解除
+  await supabase
+    .from("scheduler_lock")
+    .delete()
+    .eq("schedule_id", schedule.id);
+
+  console.log("🔓 ロック解除:", schedule.id);
+}
   }
 
   return {
