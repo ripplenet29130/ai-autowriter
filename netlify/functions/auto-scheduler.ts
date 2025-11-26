@@ -332,7 +332,7 @@ ${warningMessage}
       // last_run_at 更新
       await supabase
         .from("schedule_settings")
-        .update({ last_run_at: now.toISOString() })
+        .update({ last_run_at: isoDate })
         .eq("id", schedule.id);
 
       console.log(`✅ 投稿成功: ${postResult.link}`);
