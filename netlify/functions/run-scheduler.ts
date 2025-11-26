@@ -200,7 +200,7 @@ export const handler: Handler = async (event) => {
   );
 
   const now = getJSTDate();
-  const isoDate = now.toISOString().replace("Z", "+09:00");
+  const isoDate = now.toISOString();
 
   const postResult = await postToWordPress(wpConfig, schedule, {
     title,
