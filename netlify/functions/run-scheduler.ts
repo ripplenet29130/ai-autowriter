@@ -170,8 +170,8 @@ export const handler: Handler = async (event) => {
   await sendChatWorkMessage(
 `記事投稿が完了しました。
 
-■ サイト名
-${wpConfig.name}
+// ■ サイト名
+// ${wpConfig.name}
 
 ■ 記事タイトル
 ${title}
@@ -185,8 +185,8 @@ ${postResult.link}
 ■ 投稿状態
 ${schedule.post_status === "publish" ? "公開" : "下書き"}
 
-■ 未使用キーワード残数
-${remaining} 個
+// ■ 未使用キーワード残数
+// ${remaining} 個
 `
   );
 
