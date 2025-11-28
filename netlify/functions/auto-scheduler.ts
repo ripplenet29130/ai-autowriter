@@ -334,8 +334,8 @@ const isoDate = jstNow.toISOString().replace("Z", "+09:00");
         `いつもお世話になっております。
 自動投稿システムにて、記事の投稿が完了しましたのでご連絡いたします。
 
-■ サイト名
-${wpConfig.name}
+// ■ サイト名
+// ${wpConfig.name}
 
 ■ 記事タイトル
 ${title}
@@ -349,10 +349,10 @@ ${postResult.link}
 ■ 投稿状態
 ${schedule.post_status === "publish" ? "公開" : "下書き"}
 
-■ 未使用キーワードの残数
-${remaining} 個
+// ■ 未使用キーワードの残数
+// ${remaining} 個
 
-${warningMessage}
+// ${warningMessage}
 
 引き続きよろしくお願いいたします。`
       );
