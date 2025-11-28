@@ -332,7 +332,7 @@ const isoDate = jstNow.toISOString().replace("Z", "+09:00");
 
       await sendChatWorkMessage(
         `いつもお世話になっております。
-自動投稿システムにて、記事の投稿が完了しましたのでご連絡いたします。
+記事の投稿が完了しましたのでご連絡いたします。
 
 // ■ サイト名
 // ${wpConfig.name}
