@@ -330,12 +330,10 @@ const isoDate = jstNow.toISOString().replace("Z", "+09:00");
 キーワード補充またはスケジュール設定の見直しをお願いします。[/warning]\n`
           : "";
 
-      await sendChatWorkMessage(
-        `いつもお世話になっております。
-記事の投稿が完了しましたのでご連絡いたします。
+  await sendChatWorkMessage(
+`いつもお世話になっております。
 
-// ■ サイト名
-// ${wpConfig.name}
+記事の投稿が完了しましたのでご連絡いたします。
 
 ■ 記事タイトル
 ${title}
@@ -349,14 +347,16 @@ ${postResult.link}
 ■ 投稿状態
 ${schedule.post_status === "publish" ? "公開" : "下書き"}
 
-// ■ 未使用キーワードの残数
+ご確認をよろしくお願いいたします。
+`
+  );
+
+// 削除項目
+// ■ サイト名
+// ${wpConfig.name}
+// ■ 未使用キーワード残数
 // ${remaining} 個
-
-// ${warningMessage}
-
-引き続きよろしくお願いいたします。`
-      );
-
+      
       // 使用済みキーワードに登録
       await supabase.from("schedule_used_keywords").insert({
         schedule_id: schedule.id,
