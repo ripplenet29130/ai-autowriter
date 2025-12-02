@@ -1028,6 +1028,25 @@ export default function Scheduler() {
                           </div>
                         </div>
 
+                        {/* 編集：投稿状態 */}
+                        <div>
+                        <label className="block text-xs text-gray-500 mb-1">
+                          投稿状態
+                        </label>
+                        <select
+                          value={schedule.post_status}
+                          onChange={(e) => {
+                            schedule.post_status = e.target.value;
+                            setSchedules([...schedules]);
+                          }}
+                          className="border rounded w-full p-2"
+                        >
+                          <option value="publish">公開</option>
+                          <option value="draft">下書き</option>
+                        </select>
+                      </div>
+
+
                         {/* 編集：保存・キャンセル */}
                         <div className="flex gap-2 mt-4">
                           <button
@@ -1041,9 +1060,9 @@ export default function Scheduler() {
                                   related_keywords: schedule.related_keywords,
                                   post_time: schedule.post_time,
                                   frequency: schedule.frequency,
-                                  post_status: schedule.post_status,
                                   start_date: schedule.start_date || null,
-                                  end_date: schedule.end_date || null,
+                                  end_date: schedule.end_date || null
+                                  post_status: schedule.post_status,
                                 })
                                 .eq('id', schedule.id);
 
