@@ -1061,7 +1061,7 @@ export default function Scheduler() {
                                   post_time: schedule.post_time,
                                   frequency: schedule.frequency,
                                   start_date: schedule.start_date || null,
-                                  end_date: schedule.end_date || null
+                                  end_date: schedule.end_date || null,
                                   post_status: schedule.post_status,
                                 })
                                 .eq('id', schedule.id);
