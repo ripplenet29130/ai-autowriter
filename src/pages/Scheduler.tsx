@@ -1100,7 +1100,7 @@ export default function Scheduler() {
                                   start_date: schedule.start_date || null,
                                   end_date: schedule.end_date || null,
                                   post_status: schedule.post_status,
-                                  chatwork_room_id: formData.chatwork_room_id || null,  
+                                  chatwork_room_id: schedule.chatwork_room_id || null,  
                                 })
                                 .eq('id', schedule.id);
 
