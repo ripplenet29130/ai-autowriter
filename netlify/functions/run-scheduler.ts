@@ -170,7 +170,7 @@ export const handler: Handler = async (event) => {
   await sendChatWorkMessage(
 `いつもお世話になっております。
 
-記事の投稿が完了しましたので、共有させていただきます。
+記事の投稿が完了しましたので、ご報告いたします。
 
 ■ 記事タイトル  
 ${title}
