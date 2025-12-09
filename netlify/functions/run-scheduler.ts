@@ -66,51 +66,54 @@ async function postToWordPress(
 // ============================
 async function sendChatWorkMessages(text: string, clientRoomId?: string) {
   const token = process.env.CHATWORK_API_TOKEN;
-  const companyRoomIdsRaw = process.env.CHATWORK_COMPANY_ROOM_IDS; 
-  // 例: "11111,22222"
-
-  console.log("🔍 CHATWORK_COMPANY_ROOM_IDS(raw):", companyRoomIdsRaw);
-  console.log("🔍 companyRoomIds(parsed):", companyRoomIds);
-  console.log("🔍 clientRoomId:", clientRoomId);
+  const companyRoomIdsRaw = process.env.CHATWORK_COMPANY_ROOM_IDS;
 
   if (!token) {
     console.error("ChatWork APIトークンが設定されていません");
     return;
   }
 
-  // 自社ルーム（複数）
+  console.log("🔍 CHATWORK_COMPANY_ROOM_IDS(raw):", companyRoomIdsRaw);
+
+  // ※ companyRoomIds はここで初めて宣言する
   const companyRoomIds = companyRoomIdsRaw
     ? companyRoomIdsRaw.split(",").map(id => id.trim())
     : [];
 
-console.log("🔍 CHATWORK_COMPANY_ROOM_IDS(raw):", companyRoomIdsRaw);
-console.log("🔍 companyRoomIds(parsed):", companyRoomIds);
-console.log("🔍 clientRoomId:", clientRoomId);
-  
-  // 送信対象のリスト
+  console.log("🔍 companyRoomIds(parsed):", companyRoomIds);
+  console.log("🔍 clientRoomId:", clientRoomId);
+
+  // 送信対象
   const targets = [...companyRoomIds];
 
-  // クライアントのルームIDがある場合だけ追加
   if (clientRoomId) {
-    targets.push(clientRoomId);
+    targets.push(clientRoomId);  // クライアントも追加
   }
 
-  // 全ルームへ送信
-  for (const roomId of targets) {
-    const res = await fetch(
-      `https://api.chatwork.com/v2/rooms/${roomId}/messages`,
-      {
-        method: "POST",
-        headers: {
-          "X-ChatWorkToken": token,
-          "Content-Type": "application/x-www-form-urlencoded",
-        },
-        body: new URLSearchParams({ body: text }),
-      }
-    );
+  console.log("🔍 Send targets:", targets);
 
-    if (!res.ok) {
-      console.error(`ChatWork送信エラー（roomId: ${roomId}）:`, await res.text());
+  // 各ルームに送信
+  for (const roomId of targets) {
+    try {
+      const res = await fetch(
+        `https://api.chatwork.com/v2/rooms/${roomId}/messages`,
+        {
+          method: "POST",
+          headers: {
+            "X-ChatWorkToken": token,
+            "Content-Type": "application/x-www-form-urlencoded",
+          },
+          body: new URLSearchParams({ body: text }),
+        }
+      );
+
+      if (!res.ok) {
+        console.error(`ChatWork送信エラー（${roomId}）:`, await res.text());
+      } else {
+        console.log(`📨 ChatWork送信成功（${roomId}）`);
+      }
+    } catch (err) {
+      console.error(`ChatWork送信例外（${roomId}）:`, err);
     }
   }
 }
