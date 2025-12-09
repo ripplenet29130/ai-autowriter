@@ -69,6 +69,10 @@ async function sendChatWorkMessages(text: string, clientRoomId?: string) {
   const companyRoomIdsRaw = process.env.CHATWORK_COMPANY_ROOM_IDS; 
   // 例: "11111,22222"
 
+  console.log("🔍 CHATWORK_COMPANY_ROOM_IDS(raw):", companyRoomIdsRaw);
+  console.log("🔍 companyRoomIds(parsed):", companyRoomIds);
+  console.log("🔍 clientRoomId:", clientRoomId);
+
   if (!token) {
     console.error("ChatWork APIトークンが設定されていません");
     return;
