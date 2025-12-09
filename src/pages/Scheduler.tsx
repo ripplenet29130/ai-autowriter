@@ -211,6 +211,7 @@ export default function Scheduler() {
       end_date: formData.end_date || null,
       status: formData.status,
       post_status: formData.post_status,
+      chatwork_room_id: formData.chatwork_room_id || null,
     };
 
     const { error } = await supabase.from('schedule_settings').insert([insertData]);
