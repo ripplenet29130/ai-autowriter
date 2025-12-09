@@ -216,8 +216,8 @@ ${schedule.post_status === "publish" ? "公開" : "下書き"}
 
 問題などございましたら、お気軽にお知らせください。 
 今後ともよろしくお願いいたします。
-
 `
+    schedule.chatwork_room_id   // ← ★ クライアント用送信先
   );
 
 // 削除項目
