@@ -29,33 +29,51 @@ function daysBetween(a: Date, b: Date): number {
 }
 
 // ============================
-// ChatWork 送信
+// ChatWork 送信（自社 + クライアント）
 // ============================
-async function sendChatWorkMessage(text: string) {
+async function sendChatWorkMessages(text: string, clientRoomId?: string) {
   const token = process.env.CHATWORK_API_TOKEN;
-  const roomId = process.env.CHATWORK_ROOM_ID;
+  const companyRoomIdsRaw = process.env.CHATWORK_COMPANY_ROOM_IDS; 
+  // 例: "11111,22222" ← 自社用ルーム（複数可）
 
-  if (!token || !roomId) {
-    console.error("ChatWork 環境変数が設定されていません");
+  if (!token) {
+    console.error("ChatWork APIトークンが設定されていません");
     return;
   }
 
-  const res = await fetch(
-    `https://api.chatwork.com/v2/rooms/${roomId}/messages`,
-    {
-      method: "POST",
-      headers: {
-        "X-ChatWorkToken": token,
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-      body: new URLSearchParams({ body: text }),
-    }
-  );
+  // 自社ルーム（複数OK）
+  const companyRoomIds = companyRoomIdsRaw
+    ? companyRoomIdsRaw.split(",").map(id => id.trim())
+    : [];
 
-  if (!res.ok) {
-    console.error("ChatWork送信エラー:", await res.text());
+  // 送信対象ルーム一覧を作る
+  const targets = [...companyRoomIds];
+
+  // クライアントのルームIDがある場合だけ追加
+  if (clientRoomId) {
+    targets.push(clientRoomId);
+  }
+
+  // まとめて送信
+  for (const roomId of targets) {
+    const res = await fetch(
+      `https://api.chatwork.com/v2/rooms/${roomId}/messages`,
+      {
+        method: "POST",
+        headers: {
+          "X-ChatWorkToken": token,
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: new URLSearchParams({ body: text }),
+      }
+    );
+
+    if (!res.ok) {
+      console.error(`ChatWork送信エラー（roomId: ${roomId}）:`, await res.text());
+    }
   }
 }
+
 
 // ============================
 // WordPress 投稿処理
@@ -330,8 +348,8 @@ const isoDate = jstNow.toISOString().replace("Z", "+09:00");
 キーワード補充またはスケジュール設定の見直しをお願いします。[/warning]\n`
           : "";
 
-  await sendChatWorkMessage(
-`いつもお世話になっております。
+await sendChatWorkMessages(
+  `いつもお世話になっております。
 
 記事の投稿が完了しましたので、ご報告いたします。
 
@@ -349,8 +367,10 @@ ${schedule.post_status === "publish" ? "公開" : "下書き"}
 
 問題などございましたら、お気軽にお知らせください。 
 今後ともよろしくお願いいたします。
-`
-  );
+`,
+  schedule.chatwork_room_id   // ← ★ 追加（これでクライアントにも送れる）
+);
+
 
 // 削除項目
 // ■ サイト名
