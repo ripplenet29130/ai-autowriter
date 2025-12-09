@@ -197,7 +197,7 @@ export const handler: Handler = async (event) => {
   // ChatWork通知
   // ============================
   const remaining = unused.length;
-  await sendChatWorkMessage(
+  await sendChatWorkMessages(
 `いつもお世話になっております。
 
 記事の投稿が完了しましたので、ご報告いたします。
