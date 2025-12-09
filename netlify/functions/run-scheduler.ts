@@ -62,21 +62,51 @@ async function postToWordPress(
 }
 
 // ============================
-// ChatWork送信
+// ChatWork送信（自社 + クライアント対応）
 // ============================
-async function sendChatWorkMessage(text: string) {
+async function sendChatWorkMessages(text: string, clientRoomId?: string) {
   const token = process.env.CHATWORK_API_TOKEN;
-  const roomId = process.env.CHATWORK_ROOM_ID;
+  const companyRoomIdsRaw = process.env.CHATWORK_COMPANY_ROOM_IDS; 
+  // 例: "11111,22222"
 
-  await fetch(`https://api.chatwork.com/v2/rooms/${roomId}/messages`, {
-    method: "POST",
-    headers: {
-      "X-ChatWorkToken": token,
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body: new URLSearchParams({ body: text }),
-  });
+  if (!token) {
+    console.error("ChatWork APIトークンが設定されていません");
+    return;
+  }
+
+  // 自社ルーム（複数）
+  const companyRoomIds = companyRoomIdsRaw
+    ? companyRoomIdsRaw.split(",").map(id => id.trim())
+    : [];
+
+  // 送信対象のリスト
+  const targets = [...companyRoomIds];
+
+  // クライアントのルームIDがある場合だけ追加
+  if (clientRoomId) {
+    targets.push(clientRoomId);
+  }
+
+  // 全ルームへ送信
+  for (const roomId of targets) {
+    const res = await fetch(
+      `https://api.chatwork.com/v2/rooms/${roomId}/messages`,
+      {
+        method: "POST",
+        headers: {
+          "X-ChatWorkToken": token,
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: new URLSearchParams({ body: text }),
+      }
+    );
+
+    if (!res.ok) {
+      console.error(`ChatWork送信エラー（roomId: ${roomId}）:`, await res.text());
+    }
+  }
 }
+
 
 // ============================
 // 即時実行ハンドラ
