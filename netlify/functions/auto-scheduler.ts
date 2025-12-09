@@ -333,21 +333,22 @@ const isoDate = jstNow.toISOString().replace("Z", "+09:00");
   await sendChatWorkMessage(
 `いつもお世話になっております。
 
-記事の投稿が完了しましたのでご連絡いたします。
+記事の投稿が完了しましたので、共有させていただきます。
 
-■ 記事タイトル
+■ 記事タイトル  
 ${title}
 
-■ キーワード
+■ キーワード  
 ${selectedKeyword}
 
-■ 投稿URL
+■ 投稿URL  
 ${postResult.link}
 
-■ 投稿状態
+■ 投稿状態  
 ${schedule.post_status === "publish" ? "公開" : "下書き"}
 
-ご確認をよろしくお願いいたします。
+問題などございましたら、お気軽にお知らせください。 
+今後ともよろしくお願いいたします。
 `
   );
 
