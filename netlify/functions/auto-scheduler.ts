@@ -349,8 +349,8 @@ const isoDate = jstNow.toISOString().replace("Z", "+09:00");
           : "";
 
 await sendChatWorkMessages(
-  `いつもお世話になっております。
-
+  `
+いつもお世話になっております。
 記事の投稿が完了しましたので、ご報告いたします。
 
 ■ 記事タイトル  
@@ -366,6 +366,7 @@ ${postResult.link}
 ${schedule.post_status === "publish" ? "公開" : "下書き"}
 
 問題などございましたら、お気軽にお知らせください。 
+
 今後ともよろしくお願いいたします。
 `,
   schedule.chatwork_room_id   // ← ★ 追加（これでクライアントにも送れる）
