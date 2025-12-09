@@ -83,6 +83,10 @@ async function sendChatWorkMessages(text: string, clientRoomId?: string) {
     ? companyRoomIdsRaw.split(",").map(id => id.trim())
     : [];
 
+console.log("🔍 CHATWORK_COMPANY_ROOM_IDS(raw):", companyRoomIdsRaw);
+console.log("🔍 companyRoomIds(parsed):", companyRoomIds);
+console.log("🔍 clientRoomId:", clientRoomId);
+  
   // 送信対象のリスト
   const targets = [...companyRoomIds];
 
