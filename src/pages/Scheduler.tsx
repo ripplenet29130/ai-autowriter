@@ -115,6 +115,7 @@ export default function Scheduler() {
     end_date: '',
     post_status: 'draft',
     status: true,
+    chatwork_room_id: '',
   });
 
   const showMessage = (type: 'success' | 'error', text: string) => {
@@ -487,6 +488,26 @@ export default function Scheduler() {
                 </select>
               </div>
             </div>
+
+            {/* ChatWorkルームID */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                ChatWorkルームID（任意）
+              </label>
+              <input
+                type="text"
+                value={formData.chatwork_room_id}
+                onChange={(e) =>
+                  setFormData({ ...formData, chatwork_room_id: e.target.value })
+                }
+                placeholder="例: 123456789"
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+              <p className="text-xs text-gray-500 mt-1">
+                ※ 空欄の場合は自社のChatWorkルームにのみ通知されます
+              </p>
+            </div>
+
 
             {/* 有効化 */}
             <div className="flex items-center gap-3">
@@ -1046,6 +1067,22 @@ export default function Scheduler() {
                         </select>
                       </div>
 
+                      {/* 編集：ChatWorkルームID */}
+                      <div>
+                        <label className="block text-xs text-gray-500 mb-1">
+                          ChatWorkルームID（任意）
+                        </label>
+                        <input
+                          type="text"
+                          value={schedule.chatwork_room_id || ''}
+                          onChange={(e) => {
+                            schedule.chatwork_room_id = e.target.value;
+                            setSchedules([...schedules]);
+                          }}
+                          className="border rounded w-full p-2"
+                          placeholder="例: 123456789"
+                        />
+                      </div>
 
                         {/* 編集：保存・キャンセル */}
                         <div className="flex gap-2 mt-4">
@@ -1063,6 +1100,7 @@ export default function Scheduler() {
                                   start_date: schedule.start_date || null,
                                   end_date: schedule.end_date || null,
                                   post_status: schedule.post_status,
+                                  chatwork_room_id: formData.chatwork_room_id || null,  
                                 })
                                 .eq('id', schedule.id);
 
