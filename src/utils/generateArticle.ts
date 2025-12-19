@@ -8,6 +8,7 @@ import { createClient } from "@supabase/supabase-js";
 // 共通AIエンジン
 import {
   buildUnifiedPrompt,
+  buildUnifiedPromptWithFacts,
   callAI,
   parseArticle,
 } from "./aiEngine";
@@ -23,10 +24,11 @@ const supabase = createClient(
  * @param keyword - メインキーワード
  * @param related_keywords - 関連キーワード配列
  */
-export async function generateArticleByAI(
+// 新：factsプレビュー
+export async function generateArticleByAIWithFacts(
   ai_config_id: string,
   keyword: string,
-  related_keywords: string[] = []
+  facts: { source: string; content: string }[]
 ) {
   // ① AI設定取得
   const { data: aiConfig, error: aiError } = await supabase
@@ -47,8 +49,8 @@ export async function generateArticleByAI(
   // ✅ scheduler から渡された "keyword" をそのまま使う
   const center = keyword;
 
-  // ③ プロンプト生成
-  const prompt = buildUnifiedPrompt(center, aiConfig);
+  // ③ プロンプト生成（facts版）
+  const prompt = buildUnifiedPromptWithFacts(center, facts, aiConfig);
 
   // ④ AI呼び出し
   const raw = await callAI(aiConfig, prompt);
