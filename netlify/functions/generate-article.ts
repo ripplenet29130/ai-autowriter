@@ -9,6 +9,7 @@ import { createClient } from "@supabase/supabase-js";
 // 🔥 共通AIエンジン
 import {
   buildUnifiedPrompt,
+  buildUnifiedPromptWithFacts,
   callAI,
   parseArticle,
 } from "../../src/utils/aiEngine";
@@ -56,7 +57,7 @@ export const handler: Handler = async (event) => {
     // ------------------------------------------------------
     // ② プロンプト生成（中心テーマはフロントからの center）
     // ------------------------------------------------------
-    const prompt = buildUnifiedPrompt(center, aiConfig);
+    const prompt = buildUnifiedPromptWithFacts(center, facts, aiConfig);
 
     console.log("=== 送信プロンプト ===");
     console.log(prompt);
