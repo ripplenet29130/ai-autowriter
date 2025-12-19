@@ -24,15 +24,7 @@ export const handler: Handler = async (event) => {
     const body = JSON.parse(event.body || "{}");
 
     // 🟦 フロント側から送った「center」を受け取る
-    const { ai_config_id, center, wp_url, facts } = body;
-
-    if (!facts || !Array.isArray(facts) || facts.length === 0) {
-      return {
-        statusCode: 400,
-        body: JSON.stringify({ error: "facts がありません" }),
-      };
-    }
-
+    const { ai_config_id, center, wp_url } = body;
 
     if (!ai_config_id) {
       return {
@@ -53,6 +45,35 @@ export const handler: Handler = async (event) => {
     if (aiErr || !aiConfig) {
       throw new Error("AI設定の取得に失敗しました");
     }
+
+    // ------------------------------------------------------
+    // ★ API検索（Bing）→ facts 取得
+    // ------------------------------------------------------
+    const searchRes = await fetch(
+      `${process.env.URL}/.netlify/functions/api-search`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          keyword: center,
+        }),
+      }
+    );
+
+    if (!searchRes.ok) {
+      throw new Error("API検索に失敗しました");
+    }
+
+    const searchData = await searchRes.json();
+    const facts = searchData.facts;
+
+    if (!facts || !Array.isArray(facts) || facts.length === 0) {
+      return {
+        statusCode: 400,
+        body: JSON.stringify({ error: "検索結果（facts）が取得できませんでした" }),
+      };
+    }
+
 
     // ------------------------------------------------------
     // ② プロンプト生成（中心テーマはフロントからの center）

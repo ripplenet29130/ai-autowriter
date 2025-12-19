@@ -1,13 +1,12 @@
-// netlify/functions/api-search.ts
+// ===============================================
+// api-search.ts（SerpAPI / Google検索）
+// ===============================================
+
 import type { Handler } from "@netlify/functions";
 
-/**
- * 事実データの型
- * AIにはこの情報しか渡さない
- */
 type Fact = {
-  source: string;   // 情報元URL
-  content: string;  // 検索結果の事実要約（snippet）
+  source: string;
+  content: string;
 };
 
 export const handler: Handler = async (event) => {
@@ -17,36 +16,42 @@ export const handler: Handler = async (event) => {
     }
 
     const { keyword } = JSON.parse(event.body || "{}");
+
     if (!keyword) {
-      return { statusCode: 400, body: "keyword is required" };
+      return {
+        statusCode: 400,
+        body: JSON.stringify({ error: "keyword is required" }),
+      };
     }
 
-    const endpoint = "https://api.bing.microsoft.com/v7.0/search";
+    // -------------------------------
+    // SerpAPI（Google検索）
+    // -------------------------------
     const params = new URLSearchParams({
       q: keyword,
-      mkt: "ja-JP",
-      count: "5",
+      engine: "google",
+      hl: "ja",
+      gl: "jp",
+      num: "5",
+      api_key: process.env.SERPAPI_API_KEY!,
     });
 
-    const res = await fetch(`${endpoint}?${params.toString()}`, {
-      headers: {
-        "Ocp-Apim-Subscription-Key": process.env.BING_API_KEY!,
-      },
-    });
+    const res = await fetch(
+      `https://serpapi.com/search.json?${params.toString()}`
+    );
 
     if (!res.ok) {
-      throw new Error(`Bing API error: ${res.status}`);
+      throw new Error(`SerpAPI error: ${res.status}`);
     }
 
     const data = await res.json();
 
-    /**
-     * 🔽 ここが一番重要
-     * 検索結果 → facts（事実）に変換
-     */
+    // -------------------------------
+    // facts 生成
+    // -------------------------------
     const facts: Fact[] =
-      data.webPages?.value?.map((item: any) => ({
-        source: item.url,
+      data.organic_results?.map((item: any) => ({
+        source: item.link,
         content: item.snippet,
       })) || [];
 
@@ -54,10 +59,11 @@ export const handler: Handler = async (event) => {
       statusCode: 200,
       body: JSON.stringify({ facts }),
     };
-  } catch (error: any) {
+  } catch (err: any) {
+    console.error("api-search error:", err);
     return {
       statusCode: 500,
-      body: JSON.stringify({ error: error.message }),
+      body: JSON.stringify({ error: err.message }),
     };
   }
 };
