@@ -23,7 +23,15 @@ export const handler: Handler = async (event) => {
     const body = JSON.parse(event.body || "{}");
 
     // 🟦 フロント側から送った「center」を受け取る
-    const { ai_config_id, center, wp_url } = body;
+    const { ai_config_id, center, wp_url, facts } = body;
+
+    if (!facts || !Array.isArray(facts) || facts.length === 0) {
+      return {
+        statusCode: 400,
+        body: JSON.stringify({ error: "facts がありません" }),
+      };
+    }
+
 
     if (!ai_config_id) {
       return {

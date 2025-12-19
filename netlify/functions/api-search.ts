@@ -1,10 +1,13 @@
 // netlify/functions/api-search.ts
 import type { Handler } from "@netlify/functions";
 
-type SearchResult = {
-  title: string;
-  snippet: string;
-  url: string;
+/**
+ * 事実データの型
+ * AIにはこの情報しか渡さない
+ */
+type Fact = {
+  source: string;   // 情報元URL
+  content: string;  // 検索結果の事実要約（snippet）
 };
 
 export const handler: Handler = async (event) => {
@@ -37,16 +40,19 @@ export const handler: Handler = async (event) => {
 
     const data = await res.json();
 
-    const results: SearchResult[] =
+    /**
+     * 🔽 ここが一番重要
+     * 検索結果 → facts（事実）に変換
+     */
+    const facts: Fact[] =
       data.webPages?.value?.map((item: any) => ({
-        title: item.name,
-        snippet: item.snippet,
-        url: item.url,
+        source: item.url,
+        content: item.snippet,
       })) || [];
 
     return {
       statusCode: 200,
-      body: JSON.stringify({ results }),
+      body: JSON.stringify({ facts }),
     };
   } catch (error: any) {
     return {
