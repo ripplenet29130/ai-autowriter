@@ -65,3 +65,6 @@ export async function generateArticleByAIWithFacts(
   };
 }
 
+export const generateArticleByAI = generateArticleByAIWithFacts;
+
+
