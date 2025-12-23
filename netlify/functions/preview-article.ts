@@ -17,6 +17,13 @@ export const handler: Handler = async (event) => {
       };
     }
 
+    if (!Array.isArray(facts)) {
+      return {
+        statusCode: 400,
+        body: JSON.stringify({ error: "facts must be an array" }),
+      };
+    }
+
     const article = await generateArticleByAIWithFacts(
       ai_config_id,
       keyword,
