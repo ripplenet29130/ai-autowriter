@@ -5,22 +5,28 @@ import { generateArticleByAIWithFacts } from "../../src/utils/generateArticle";
 
 // api-search を「関数として」呼ぶための処理
 async function searchFacts(keyword: string) {
-  const res = await fetch(
-    `${process.env.URL}/.netlify/functions/api-search`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ keyword }),
+    const baseUrl =
+      process.env.DEPLOY_PRIME_URL ||
+      process.env.URL ||
+      "";
+  
+    const res = await fetch(
+      `${baseUrl}/.netlify/functions/api-search`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ keyword }),
+      }
+    );
+  
+    if (!res.ok) {
+      throw new Error("search failed");
     }
-  );
-
-  if (!res.ok) {
-    throw new Error("search failed");
+  
+    const data = await res.json();
+    return data.facts;
   }
-
-  const data = await res.json();
-  return data.facts;
-}
+  
 
 export const handler: Handler = async (event) => {
   try {
