@@ -9,6 +9,7 @@ export const handler: Handler = async (event) => {
     }
 
     const { ai_config_id, keyword } = JSON.parse(event.body || "{}");
+    console.log("preview-with-search keyword:", keyword);
 
     if (!ai_config_id || !keyword) {
       return {
@@ -25,6 +26,17 @@ export const handler: Handler = async (event) => {
     }
 
     const facts = await searchFactsByKeyword(keyword);
+
+    if (!facts || facts.length === 0) {
+        return {
+          statusCode: 200,
+          body: JSON.stringify({
+            error: "検索結果が取得できなかったため、記事を生成しませんでした",
+            keyword,
+            facts_count: 0,
+          }),
+        };
+      }
 
     const article = await generateArticleByAIWithFacts(
       ai_config_id,
