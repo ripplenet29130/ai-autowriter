@@ -9,6 +9,7 @@ import { createClient } from "@supabase/supabase-js";
 // 🔥 共通AIエンジン
 import {
   buildUnifiedPrompt,
+  buildUnifiedPromptWithFacts,
   callAI,
   parseArticle,
 } from "../../src/utils/aiEngine";
@@ -46,9 +47,38 @@ export const handler: Handler = async (event) => {
     }
 
     // ------------------------------------------------------
+    // ★ API検索（Bing）→ facts 取得
+    // ------------------------------------------------------
+    const searchRes = await fetch(
+      `${process.env.URL}/.netlify/functions/api-search`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          keyword: center,
+        }),
+      }
+    );
+
+    if (!searchRes.ok) {
+      throw new Error("API検索に失敗しました");
+    }
+
+    const searchData = await searchRes.json();
+    const facts = searchData.facts;
+
+    if (!facts || !Array.isArray(facts) || facts.length === 0) {
+      return {
+        statusCode: 400,
+        body: JSON.stringify({ error: "検索結果（facts）が取得できませんでした" }),
+      };
+    }
+
+
+    // ------------------------------------------------------
     // ② プロンプト生成（中心テーマはフロントからの center）
     // ------------------------------------------------------
-    const prompt = buildUnifiedPrompt(center, aiConfig);
+    const prompt = buildUnifiedPromptWithFacts(center, facts, aiConfig);
 
     console.log("=== 送信プロンプト ===");
     console.log(prompt);
