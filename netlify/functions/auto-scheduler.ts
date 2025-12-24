@@ -2,6 +2,8 @@
 import type { Handler } from "@netlify/functions";
 import { createClient } from "@supabase/supabase-js";
 import { generateArticleByAI } from "../../src/utils/generateArticle";
+import { notifyFactReject } from "../../src/utils/notifyFactReject";
+import { notifyPostSuccess } from "../../src/utils/notifyPostSuccess";
 
 // ============================
 // Supabase 初期化
@@ -29,63 +31,16 @@ function daysBetween(a: Date, b: Date): number {
 }
 
 // ============================
-// ChatWork 送信（自社 + クライアント）
-// ============================
-async function sendChatWorkMessages(text: string, clientRoomId?: string) {
-  const token = process.env.CHATWORK_API_TOKEN;
-  const companyRoomIdsRaw = process.env.CHATWORK_COMPANY_ROOM_IDS; 
-  // 例: "11111,22222" ← 自社用ルーム（複数可）
-
-  if (!token) {
-    console.error("ChatWork APIトークンが設定されていません");
-    return;
-  }
-
-  // 自社ルーム（複数OK）
-  const companyRoomIds = companyRoomIdsRaw
-    ? companyRoomIdsRaw.split(",").map(id => id.trim())
-    : [];
-
-  // 送信対象ルーム一覧を作る
-  const targets = [...companyRoomIds];
-
-  // クライアントのルームIDがある場合だけ追加
-  if (clientRoomId) {
-    targets.push(clientRoomId);
-  }
-
-  // まとめて送信
-  for (const roomId of targets) {
-    const res = await fetch(
-      `https://api.chatwork.com/v2/rooms/${roomId}/messages`,
-      {
-        method: "POST",
-        headers: {
-          "X-ChatWorkToken": token,
-          "Content-Type": "application/x-www-form-urlencoded",
-        },
-        body: new URLSearchParams({ body: text }),
-      }
-    );
-
-    if (!res.ok) {
-      console.error(`ChatWork送信エラー（roomId: ${roomId}）:`, await res.text());
-    }
-  }
-}
-
-
-// ============================
 // WordPress 投稿処理
 // ============================
 async function postToWordPress(
   wp: any,
-  schedule: any,
   article: {
     title: string;
     content: string;
     date: string;
-  }
+  },
+  status: "draft" | "publish"
 ) {
   console.log(`🌐 WordPress投稿開始: ${wp.url}`);
   const endpoint = `${wp.url.replace(/\/$/, "")}/wp-json/wp/v2/posts`;
@@ -132,7 +87,7 @@ async function postToWordPress(
       title: article.title,
       content: article.content,
       categories: [categoryId],
-      status: schedule.post_status === "draft" ? "draft" : "publish",
+      status,
       date: article.date,
     }),
   });
@@ -321,56 +276,68 @@ export const handler: Handler = async () => {
       const selectedKeyword =
         unused[Math.floor(Math.random() * unused.length)];
 
-// 記事生成
-const { title, content } = await generateArticleByAI(
-  schedule.ai_config_id,
-  selectedKeyword,
-  relatedList
-);
+      // 記事生成
+      const articleResult = await generateArticleByAI(
+        schedule.ai_config_id,
+        selectedKeyword,
+        relatedList
+      );
 
-// 💥 投稿直前に必ず JST を生成しなおす！
-const jstNow = getJSTDate();
-const isoDate = jstNow.toISOString().replace("Z", "+09:00");
+      const { title, content, is_rejected, fact_check, center_keyword } = articleResult;
+
+      // ============================
+      // 最終投稿ステータス決定
+      // ============================
+      const postStatus: "draft" | "publish" =
+        is_rejected === true
+          ? "draft"
+          : schedule.post_status === "draft"
+          ? "draft"
+          : "publish";
+
+      // 💥 投稿直前に必ず JST を生成しなおす！
+      const jstNow = getJSTDate();
+      const isoDate = jstNow.toISOString().replace("Z", "+09:00");
 
       // 投稿
-      const postResult = await postToWordPress(wpConfig, schedule, {
-        title,
-        content,
-        date: isoDate,
-      });
+      const postResult = await postToWordPress(
+        wpConfig,
+        {
+          title,
+          content,
+          date: isoDate,
+        },
+        postStatus
+      );
 
-      // ChatWork 通知
+      // ============================
+      // reject 通知（reject の場合のみ）
+      // ============================
+      if (is_rejected === true && fact_check?.reasons) {
+        try {
+          await notifyFactReject({
+            keyword: center_keyword || selectedKeyword,
+            title,
+            reasons: fact_check.reasons,
+            roomId: schedule.chatwork_room_id || "",
+          });
+        } catch (err) {
+          console.error("❌ reject通知エラー:", err);
+          // reject通知のエラーは処理を止めない
+        }
+      }
+
+      // ChatWork 通知（投稿完了通知）
       const remaining = unused.length - 1;
 
-      const warningMessage =
-        remaining <= 3
-          ? `[warning]残りキーワード数が少なくなっています（残り ${remaining} 個）
-キーワード補充またはスケジュール設定の見直しをお願いします。[/warning]\n`
-          : "";
-
-await sendChatWorkMessages(
-  `
-いつもお世話になっております。
-記事の投稿が完了しましたので、ご報告いたします。
-
-■ 記事タイトル  
-${title}
-
-■ キーワード  
-${selectedKeyword}
-
-■ 投稿URL  
-${postResult.link}
-
-■ 投稿状態  
-${schedule.post_status === "publish" ? "公開" : "下書き"}
-
-問題などございましたら、お気軽にお知らせください。 
-
-今後ともよろしくお願いいたします。
-`,
-  schedule.chatwork_room_id   // ← ★ 追加（これでクライアントにも送れる）
-);
+      await notifyPostSuccess({
+        title,
+        keyword: center_keyword || selectedKeyword,
+        postUrl: postResult.link,
+        postStatus: postStatus,
+        roomId: schedule.chatwork_room_id,
+        remaining,
+      });
 
 
 // 削除項目

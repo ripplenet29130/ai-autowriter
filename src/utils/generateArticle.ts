@@ -7,11 +7,13 @@ import { createClient } from "@supabase/supabase-js";
 
 // 共通AIエンジン
 import {
-  buildUnifiedPrompt,
   buildUnifiedPromptWithFacts,
   callAI,
   parseArticle,
 } from "./aiEngine";
+import { searchFactsByKeyword } from "./searchFacts";
+import { factCheckArticle } from "./factCheckArticle";
+import { buildRewritePrompt } from "./aiEngine";
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -40,7 +42,7 @@ export async function generateArticleByAIWithFacts(
     throw new Error("AI設定の取得に失敗しました");
   }
 
-  // ✅ scheduler から渡された "keyword" をそのまま使う
+  // // previewでは指定された keyword をそのまま中心テーマにする
   const center = keyword;
 
   // ③ プロンプト生成（facts版）
@@ -50,20 +52,57 @@ export async function generateArticleByAIWithFacts(
   const raw = await callAI(aiConfig, prompt);
 
   // ⑤ JSON解析
-  const article = parseArticle(raw);
+  let article = parseArticle(raw);
 
+  // ⑥ ファクトチェック（1回目）
+  const checkResult = await factCheckArticle(
+    article,
+    facts,
+    (prompt) => callAI(aiConfig, prompt)
+  );
+
+  console.log("[factCheck][1st]", checkResult);
+
+  if (checkResult.status === "ok") {
+    // ✅ 問題なし → そのまま返す
+    return {
+      title: article.title,
+      content: article.content,
+      center_keyword: center,
+      fact_check: checkResult,
+      is_rejected: false,
+    };
+  }
+
+  // ===== NG → 1回だけリライト =====
+  const rewritePrompt = buildRewritePrompt(article, checkResult.reasons);
+  const rewrittenRaw = await callAI(aiConfig, rewritePrompt);
+  article = parseArticle(rewrittenRaw);
+
+  // ===== 2回目のファクトチェック =====
+  const secondCheckResult = await factCheckArticle(
+    article,
+    facts,
+    (p) => callAI(aiConfig, p)
+  );
+
+  console.log("[factCheck][2nd]", secondCheckResult);
+
+  // ===== 最終判断 =====
   return {
     title: article.title,
     content: article.content,
     center_keyword: center,
+    fact_check: secondCheckResult,
+    is_rejected: secondCheckResult.status === "reject",
   };
 }
 
 /**
- * スケジューラー用：記事生成（related_keywords使用版）
+ * スケジューラー用：記事生成（facts使用版）
  * @param ai_config_id - AI設定ID
- * @param keyword - メインキーワード
- * @param related_keywords - 関連キーワード配列（文字列配列）
+ * @param keyword - メインキーワード（related_keywordsが空の場合に使用）
+ * @param related_keywords - 関連キーワード配列（ここからランダムで1つ選んで検索）
  */
 export async function generateArticleByAI(
   ai_config_id: string,
@@ -81,22 +120,81 @@ export async function generateArticleByAI(
     throw new Error("AI設定の取得に失敗しました");
   }
 
-  // ✅ scheduler から渡された "keyword" をそのまま使う
-  const center = keyword;
+  // ✅ related_keywordsからランダムで1つ選ぶ
+  const validRelatedKeywords = related_keywords.filter(kw => kw && kw.trim() !== "");
+  let selectedKeyword: string;
 
-  // ③ プロンプト生成（通常版）
-  const prompt = buildUnifiedPrompt(center, aiConfig);
+  if (validRelatedKeywords.length > 0) {
+    // related_keywordsからランダムに1つ選ぶ
+    selectedKeyword = validRelatedKeywords[Math.floor(Math.random() * validRelatedKeywords.length)];
+    console.log(`[generateArticleByAI] related_keywordsから選択: 「${selectedKeyword}」`);
+  } else {
+    // related_keywordsが空の場合はメインキーワードを使用
+    selectedKeyword = keyword;
+    console.log(`[generateArticleByAI] related_keywordsが空のためメインキーワードを使用: 「${selectedKeyword}」`);
+  }
+
+  const center = selectedKeyword;
+
+  // ② facts取得（選んだキーワードで検索）
+  const facts = await searchFactsByKeyword(center);
+
+  if (!facts || facts.length === 0) {
+    throw new Error(`キーワード「${center}」の検索結果（facts）が取得できませんでした`);
+  }
+
+  console.log(`[generateArticleByAI] キーワード「${center}」: ${facts.length}件のfactsを取得`);
+
+  // ③ プロンプト生成（facts版）
+  const prompt = buildUnifiedPromptWithFacts(center, facts, aiConfig);
 
   // ④ AI呼び出し
   const raw = await callAI(aiConfig, prompt);
 
   // ⑤ JSON解析
-  const article = parseArticle(raw);
+  let article = parseArticle(raw);
 
+  // ⑥ ファクトチェック（1回目）
+  const checkResult = await factCheckArticle(
+    article,
+    facts,
+    (prompt) => callAI(aiConfig, prompt)
+  );
+
+  console.log("[factCheck][1st]", checkResult);
+
+  if (checkResult.status === "ok") {
+    // ✅ 問題なし → そのまま返す
+    return {
+      title: article.title,
+      content: article.content,
+      center_keyword: center,
+      fact_check: checkResult,
+      is_rejected: false,
+    };
+  }
+
+  // ===== NG → 1回だけリライト =====
+  const rewritePrompt = buildRewritePrompt(article, checkResult.reasons);
+  const rewrittenRaw = await callAI(aiConfig, rewritePrompt);
+  article = parseArticle(rewrittenRaw);
+
+  // ===== 2回目のファクトチェック =====
+  const secondCheckResult = await factCheckArticle(
+    article,
+    facts,
+    (p) => callAI(aiConfig, p)
+  );
+
+  console.log("[factCheck][2nd]", secondCheckResult);
+
+  // ===== 最終判断 =====
   return {
     title: article.title,
     content: article.content,
     center_keyword: center,
+    fact_check: secondCheckResult,
+    is_rejected: secondCheckResult.status === "reject",
   };
 }
 
