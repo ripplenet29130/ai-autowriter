@@ -170,32 +170,49 @@ ${factsText || "一般的な公開情報を参考にしてください。"}
 
 /* -----------------------------------------------
   AI 呼び出し（Gemini / OpenAI / Claude）
+  ※ エラーハンドリング強化版
 ------------------------------------------------ */
 export async function callAI(aiConfig: any, prompt: string) {
   const provider = (aiConfig.provider || "").toLowerCase();
   let text = "";
 
-  // Gemini
+  // 共通エラーハンドラー
+  const handleApiError = async (res: Response, providerName: string) => {
+    if (!res.ok) {
+      const errorText = await res.text();
+      console.error(`🚨 [${providerName}] API Error: ${res.status} ${res.statusText}`);
+      console.error(`🚨 Error Body:`, errorText);
+      throw new Error(`${providerName} API Error: ${res.status} - ${errorText}`);
+    }
+  };
+
+  // --- Gemini ---
   if (provider.includes("gemini")) {
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${aiConfig.model}:generateContent?key=${aiConfig.api_key}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: {
-            temperature: aiConfig.temperature ?? 0.5,
-            maxOutputTokens: aiConfig.max_tokens ?? 4000,
-          },
-        }),
-      }
-    );
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${aiConfig.model}:generateContent?key=${aiConfig.api_key}`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: {
+          temperature: aiConfig.temperature ?? 0.5,
+          maxOutputTokens: aiConfig.max_tokens ?? 4000,
+          responseMimeType: "application/json" // ★Gemini 1.5系ならJSONモード推奨
+        },
+      }),
+    });
+
+    await handleApiError(res, "Gemini"); // エラーチェック
+
     const data = await res.json();
+    // 安全に取得 & ブロック理由のログ出し
+    if (data.promptFeedback?.blockReason) {
+      console.error("🚨 Gemini Blocked:", data.promptFeedback);
+    }
     text = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
   }
 
-  // OpenAI
+  // --- OpenAI ---
   else if (provider.includes("openai")) {
     const res = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
@@ -208,13 +225,17 @@ export async function callAI(aiConfig: any, prompt: string) {
         messages: [{ role: "user", content: prompt }],
         temperature: aiConfig.temperature ?? 0.5,
         max_tokens: aiConfig.max_tokens ?? 4000,
+        response_format: { type: "json_object" } // ★JSONモード推奨
       }),
     });
+
+    await handleApiError(res, "OpenAI"); // エラーチェック
+
     const data = await res.json();
     text = data?.choices?.[0]?.message?.content || "";
   }
 
-  // Claude
+  // --- Claude ---
   else if (provider.includes("claude")) {
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -230,13 +251,17 @@ export async function callAI(aiConfig: any, prompt: string) {
         max_tokens: aiConfig.max_tokens ?? 4000,
       }),
     });
+
+    await handleApiError(res, "Claude"); // エラーチェック
+
     const data = await res.json();
     text = data?.content?.[0]?.text || "";
   }
 
   // ✅ 空レスポンス防止
   if (!text || !text.trim()) {
-    throw new Error("AIのレスポンスが空でした");
+    console.error("🚨 AI Raw Response was empty or invalid structure.");
+    throw new Error("AIのレスポンスが空でした（APIは成功しましたがテキストが含まれていません）");
   }
 
   return text;
