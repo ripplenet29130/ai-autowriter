@@ -5,21 +5,21 @@ export const handler: Handler = async (event) => {
   try {
     const body = JSON.parse(event.body || "{}");
 
-    const { ai_config_id, keyword, related_keywords, wp_url } = body;
-
-    if (!ai_config_id || !keyword) {
-      return {
-        statusCode: 400,
-        body: JSON.stringify({ error: "必須パラメータが不足しています" }),
-      };
-    }
-
-    // 🔥 スケジューラーと同じロジック
-    const result = await generateArticleByAI(
-      ai_config_id,
-      keyword,
-      related_keywords || []
-    );
+    const centerKeyword =
+    keyword || related_keywords?.[0];
+  
+  if (!ai_config_id || !centerKeyword) {
+    return {
+      statusCode: 400,
+      body: JSON.stringify({ error: "必須パラメータが不足しています" }),
+    };
+  }
+  
+  const result = await generateArticleByAI(
+    ai_config_id,
+    centerKeyword,
+    related_keywords || []
+  );
 
     return {
       statusCode: 200,
