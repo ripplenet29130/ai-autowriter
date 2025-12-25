@@ -94,7 +94,7 @@ JSON以外の文字が1文字でも含まれてはいけません。
 /* -----------------------------------------------
   プロンプト生成（centerのみ）
 ------------------------------------------------ */
-export function buildUnifiedPrompt(center, aiConfig) {
+export function buildUnifiedPrompt(center: string, aiConfig: any) {
   const tone = aiConfig.tone || "ナチュラル";
   const style = aiConfig.style || "ブログ風";
   const length = aiConfig.article_length || "中程度";
@@ -129,7 +129,11 @@ ${getOutputFormat()}
 /* -----------------------------------------------
   プロンプト生成（facts 使用）
 ------------------------------------------------ */
-export function buildUnifiedPromptWithFacts(center, facts, aiConfig) {
+export function buildUnifiedPromptWithFacts(
+  center: string,
+  facts: Array<{ source: string; content: string }>,
+  aiConfig: any
+) {
   const tone = aiConfig.tone || "ナチュラル";
   const style = aiConfig.style || "ブログ風";
   const length = aiConfig.article_length || "中程度";
@@ -138,15 +142,13 @@ export function buildUnifiedPromptWithFacts(center, facts, aiConfig) {
   const { langLabel } = getLanguageSettings(language);
 
   // 🔒 関連性の低い facts を除外（超重要）
-  const safeFacts = facts.filter(f =>
-    f.source.includes("nagoya") ||
-    f.source.includes("bus") ||
-    f.source.includes("観光")
-  );
+  // ここは必要に応じて条件を増やしてください
+  const safeFacts = (facts || []).filter((f) => {
+    const s = (f?.source || "").toLowerCase();
+    return s.includes("nagoya") || s.includes("bus") || s.includes("kotsu") || s.includes("観光");
+  });
 
-  const factsText = safeFacts
-    .map((f, i) => `${i + 1}. ${f.content}`)
-    .join("\n");
+  const factsText = safeFacts.map((f, i) => `${i + 1}. ${f.content}`).join("\n");
 
   return `
 あなたはSEOおよびAIOに精通した専門ライターです。
@@ -178,9 +180,9 @@ ${getOutputFormat()}
 }
 
 /* -----------------------------------------------
-  AI 呼び出し
+  AI 呼び出し（Gemini / OpenAI / Claude）
 ------------------------------------------------ */
-export async function callAI(aiConfig, prompt) {
+export async function callAI(aiConfig: any, prompt: string) {
   const provider = (aiConfig.provider || "").toLowerCase();
   let text = "";
 
@@ -195,9 +197,9 @@ export async function callAI(aiConfig, prompt) {
           contents: [{ parts: [{ text: prompt }] }],
           generationConfig: {
             temperature: aiConfig.temperature ?? 0.5,
-            maxOutputTokens: aiConfig.max_tokens ?? 4000
-          }
-        })
+            maxOutputTokens: aiConfig.max_tokens ?? 4000,
+          },
+        }),
       }
     );
     const data = await res.json();
@@ -210,14 +212,14 @@ export async function callAI(aiConfig, prompt) {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${aiConfig.api_key}`
+        Authorization: `Bearer ${aiConfig.api_key}`,
       },
       body: JSON.stringify({
         model: aiConfig.model,
         messages: [{ role: "user", content: prompt }],
         temperature: aiConfig.temperature ?? 0.5,
-        max_tokens: aiConfig.max_tokens ?? 4000
-      })
+        max_tokens: aiConfig.max_tokens ?? 4000,
+      }),
     });
     const data = await res.json();
     text = data?.choices?.[0]?.message?.content || "";
@@ -230,14 +232,14 @@ export async function callAI(aiConfig, prompt) {
       headers: {
         "Content-Type": "application/json",
         "x-api-key": aiConfig.api_key,
-        "anthropic-version": "2023-06-01"
+        "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
         model: aiConfig.model,
         messages: [{ role: "user", content: prompt }],
         temperature: aiConfig.temperature ?? 0.5,
-        max_tokens: aiConfig.max_tokens ?? 4000
-      })
+        max_tokens: aiConfig.max_tokens ?? 4000,
+      }),
     });
     const data = await res.json();
     text = data?.content?.[0]?.text || "";
@@ -258,10 +260,49 @@ export function parseArticle(rawText: string) {
 
   const article = JSON.parse(match[0]);
 
+  if (typeof article?.title !== "string" || typeof article?.content !== "string") {
+    console.error("🧠 PARSED JSON:", article);
+    throw new Error("JSONは取得できましたが、title/content が不正です");
+  }
+
   article.content = article.content
     .replace(/\\n|\\r|\\t/g, "")
     .replace(/\n+/g, "")
     .trim();
 
   return article;
+}
+
+/* -----------------------------------------------
+  事実性エラー時の「書き直し」プロンプト
+  ※ generateArticle.ts が import しているため export 必須
+------------------------------------------------ */
+export function buildRewritePrompt(
+  article: { title: string; content: string },
+  reasons: string[]
+) {
+  return `
+以下の記事には事実性の問題があります。
+指摘事項を修正してください。
+
+【指摘内容】
+${(reasons || []).map((r) => `- ${r}`).join("\n")}
+
+【修正ルール】
+・facts に基づかない内容は削除または一般化する
+・断定表現は避ける
+・構成は大きく変えない
+・出力は必ず JSON のみ（title/content のみ）
+
+【出力形式（厳守）】
+{
+  "title": "タイトル文字列",
+  "content": "<p>...</p><h3>...</h3><p>...</p><h3>まとめ</h3><p>...</p>"
+}
+
+【記事】
+タイトル：${article.title}
+本文：
+${article.content}
+`;
 }
