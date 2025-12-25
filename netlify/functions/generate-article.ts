@@ -1,116 +1,31 @@
-// ===============================================
-// generate-article.ts（本番投稿）
-// → aiEngine.ts を呼び出すだけの薄い関数
-// ===============================================
-
 import type { Handler } from "@netlify/functions";
-import { createClient } from "@supabase/supabase-js";
-
-// 🔥 共通AIエンジン
-import {
-  buildUnifiedPrompt,
-  buildUnifiedPromptWithFacts,
-  callAI,
-  parseArticle,
-} from "../../src/utils/aiEngine";
-
-const supabase = createClient(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_KEY!
-);
+import { generateArticleByAI } from "../../src/utils/generateArticle";
 
 export const handler: Handler = async (event) => {
   try {
     const body = JSON.parse(event.body || "{}");
 
-    // 🟦 フロント側から送った「center」を受け取る
-    const { ai_config_id, center, wp_url } = body;
+    const { ai_config_id, keyword, related_keywords, wp_url } = body;
 
-    if (!ai_config_id) {
+    if (!ai_config_id || !keyword) {
       return {
         statusCode: 400,
-        body: JSON.stringify({ error: "AI設定IDがありません" }),
+        body: JSON.stringify({ error: "必須パラメータが不足しています" }),
       };
     }
 
-    // ------------------------------------------------------
-    // ① AI設定取得
-    // ------------------------------------------------------
-    const { data: aiConfig, error: aiErr } = await supabase
-      .from("ai_configs")
-      .select("*")
-      .eq("id", ai_config_id)
-      .single();
-
-    if (aiErr || !aiConfig) {
-      throw new Error("AI設定の取得に失敗しました");
-    }
-
-    // ------------------------------------------------------
-    // ★ API検索（Bing）→ facts 取得
-    // ------------------------------------------------------
-    const searchRes = await fetch(
-      `${process.env.URL}/.netlify/functions/api-search`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          keyword: center,
-        }),
-      }
+    // 🔥 スケジューラーと同じロジック
+    const result = await generateArticleByAI(
+      ai_config_id,
+      keyword,
+      related_keywords || []
     );
 
-    if (!searchRes.ok) {
-      throw new Error("API検索に失敗しました");
-    }
-
-    const searchData = await searchRes.json();
-    const facts = searchData.facts;
-
-    if (!facts || !Array.isArray(facts) || facts.length === 0) {
-      return {
-        statusCode: 400,
-        body: JSON.stringify({ error: "検索結果（facts）が取得できませんでした" }),
-      };
-    }
-
-
-    // ------------------------------------------------------
-    // ② プロンプト生成（中心テーマはフロントからの center）
-    // ------------------------------------------------------
-    const prompt = buildUnifiedPromptWithFacts(center, facts, aiConfig);
-
-    console.log("=== 送信プロンプト ===");
-    console.log(prompt);
-
-    // ------------------------------------------------------
-    // ③ AIへ送信（引数順の修正）
-    // ------------------------------------------------------
-    const rawOutput = await callAI(aiConfig, prompt);
-
-    console.log("=== AI 生出力 ===");
-    console.log(rawOutput);
-
-    // ------------------------------------------------------
-    // ④ JSON を解析
-    // ------------------------------------------------------
-    const article = parseArticle(rawOutput);
-
-    // ------------------------------------------------------
-    // ⑤ WordPress URL 整形
-    // ------------------------------------------------------
-    const postUrl = `${wp_url?.replace(/\/$/, "")}/`;
-
-    // ------------------------------------------------------
-    // ⑥ レスポンス返却
-    // ------------------------------------------------------
     return {
       statusCode: 200,
       body: JSON.stringify({
-        title: article.title,
-        content: article.content,
-        center_keyword: center,
-        post_url: postUrl,
+        ...result,
+        post_url: `${wp_url?.replace(/\/$/, "")}/`,
       }),
     };
   } catch (err) {
