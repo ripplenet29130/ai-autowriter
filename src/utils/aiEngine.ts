@@ -43,21 +43,20 @@ function getLanguageSettings(language: string) {
   共通：ハルシネーション防止
 ------------------------------------------------ */
 function getHallucinationPreventionRules() {
-  return `【ハルシネーション防止・事実性ルール（最重要）】
+  return `【ハルシネーション防止・事実性ルール】
 ・事実として断定できない内容は創作しない
 ・存在しない制度、法律、数値、実績は記載しない
-・不確かな内容は「一般的に」「場合によって異なります」と表現する
-・断定的な数値・日付・実績は使用しない`;
+・不確かな内容は「一般的に」「場合によって異なります」と表現する`;
 }
 
 /* -----------------------------------------------
   facts の扱いルール
 ------------------------------------------------ */
 function getFactsHandlingRules() {
-  return `【検索情報（facts）の扱いルール（最重要）】
-・facts に含まれる情報のみを根拠として使用する
-・facts に含まれない事実は創作しない
-・不足している場合は一般論として安全に曖昧化する`;
+  return `【検索情報（facts）の扱いルール】
+・facts に含まれる情報を参考に一般論として整理する
+・facts に含まれない内容は断定しない
+・情報が不足する場合は注意喚起として表現する`;
 }
 
 /* -----------------------------------------------
@@ -79,11 +78,10 @@ function getHTMLRules() {
   出力形式（JSON完全強制）
 ------------------------------------------------ */
 function getOutputFormat() {
-  return `【出力形式（厳守・最重要）】
+  return `【出力形式（厳守）】
 
 以下のJSONのみを出力してください。
-JSON以外の文字が1文字でも含まれてはいけません。
-説明文・注意文・空行・記号・コードブロックは禁止です。
+JSON以外の文字を含めてはいけません。
 
 {
   "title": "タイトル文字列",
@@ -127,7 +125,7 @@ ${getOutputFormat()}
 }
 
 /* -----------------------------------------------
-  プロンプト生成（facts 使用）
+  プロンプト生成（facts 使用・フィルターなし）
 ------------------------------------------------ */
 export function buildUnifiedPromptWithFacts(
   center: string,
@@ -141,29 +139,44 @@ export function buildUnifiedPromptWithFacts(
 
   const { langLabel } = getLanguageSettings(language);
 
+  // ✅ フィルターなし・必ず定義
+  const factsText = (facts || [])
+    .map((f, i) => `${i + 1}. ${f.content}`)
+    .join("\n");
+
   return `
-  あなたはSEOに強いプロライターです。
-  
-  【記事テーマ】
-  ${center}
-  
-  【参考情報】
-  ${factsText}
-  
+あなたはSEOおよびAIOに精通した専門ライターです。
+以下の条件で${langLabel}の記事を作成してください。
+
+${getFactsHandlingRules()}
+
+${getHallucinationPreventionRules()}
+
+【記事テーマ】
+${center}
+
+【参考情報】
+${factsText || "（一般的な公開情報を参考にしてください）"}
+
 【重要な書き方ルール】
-・結論は最初に「原則としてどうなのか」を述べる
-・例外は「ただし〜の場合」と分けて説明する
-・facts 間で表現が異なる場合は、共通する一般論のみを書く
-・医療・保険分野のため断定表現は避ける
+・結論は先に示す
+・断定できない内容は一般論として整理する
+・注意点がある場合は明確に分けて説明する
 ・出力はJSONのみ
-  
-  【出力形式】
-  {
-    "title": "タイトル",
-    "content": "<p>...</p><h3>...</h3><p>...</p><h3>まとめ</h3><p>...</p>"
-  }
-  `;
-  
+
+【文体】
+${tone}
+
+【スタイル】
+${style}
+
+【ボリューム】
+${length}
+
+${getHTMLRules()}
+
+${getOutputFormat()}
+`;
 }
 
 /* -----------------------------------------------
@@ -232,6 +245,11 @@ export async function callAI(aiConfig: any, prompt: string) {
     text = data?.content?.[0]?.text || "";
   }
 
+  // ✅ 空レスポンス防止
+  if (!text || !text.trim()) {
+    throw new Error("AIのレスポンスが空でした");
+  }
+
   return text;
 }
 
@@ -247,8 +265,10 @@ export function parseArticle(rawText: string) {
 
   const article = JSON.parse(match[0]);
 
-  if (typeof article?.title !== "string" || typeof article?.content !== "string") {
-    console.error("🧠 PARSED JSON:", article);
+  if (
+    typeof article?.title !== "string" ||
+    typeof article?.content !== "string"
+  ) {
     throw new Error("JSONは取得できましたが、title/content が不正です");
   }
 
@@ -262,7 +282,6 @@ export function parseArticle(rawText: string) {
 
 /* -----------------------------------------------
   事実性エラー時の「書き直し」プロンプト
-  ※ generateArticle.ts が import しているため export 必須
 ------------------------------------------------ */
 export function buildRewritePrompt(
   article: { title: string; content: string },
@@ -276,12 +295,11 @@ export function buildRewritePrompt(
 ${(reasons || []).map((r) => `- ${r}`).join("\n")}
 
 【修正ルール】
-・facts に基づかない内容は削除または一般化する
 ・断定表現は避ける
 ・構成は大きく変えない
-・出力は必ず JSON のみ（title/content のみ）
+・出力は必ず JSON のみ
 
-【出力形式（厳守）】
+【出力形式】
 {
   "title": "タイトル文字列",
   "content": "<p>...</p><h3>...</h3><p>...</p><h3>まとめ</h3><p>...</p>"
