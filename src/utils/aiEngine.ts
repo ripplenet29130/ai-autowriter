@@ -151,32 +151,26 @@ export function buildUnifiedPromptWithFacts(
   const factsText = safeFacts.map((f, i) => `${i + 1}. ${f.content}`).join("\n");
 
   return `
-あなたはSEOおよびAIOに精通した専門ライターです。
-以下の条件で${langLabel}の記事を作成してください。
-
-${getFactsHandlingRules()}
-
-${getHallucinationPreventionRules()}
-
-【記事テーマ】
-${center}
-
-【事実情報（この情報のみ使用可）】
-${factsText}
-
-【文体】
-${tone}
-
-【スタイル】
-${style}
-
-【ボリューム】
-${length}
-
-${getHTMLRules()}
-
-${getOutputFormat()}
-`;
+  あなたはSEOに強いプロライターです。
+  
+  【記事テーマ】
+  ${center}
+  
+  【参考情報】
+  ${factsText}
+  
+  【重要】
+  ・上記情報を参考にする
+  ・断定できない内容は一般論にする
+  ・出力はJSONのみ
+  
+  【出力形式】
+  {
+    "title": "タイトル",
+    "content": "<p>...</p><h3>...</h3><p>...</p><h3>まとめ</h3><p>...</p>"
+  }
+  `;
+  
 }
 
 /* -----------------------------------------------
