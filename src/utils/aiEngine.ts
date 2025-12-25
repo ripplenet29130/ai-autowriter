@@ -137,47 +137,36 @@ export function buildUnifiedPromptWithFacts(
   const length = aiConfig.article_length || "中程度";
   const language = aiConfig.language || "ja";
 
-  const { langLabel } = getLanguageSettings(language);
-
-  // ✅ フィルターなし・必ず定義
   const factsText = (facts || [])
     .map((f, i) => `${i + 1}. ${f.content}`)
     .join("\n");
 
   return `
-あなたはSEOおよびAIOに精通した専門ライターです。
-以下の条件で${langLabel}の記事を作成してください。
+あなたはSEOに配慮したプロのライターです。
+${language === "ja" ? "日本語" : language}で記事を書いてください。
 
-${getFactsHandlingRules()}
-
-${getHallucinationPreventionRules()}
-
-【記事テーマ】
+【テーマ】
 ${center}
 
 【参考情報】
-${factsText || "（一般的な公開情報を参考にしてください）"}
+${factsText || "一般的な公開情報を参考にしてください。"}
 
-【重要な書き方ルール】
-・結論は先に示す
-・断定できない内容は一般論として整理する
-・注意点がある場合は明確に分けて説明する
-・出力はJSONのみ
+【書き方の注意】
+・参考情報をもとに一般的な解説を行う
+・断定的な表現は避ける
+・結論は最初に簡潔に述べる
 
-【文体】
-${tone}
+【出力について】
+・最終的に JSON 形式で出力してください
+・形式は以下を参考にしてください
 
-【スタイル】
-${style}
-
-【ボリューム】
-${length}
-
-${getHTMLRules()}
-
-${getOutputFormat()}
+{
+  "title": "タイトル",
+  "content": "<p>導入文。<br>続く文。</p><h3>見出し</h3><p>本文。</p><h3>まとめ</h3><p>まとめ。</p>"
+}
 `;
 }
+
 
 /* -----------------------------------------------
   AI 呼び出し（Gemini / OpenAI / Claude）
