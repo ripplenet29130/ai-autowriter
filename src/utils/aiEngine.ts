@@ -141,15 +141,6 @@ export function buildUnifiedPromptWithFacts(
 
   const { langLabel } = getLanguageSettings(language);
 
-  // 🔒 関連性の低い facts を除外（超重要）
-  // ここは必要に応じて条件を増やしてください
-  const safeFacts = (facts || []).filter((f) => {
-    const s = (f?.source || "").toLowerCase();
-    return s.includes("nagoya") || s.includes("bus") || s.includes("kotsu") || s.includes("観光");
-  });
-
-  const factsText = safeFacts.map((f, i) => `${i + 1}. ${f.content}`).join("\n");
-
   return `
   あなたはSEOに強いプロライターです。
   
