@@ -45,10 +45,18 @@ export async function generateArticleByAIWithFacts(
   // // previewでは指定された keyword をそのまま中心テーマにする
   const center = keyword;
 
-  // 対策①：明らかなエラー文を除外
-  const cleanedFacts = facts.filter(f =>
-    !/warning|error|invalid argument|\/wp-content\//i.test(f.content)
-  );
+  // 対策①：明らかなエラー文を除外 + 件数制限（最大10件）
+  /*
+  const cleanedFacts = facts
+    .filter(f => !/warning|error|invalid argument|\/wp-content\//i.test(f.content))
+    .slice(0, 10); // 最大10件に制限してプロンプトを短く
+
+  console.log(`[generateArticleByAIWithFacts] フィルタリング後 ${cleanedFacts.length}件のfactsを使用`);
+  */
+
+  // 制限なしバージョン（デフォルト）
+  const cleanedFacts = facts
+    .filter(f => !/warning|error|invalid argument|\/wp-content\//i.test(f.content));
 
   // ③ プロンプト生成（facts版）
   const prompt = buildUnifiedPromptWithFacts(center, cleanedFacts, aiConfig);
@@ -155,10 +163,18 @@ export async function generateArticleByAI(
   // ② facts取得（選んだキーワードで検索）
   const rawFacts = await searchFactsByKeyword(center);
 
-  // 対策①：明らかなエラー文を除外
-  const cleanedFacts = rawFacts.filter(f =>
-    !/warning|error|invalid argument|\/wp-content\//i.test(f.content)
-  );
+  // 対策①：明らかなエラー文を除外 + 件数制限（最大10件）
+  /*
+  const cleanedFacts = rawFacts
+    .filter(f => !/warning|error|invalid argument|\/wp-content\//i.test(f.content))
+    .slice(0, 10); // 最大10件に制限してプロンプトを短く
+
+  console.log(`[generateArticleByAI] キーワード「${center}」: ${rawFacts.length}件 → フィルタリング後 ${cleanedFacts.length}件のfactsを使用`);
+  */
+
+  // 制限なしバージョン（デフォルト）
+  const cleanedFacts = rawFacts
+    .filter(f => !/warning|error|invalid argument|\/wp-content\//i.test(f.content));
 
   if (!cleanedFacts || cleanedFacts.length === 0) {
     throw new Error(`キーワード「${center}」の検索結果（facts）が取得できませんでした`);

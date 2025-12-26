@@ -57,6 +57,24 @@ export function buildUnifiedPromptWithFacts(
   const lengthRule = buildLengthInstruction(aiConfig.article_length || "");
   const factsText = facts.map((f, i) => `${i + 1}. ${f.content}`).join("\n");
 
+  // 短縮版プロンプト（コメントアウト）
+  /*
+  return `あなたはSEO記事を書くプロライターです。日本語で記事を書いてください。
+
+【テーマ】${center}
+
+【参考情報】${factsText}
+
+【ルール】
+${lengthRule}
+・事実に基づいて正確に書く
+・JSON以外の出力は禁止
+
+以下のJSONのみを出力してください。
+{"title": "記事タイトル", "content": "<p>本文</p><h3>見出し</h3><p>内容</p>"}`;
+  */
+
+  // 元の長いプロンプト（デフォルト）
   return `
 あなたはSEO記事を書くプロライターです。
 日本語で記事を書いてください。
@@ -99,7 +117,8 @@ export async function callAI(aiConfig: any, prompt: string) {
           contents: [{ parts: [{ text: prompt }] }],
           generationConfig: {
             temperature: aiConfig.temperature ?? 0.5,
-            maxOutputTokens: aiConfig.max_tokens ?? 6000,
+            maxOutputTokens: aiConfig.max_tokens ?? 6000, // タイムアウト対策で制限（コメントアウト）
+            // maxOutputTokens: aiConfig.max_tokens ?? 4000, // タイムアウト対策で制限
           },
         }),
       }
@@ -123,12 +142,13 @@ export async function callAI(aiConfig: any, prompt: string) {
         "Content-Type": "application/json",
         Authorization: `Bearer ${aiConfig.api_key}`,
       },
-      body: JSON.stringify({
-        model: aiConfig.model,
-        messages: [{ role: "user", content: prompt }],
-        temperature: aiConfig.temperature ?? 0.5,
-        max_tokens: aiConfig.max_tokens ?? 6000,
-      }),
+        body: JSON.stringify({
+          model: aiConfig.model,
+          messages: [{ role: "user", content: prompt }],
+          temperature: aiConfig.temperature ?? 0.5,
+          max_tokens: aiConfig.max_tokens ?? 6000, // タイムアウト対策で制限（コメントアウト）
+          // max_tokens: aiConfig.max_tokens ?? 4000, // タイムアウト対策で制限
+        }),
     });
 
     if (!res.ok) {
@@ -147,6 +167,82 @@ export async function callAI(aiConfig: any, prompt: string) {
 /* -----------------------------------------------
   JSON抽出（最小・安全）
 ------------------------------------------------ */
+// 改善版parseArticle（コメントアウト）
+/*
+export function parseArticle(rawText: string) {
+  // デバッグ用ログ（本番では削除可能）
+  console.log("[parseArticle] 入力長:", rawText.length);
+  console.log("[parseArticle] 開始部分:", rawText.substring(0, 200));
+
+  // より堅牢なJSON抽出
+  let start = rawText.indexOf("{");
+  if (start === -1) {
+    throw new Error("JSON開始が見つかりません");
+  }
+
+  // JSONの終わりを探す（ネスト対応）
+  let braceCount = 0;
+  let end = -1;
+  for (let i = start; i < rawText.length; i++) {
+    if (rawText[i] === "{") {
+      braceCount++;
+    } else if (rawText[i] === "}") {
+      braceCount--;
+      if (braceCount === 0) {
+        end = i;
+        break;
+      }
+    }
+  }
+
+  if (end === -1 || braceCount !== 0) {
+    console.error("[parseArticle] 不完全JSON:", rawText.substring(start, Math.min(start + 500, rawText.length)));
+    throw new Error("JSON構造が不完全です");
+  }
+
+  const jsonString = rawText.slice(start, end + 1);
+  console.log("[parseArticle] 抽出JSON長:", jsonString.length);
+
+  let article;
+  try {
+    article = JSON.parse(jsonString);
+  } catch (e) {
+    console.error("[parseArticle] JSONパースエラー:", e);
+    console.error("[parseArticle] 問題JSON:", jsonString);
+
+    // 簡易的なJSON修復を試みる
+    const repaired = jsonString
+      .replace(/,\s*}/g, "}")  // 末尾のカンマを除去
+      .replace(/{\s*,/g, "{"); // 先頭のカンマを除去
+
+    if (repaired !== jsonString) {
+      console.log("[parseArticle] JSON修復を試行");
+      try {
+        article = JSON.parse(repaired);
+        console.log("[parseArticle] JSON修復成功");
+      } catch (repairError) {
+        throw new Error("JSONパースに失敗しました");
+      }
+    } else {
+      throw new Error("JSONパースに失敗しました");
+    }
+  }
+
+  if (!article || typeof article.title !== "string" || typeof article.content !== "string") {
+    throw new Error("title/content が不正です");
+  }
+
+  // HTMLクリーンアップ
+  article.content = article.content
+    .replace(/\n|\r|\t/g, "")
+    .trim();
+
+  console.log("[parseArticle] パース成功:", article.title.substring(0, 50) + "...");
+  return article;
+}
+*/
+
+// 元のシンプル版parseArticle（デフォルト）
 export function parseArticle(rawText: string) {
   const start = rawText.indexOf("{");
   const end = rawText.lastIndexOf("}");
