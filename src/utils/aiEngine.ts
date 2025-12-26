@@ -96,50 +96,38 @@ export async function callAI(aiConfig: any, prompt: string) {
 
   // --- Gemini ---
   if (provider.includes("gemini")) {
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 8000); // 8秒タイムアウト
-
-      const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${aiConfig.model}:generateContent?key=${aiConfig.api_key}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: {
-              temperature: aiConfig.temperature ?? 0.5,
-              maxOutputTokens: aiConfig.max_tokens ?? 2500, // タイムアウト対策で制限
-            },
-          }),
-          signal: controller.signal,
-        }
-      );
-
-      clearTimeout(timeoutId);
-
-      if (!res.ok) {
-        const errorText = await res.text().catch(() => "Unknown error");
-        throw new Error(`Gemini API Error: ${errorText}`);
+    // Gemini用はタイムアウトをかけない
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${aiConfig.model}:generateContent?key=${aiConfig.api_key}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: {
+            temperature: aiConfig.temperature ?? 0.5,
+            maxOutputTokens: aiConfig.max_tokens ?? 4000, // タイムアウト対策で制限
+          },
+        }),
       }
+    );
 
-      const data = await res.json();
-      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
-      if (!text.trim()) throw new Error("Gemini response empty");
-      return text;
-    } catch (error) {
-      if (error.name === 'AbortError') {
-        throw new Error("AI応答がタイムアウトしました（8秒）");
-      }
-      throw error;
+    if (!res.ok) {
+      const errorText = await res.text().catch(() => "Unknown error");
+      throw new Error(`Gemini API Error: ${errorText}`);
     }
+
+    const data = await res.json();
+    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    if (!text.trim()) throw new Error("Gemini response empty");
+    return text;
   }
 
   // --- OpenAI ---
   if (provider.includes("openai")) {
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 8000); // 8秒タイムアウト
+      const timeoutId = setTimeout(() => controller.abort(), 20000); // 20秒タイムアウト
 
       const res = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
@@ -169,7 +157,7 @@ export async function callAI(aiConfig: any, prompt: string) {
       return text;
     } catch (error) {
       if (error.name === 'AbortError') {
-        throw new Error("AI応答がタイムアウトしました（8秒）");
+        throw new Error("AI応答がタイムアウトしました（20秒）");
       }
       throw error;
     }
