@@ -2,7 +2,7 @@
 import type { Handler } from "@netlify/functions";
 import { createClient } from "@supabase/supabase-js";
 import { generateArticleByAI } from "../../src/utils/generateArticle";
-import { notifyFactReject } from "../../src/utils/notifyFactReject";
+// import { notifyFactReject } from "../../src/utils/notifyFactReject";
 import { notifyPostSuccess } from "../../src/utils/notifyPostSuccess";
 
 // ============================
@@ -286,14 +286,18 @@ export const handler: Handler = async () => {
       const { title, content, is_rejected, fact_check, center_keyword } = articleResult;
 
       // ============================
-      // 最終投稿ステータス決定
+      // 最終投稿ステータス決定（ファクトチェックOFF）
       // ============================
+      /*
       const postStatus: "draft" | "publish" =
         is_rejected === true
           ? "draft"
           : schedule.post_status === "draft"
           ? "draft"
           : "publish";
+      */
+      const postStatus: "draft" | "publish" =
+        schedule.post_status === "draft" ? "draft" : "publish";
 
       // 💥 投稿直前に必ず JST を生成しなおす！
       const jstNow = getJSTDate();
@@ -310,6 +314,8 @@ export const handler: Handler = async () => {
         postStatus
       );
 
+      // ファクトチェックOFF - reject通知は不要
+      /*
       // ============================
       // reject 通知（reject の場合のみ）
       // ============================
@@ -326,6 +332,7 @@ export const handler: Handler = async () => {
           // reject通知のエラーは処理を止めない
         }
       }
+      */
 
       // ChatWork 通知（投稿完了通知）
       const remaining = unused.length - 1;

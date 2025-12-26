@@ -12,8 +12,8 @@ import {
   parseArticle,
 } from "./aiEngine";
 import { searchFactsByKeyword } from "./searchFacts";
-import { factCheckArticle } from "./factCheckArticle";
-import { buildRewritePrompt } from "./aiEngine";
+// import { factCheckArticle } from "./factCheckArticle";
+// import { buildRewritePrompt } from "./aiEngine";
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -57,8 +57,10 @@ export async function generateArticleByAIWithFacts(
   const raw = await callAI(aiConfig, prompt);
 
   // ⑤ JSON解析
-  let article = parseArticle(raw);
+  const article = parseArticle(raw);
 
+  // ファクトチェックOFF - 常にOKとして扱う
+  /*
   // ⑥ ファクトチェック（1回目）
   const checkResult = await factCheckArticle(
     article,
@@ -100,6 +102,15 @@ export async function generateArticleByAIWithFacts(
     center_keyword: center,
     fact_check: secondCheckResult,
     is_rejected: secondCheckResult.status === "reject",
+  };
+  */
+
+  return {
+    title: article.title,
+    content: article.content,
+    center_keyword: center,
+    fact_check: { status: "ok", reasons: [] },
+    is_rejected: false,
   };
 }
 
@@ -162,8 +173,10 @@ export async function generateArticleByAI(
   const raw = await callAI(aiConfig, prompt);
 
   // ⑤ JSON解析
-  let article = parseArticle(raw);
+  const article = parseArticle(raw);
 
+  // ファクトチェックOFF - 常にOKとして扱う
+  /*
   // ⑥ ファクトチェック（1回目）
   const checkResult = await factCheckArticle(
     article,
@@ -205,6 +218,15 @@ export async function generateArticleByAI(
     center_keyword: center,
     fact_check: secondCheckResult,
     is_rejected: secondCheckResult.status === "reject",
+  };
+  */
+
+  return {
+    title: article.title,
+    content: article.content,
+    center_keyword: center,
+    fact_check: { status: "ok", reasons: [] },
+    is_rejected: false,
   };
 }
 

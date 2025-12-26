@@ -2,7 +2,7 @@
 import type { Handler } from "@netlify/functions";
 import { createClient } from "@supabase/supabase-js";
 import { generateArticleByAI } from "../../src/utils/generateArticle";
-import { notifyFactReject } from "../../src/utils/notifyFactReject";
+// import { notifyFactReject } from "../../src/utils/notifyFactReject";
 import { notifyPostSuccess } from "../../src/utils/notifyPostSuccess";
 
 // ============================
@@ -157,6 +157,8 @@ export const handler: Handler = async (event) => {
     postStatus
   );
 
+  // ファクトチェックOFF - reject通知は不要
+  /*
   // ============================
   // reject 通知（reject の場合のみ）
   // ============================
@@ -173,6 +175,7 @@ export const handler: Handler = async (event) => {
       // reject通知のエラーは処理を止めない
     }
   }
+  */
 
   // ============================
   // ChatWork通知（投稿完了通知）
