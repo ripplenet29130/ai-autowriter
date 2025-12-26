@@ -1,6 +1,5 @@
 // ===============================================
-// aiEngine.ts
-// すべてのAIロジック（中心テーマ抽出・プロンプト生成・API呼び出し）
+// aiEngine.ts（安定版）
 // ===============================================
 
 import { createClient } from "@supabase/supabase-js";
@@ -11,147 +10,85 @@ const supabase = createClient(
 );
 
 /* -----------------------------------------------
-  共通：ハルシネーション防止
+  ハルシネーション防止
 ------------------------------------------------ */
-function getHallucinationPreventionRules() {
-  return `【ハルシネーション防止・事実性ルール】
-・事実として断定できない内容は創作しない
-・存在しない制度、法律、数値、実績は記載しない
-・不確かな内容は「一般的に」「場合によって異なります」と表現する`;
-}
-
-/* -----------------------------------------------
-  HTMLルール
------------------------------------------------- */
-function getHTMLRules() {
-  return `【HTMLルール】
-1. 出力は JSON のみ
-2. JSON は "title" と "content" のみ
-3. title はテキストのみ
-4. content は <p> → <h3> 構成
-5. <h1><h2><h5><h6> 使用禁止
-6. 段落は <p>、一文ごとに <br><br>（1文ごとに空行を入れる）
-7. 改行文字・コードブロック禁止
-8. 最後に <h3>まとめ</h3><p>...</p> を付ける`;
-}
-
-/* -----------------------------------------------
-  出力形式（JSON完全強制）
------------------------------------------------- */
-function getOutputFormat() {
-  return `【出力形式（厳守）】
-
-以下のJSONのみを出力してください。
-JSON以外の文字を含めてはいけません。
-
-{
-  "title": "タイトル文字列",
-  "content": "<p>導入文。<br>続く文。</p><h3>見出し</h3><p>本文。</p><h3>まとめ</h3><p>まとめ。</p>"
-}`;
-}
-
-/* -----------------------------------------------
-  文字数指定（Supabaseの値をそのまま解釈）
------------------------------------------------- */
-function buildLengthInstruction(articleLength: string) {
-  if (articleLength.includes("2000")) {
-    return "本文は【2000～2300文字】で作成してください。";
-  }
-  if (articleLength.includes("1000")) {
-    return "本文は【1000〜1500文字】で作成してください。";
-  }
-  if (articleLength.includes("500")) {
-    return "本文は【500〜800文字】で作成してください。";
-  }
-  return "本文は適切な分量で作成してください。";
-}
-
-/* -----------------------------------------------
-  プロンプト生成（centerのみ）
------------------------------------------------- */
-export function buildUnifiedPrompt(center: string, aiConfig: any) {
-  const language = aiConfig.language || "ja";
-  const tone = aiConfig.tone || "ナチュラル";
-  const style = aiConfig.style || "ブログ風";
-  const articleLength = aiConfig.article_length || "";
-
-  const lengthInstruction = buildLengthInstruction(articleLength);
-
+function hallucinationRules() {
   return `
-あなたはSEOに強いプロライターです。
-${language === "ja" ? "日本語" : language}で記事を作成してください。
-
-${getHallucinationPreventionRules()}
-
-【記事テーマ】
-${center}
-
-【文体】
-${tone}
-
-【スタイル】
-${style}
-
-【文字数条件】
-${lengthInstruction}
-
-${getHTMLRules()}
-
-${getOutputFormat()}
+【事実性ルール】
+・不確かな情報は断定しない
+・存在しない制度・数値・実績は書かない
+・曖昧な場合は「一般的に」「〜とされています」と表現する
 `;
 }
 
 /* -----------------------------------------------
-  プロンプト生成（facts 使用）
+  HTML / JSON ルール
+------------------------------------------------ */
+function outputRules() {
+  return `
+【出力ルール】
+・出力は JSON のみ
+・キーは title, content の2つだけ
+・title はテキストのみ
+・content は <p> と <h3> のみ使用
+・段落内は1文ごとに <br><br>
+・説明文、前置き、コードブロックは禁止
+`;
+}
+
+/* -----------------------------------------------
+  文字数指定
+------------------------------------------------ */
+function buildLengthInstruction(length: string) {
+  if (length.includes("2000")) return "本文は2000〜2300文字で作成してください。";
+  if (length.includes("1000")) return "本文は1000〜1500文字で作成してください。";
+  if (length.includes("500")) return "本文は500〜800文字で作成してください。";
+  return "本文は適切な分量で作成してください。";
+}
+
+/* -----------------------------------------------
+  プロンプト生成（factsあり）
 ------------------------------------------------ */
 export function buildUnifiedPromptWithFacts(
   center: string,
-  facts: Array<{ source: string; content: string }>,
+  facts: { source: string; content: string }[],
   aiConfig: any
 ) {
-  const language = aiConfig.language || "ja";
-  const articleLength = aiConfig.article_length || "";
-
-  const lengthInstruction = buildLengthInstruction(articleLength);
-
-  const factsText = (facts || [])
-    .map((f, i) => `${i + 1}. ${f.content}`)
-    .join("\n");
+  const lengthRule = buildLengthInstruction(aiConfig.article_length || "");
+  const factsText = facts.map((f, i) => `${i + 1}. ${f.content}`).join("\n");
 
   return `
-あなたはSEOに配慮したプロのライターです。
-${language === "ja" ? "日本語" : language}で記事を書いてください。
+あなたはSEO記事を書くプロライターです。
+日本語で記事を書いてください。
 
 【テーマ】
 ${center}
 
 【参考情報】
-${factsText || "一般的な公開情報を参考にしてください。"}
+${factsText}
 
-【文字数条件】
-${lengthInstruction}
+${lengthRule}
 
-${getHTMLRules()}
+${hallucinationRules()}
 
-【重要】出力形式について
-・以下の JSON のみを返してください
-・前後に説明文・注意文・コードブロックは一切書かないでください
-・JSON の構造を厳守してください
+${outputRules()}
+
+以下のJSONのみを出力してください。
 
 {
-  "title": "記事のタイトル文字列",
-  "content": "<p>導入文。</p><h3>見出し</h3><p>本文。</p><h3>まとめ</h3><p>まとめ。</p>"
+  "title": "記事タイトル",
+  "content": "<p>導入文。<br><br>続く文。</p><h3>見出し</h3><p>本文。</p><h3>まとめ</h3><p>まとめ。</p>"
 }
 `;
 }
 
 /* -----------------------------------------------
-  AI 呼び出し（Gemini / OpenAI / Claude）
+  AI 呼び出し（JSONモード不使用）
 ------------------------------------------------ */
 export async function callAI(aiConfig: any, prompt: string) {
   const provider = (aiConfig.provider || "").toLowerCase();
-  let text = "";
 
+  // --- Gemini ---
   if (provider.includes("gemini")) {
     const res = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${aiConfig.model}:generateContent?key=${aiConfig.api_key}`,
@@ -162,161 +99,98 @@ export async function callAI(aiConfig: any, prompt: string) {
           contents: [{ parts: [{ text: prompt }] }],
           generationConfig: {
             temperature: aiConfig.temperature ?? 0.5,
-            maxOutputTokens: aiConfig.max_tokens ?? 8000,
+            maxOutputTokens: aiConfig.max_tokens ?? 6000,
           },
         }),
       }
     );
 
     if (!res.ok) {
-      const errorText = await res.text();
-      throw new Error(`Gemini API Error: ${errorText}`);
+      throw new Error(`Gemini API Error: ${await res.text()}`);
     }
 
     const data = await res.json();
-    text = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    if (!text.trim()) throw new Error("Gemini response empty");
+    return text;
   }
 
-  if (!text || !text.trim()) {
-    throw new Error("AIのレスポンスが空でした");
+  // --- OpenAI ---
+  if (provider.includes("openai")) {
+    const res = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${aiConfig.api_key}`,
+      },
+      body: JSON.stringify({
+        model: aiConfig.model,
+        messages: [{ role: "user", content: prompt }],
+        temperature: aiConfig.temperature ?? 0.5,
+        max_tokens: aiConfig.max_tokens ?? 6000,
+      }),
+    });
+
+    if (!res.ok) {
+      throw new Error(`OpenAI API Error: ${await res.text()}`);
+    }
+
+    const data = await res.json();
+    const text = data?.choices?.[0]?.message?.content || "";
+    if (!text.trim()) throw new Error("OpenAI response empty");
+    return text;
   }
 
-  return text;
+  throw new Error("Unknown AI provider");
 }
 
 /* -----------------------------------------------
-  JSON抽出・整形
+  JSON抽出（最小・安全）
 ------------------------------------------------ */
 export function parseArticle(rawText: string) {
-  console.log("[parseArticle] 入力テキスト長:", rawText.length);
-  console.log("[parseArticle] 入力テキスト先頭100文字:", rawText.substring(0, 100));
-  console.log("[parseArticle] 入力テキスト末尾100文字:", rawText.substring(Math.max(0, rawText.length - 100)));
+  const start = rawText.indexOf("{");
+  const end = rawText.lastIndexOf("}");
 
-  // 対策: JSON のみを正確に抽出するロジック
-  let jsonStart = -1;
-  let jsonEnd = -1;
-  let braceCount = 0;
-  let foundCompleteJson = false;
-
-  // JSON の開始位置を特定（最初の { を探す）
-  const firstBraceIndex = rawText.indexOf('{');
-  if (firstBraceIndex === -1) {
-    console.error("[parseArticle] JSON開始の { が見つからない");
+  if (start === -1 || end === -1 || end <= start) {
     throw new Error("JSON構造が見つかりませんでした");
   }
-  jsonStart = firstBraceIndex;
 
-  // JSON の終了位置を特定（braceCount が 0 になる位置）
-  for (let i = jsonStart; i < rawText.length; i++) {
-    if (rawText[i] === '{') {
-      braceCount++;
-    } else if (rawText[i] === '}') {
-      braceCount--;
-      if (braceCount === 0) {
-        jsonEnd = i + 1;
-        foundCompleteJson = true;
-        console.log("[parseArticle] 完全なJSON構造を発見: start=", jsonStart, "end=", jsonEnd);
-        break;
-      }
-    }
-  }
-
-  if (!foundCompleteJson) {
-    console.error("[parseArticle] 完全なJSON構造が見つからない。braceCount:", braceCount);
-    console.error("[parseArticle] JSON開始位置:", jsonStart);
-    console.error("[parseArticle] テキスト長:", rawText.length);
-
-    // 不完全なJSONの場合、最後の } までを仮定して抽出を試みる
-    const lastBraceIndex = rawText.lastIndexOf('}');
-    if (lastBraceIndex > jsonStart) {
-      jsonEnd = lastBraceIndex + 1;
-      console.log("[parseArticle] 不完全JSONを抽出: start=", jsonStart, "end=", jsonEnd);
-    } else {
-      throw new Error("JSON構造が見つかりませんでした");
-    }
-  }
-
-  const jsonString = rawText.substring(jsonStart, jsonEnd);
-  console.log("[parseArticle] 抽出されたJSON長:", jsonString.length);
-  console.log("[parseArticle] 抽出されたJSON先頭200文字:", jsonString.substring(0, 200));
-  console.log("[parseArticle] 抽出されたJSON末尾200文字:", jsonString.substring(Math.max(0, jsonString.length - 200)));
-
-  let article;
-  try {
-    article = JSON.parse(jsonString);
-    console.log("[parseArticle] JSONパース成功: title長=", article.title?.length || 0, "content長=", article.content?.length || 0);
-  } catch (e) {
-    console.error("[parseArticle] JSONパースエラー:", e);
-    console.error("[parseArticle] 問題のあるJSON:", jsonString);
-
-    // パースエラーの場合、不完全なJSONを修復する試み
-    if (jsonString.includes('"content"') && !jsonString.trim().endsWith('}')) {
-      const repairedJson = jsonString.trim() + '\n}';
-      console.log("[parseArticle] JSON修復を試行:", repairedJson);
-      try {
-        article = JSON.parse(repairedJson);
-        console.log("[parseArticle] JSON修復成功");
-      } catch (repairError) {
-        console.error("[parseArticle] JSON修復失敗:", repairError);
-        throw new Error("JSONのパースに失敗しました");
-      }
-    } else {
-      throw new Error("JSONのパースに失敗しました");
-    }
-  }
+  const jsonString = rawText.slice(start, end + 1);
+  const article = JSON.parse(jsonString);
 
   if (typeof article.title !== "string" || typeof article.content !== "string") {
-    console.error("[parseArticle] title/content が不正:", {
-      title: article.title,
-      content: article.content?.substring(0, 100) + "..."
-    });
-    throw new Error("title / content が不正です");
+    throw new Error("title/content が不正です");
   }
 
-  // HTML エンティティとエスケープシーケンスをクリーンアップ
   article.content = article.content
-    .replace(/\\n|\\r|\\t/g, "")  // エスケープされた改行を除去
-    .replace(/\n|\r|\t/g, "")     // 実際の改行文字を除去
-    .replace(/&lt;/g, "<")        // HTML エンティティをデコード
-    .replace(/&gt;/g, ">")
-    .replace(/&amp;/g, "&")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
+    .replace(/\n|\r|\t/g, "")
     .trim();
 
-  console.log("[parseArticle] 処理完了: title長=", article.title.length, "content長=", article.content.length);
   return article;
 }
 
 /* -----------------------------------------------
-  事実性エラー時の「書き直し」プロンプト
+  リライト用プロンプト
 ------------------------------------------------ */
 export function buildRewritePrompt(
   article: { title: string; content: string },
   reasons: string[]
 ) {
   return `
-以下の記事には事実性の問題があります。
-指摘事項を修正してください。
+以下の記事を修正してください。
 
-【指摘内容】
-${(reasons || []).map((r) => `- ${r}`).join("\n")}
+【修正理由】
+${reasons.map(r => `- ${r}`).join("\n")}
 
-【修正ルール】
-・断定表現は避ける
-・構成は大きく変えない
-【重要】出力形式について
-・以下の JSON のみを返してください
-・前後に説明文・注意文・コードブロックは一切書かないでください
+${outputRules()}
 
 {
-  "title": "修正後のタイトル文字列",
-  "content": "<p>...</p><h3>...</h3><p>...</p><h3>まとめ</h3><p>...</p>"
+  "title": "修正後タイトル",
+  "content": "<p>修正文。</p><h3>見出し</h3><p>本文。</p><h3>まとめ</h3><p>まとめ。</p>"
 }
 
-【記事】
-タイトル：${article.title}
-本文：
+【元記事】
+${article.title}
 ${article.content}
 `;
 }
