@@ -133,12 +133,13 @@ ${lengthInstruction}
 
 ${getHTMLRules()}
 
-【出力について】
-・最終的に JSON 形式で出力してください
-・JSON以外の文字は出力しないでください
+【重要】出力形式について
+・以下の JSON のみを返してください
+・前後に説明文・注意文・コードブロックは一切書かないでください
+・JSON の構造を厳守してください
 
 {
-  "title": "タイトル",
+  "title": "記事のタイトル文字列",
   "content": "<p>導入文。</p><h3>見出し</h3><p>本文。</p><h3>まとめ</h3><p>まとめ。</p>"
 }
 `;
@@ -188,18 +189,59 @@ export async function callAI(aiConfig: any, prompt: string) {
   JSON抽出・整形
 ------------------------------------------------ */
 export function parseArticle(rawText: string) {
-  const match = rawText.match(/\{[\s\S]*\}/);
-  if (!match) {
+  // 対策: JSON のみを正確に抽出するロジック
+  let jsonStart = -1;
+  let jsonEnd = -1;
+  let braceCount = 0;
+
+  // JSON の開始位置を特定
+  for (let i = 0; i < rawText.length; i++) {
+    if (rawText[i] === '{') {
+      if (jsonStart === -1) {
+        jsonStart = i;
+      }
+      braceCount++;
+    } else if (rawText[i] === '}') {
+      braceCount--;
+      if (braceCount === 0 && jsonStart !== -1) {
+        jsonEnd = i + 1;
+        break;
+      }
+    }
+  }
+
+  if (jsonStart === -1 || jsonEnd === -1) {
+    console.error("[parseArticle] JSON構造が見つからない rawText:", rawText);
     throw new Error("JSON構造が見つかりませんでした");
   }
 
-  const article = JSON.parse(match[0]);
+  const jsonString = rawText.substring(jsonStart, jsonEnd);
+
+  let article;
+  try {
+    article = JSON.parse(jsonString);
+  } catch (e) {
+    console.error("[parseArticle] JSONパースエラー:", e);
+    console.error("[parseArticle] 抽出されたJSON:", jsonString);
+    throw new Error("JSONのパースに失敗しました");
+  }
 
   if (typeof article.title !== "string" || typeof article.content !== "string") {
+    console.error("[parseArticle] title/content が不正:", article);
     throw new Error("title / content が不正です");
   }
 
-  article.content = article.content.replace(/\\n|\\r|\\t/g, "").trim();
+  // HTML エンティティとエスケープシーケンスをクリーンアップ
+  article.content = article.content
+    .replace(/\\n|\\r|\\t/g, "")  // エスケープされた改行を除去
+    .replace(/\n|\r|\t/g, "")     // 実際の改行文字を除去
+    .replace(/&lt;/g, "<")        // HTML エンティティをデコード
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .trim();
+
   return article;
 }
 
@@ -220,11 +262,12 @@ ${(reasons || []).map((r) => `- ${r}`).join("\n")}
 【修正ルール】
 ・断定表現は避ける
 ・構成は大きく変えない
-・出力は必ず JSON のみ
+【重要】出力形式について
+・以下の JSON のみを返してください
+・前後に説明文・注意文・コードブロックは一切書かないでください
 
-【出力形式】
 {
-  "title": "タイトル文字列",
+  "title": "修正後のタイトル文字列",
   "content": "<p>...</p><h3>...</h3><p>...</p><h3>まとめ</h3><p>...</p>"
 }
 
