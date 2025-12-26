@@ -108,7 +108,7 @@ export async function callAI(aiConfig: any, prompt: string) {
           contents: [{ parts: [{ text: prompt }] }],
           generationConfig: {
             temperature: aiConfig.temperature ?? 0.5,
-            maxOutputTokens: aiConfig.max_tokens ?? 4000, // タイムアウト対策で制限
+            maxOutputTokens: aiConfig.max_tokens ?? 4500, // 記事生成に十分なトークン数を確保
           },
         }),
       }
@@ -141,7 +141,7 @@ export async function callAI(aiConfig: any, prompt: string) {
           model: aiConfig.model,
           messages: [{ role: "user", content: prompt }],
           temperature: aiConfig.temperature ?? 0.5,
-          max_tokens: aiConfig.max_tokens ?? 2500, // タイムアウト対策で制限
+          max_tokens: aiConfig.max_tokens ?? 4500, // 記事生成に十分なトークン数を確保
         }),
         signal: controller.signal,
       });
@@ -208,8 +208,20 @@ export function parseArticle(rawText: string) {
   }
 
   if (end === -1 || braceCount !== 0) {
-    console.error("[parseArticle] 不完全JSON:", cleanedText.substring(start, Math.min(start + 500, cleanedText.length)));
-    throw new Error("JSON構造が不完全です");
+    console.log("[parseArticle] JSONが不完全ですが、可能な限り修復を試みます");
+    console.log("[parseArticle] 不完全JSON:", cleanedText.substring(start, Math.min(start + 500, cleanedText.length)));
+
+    // 不完全JSONの場合、最後の有効な位置までを使用
+    if (braceCount > 0) {
+      // 開きカッコが多い場合、最後の閉じカッコを探す
+      const lastClosingBrace = cleanedText.lastIndexOf('}');
+      if (lastClosingBrace > start) {
+        end = lastClosingBrace;
+        console.log("[parseArticle] 最終閉じカッコ位置を使用:", end);
+      } else {
+        throw new Error("JSON構造が修復不可能です");
+      }
+    }
   }
 
   const jsonString = cleanedText.slice(start, end + 1);
@@ -222,28 +234,66 @@ export function parseArticle(rawText: string) {
     console.error("[parseArticle] JSONパースエラー:", e);
     console.error("[parseArticle] 問題JSON:", jsonString);
 
-    // 簡易的なJSON修復を試みる
-    const repaired = jsonString
-      .replace(/,\s*}/g, "}")  // 末尾のカンマを除去
-      .replace(/{\s*,/g, "{")  // 先頭のカンマを除去
-      .replace(/,\s*]/g, "]")  // 配列の末尾カンマを除去
-      .replace(/\[\s*,/g, "["); // 配列の先頭カンマを除去
+    // 複数の修復方法を試行
+    const repairAttempts = [
+      // 1. カンマ修復
+      (str: string) => str
+        .replace(/,\s*}/g, "}")  // 末尾のカンマを除去
+        .replace(/{\s*,/g, "{")  // 先頭のカンマを除去
+        .replace(/,\s*]/g, "]")  // 配列の末尾カンマを除去
+        .replace(/\[\s*,/g, "["), // 配列の先頭カンマを除去
 
-    if (repaired !== jsonString) {
-      console.log("[parseArticle] JSON修復を試行");
-      try {
-        article = JSON.parse(repaired);
-        console.log("[parseArticle] JSON修復成功");
-      } catch (repairError) {
-        throw new Error("JSONパースに失敗しました");
+      // 2. 不完全なJSONに閉じカッコを追加
+      (str: string) => {
+        const openBraces = (str.match(/{/g) || []).length;
+        const closeBraces = (str.match(/}/g) || []).length;
+        if (openBraces > closeBraces) {
+          return str + '}'.repeat(openBraces - closeBraces);
+        }
+        return str;
+      },
+
+      // 3. HTMLタグの不完全修復
+      (str: string) => str.replace(/<[^>]*$/g, ''), // 不完全なHTMLタグを除去
+    ];
+
+    for (let i = 0; i < repairAttempts.length; i++) {
+      const repaired = repairAttempts[i](jsonString);
+      if (repaired !== jsonString) {
+        console.log(`[parseArticle] JSON修復方法${i + 1}を試行`);
+        try {
+          article = JSON.parse(repaired);
+          console.log(`[parseArticle] JSON修復成功（方法${i + 1}）`);
+          break;
+        } catch (repairError) {
+          console.log(`[parseArticle] 修復方法${i + 1}失敗:`, repairError.message);
+        }
       }
-    } else {
+    }
+
+    if (!article) {
       throw new Error("JSONパースに失敗しました");
     }
   }
 
-  if (!article || typeof article.title !== "string" || typeof article.content !== "string") {
-    throw new Error("title/content が不正です");
+  // 最低限の構造チェックと修復
+  if (!article) {
+    throw new Error("記事データが取得できませんでした");
+  }
+
+  if (typeof article.title !== "string" || !article.title.trim()) {
+    console.warn("[parseArticle] titleが不正のためデフォルト値を設定");
+    article.title = "記事タイトル";
+  }
+
+  if (typeof article.content !== "string" || !article.content.trim()) {
+    console.warn("[parseArticle] contentが不正のためデフォルト値を設定");
+    article.content = "<p>記事の内容を読み込み中です。</p>";
+  }
+
+  // title/contentが存在することを確認
+  if (!article.title || !article.content) {
+    throw new Error("titleまたはcontentが空です");
   }
 
   // HTMLクリーンアップ
