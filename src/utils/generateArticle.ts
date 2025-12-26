@@ -45,8 +45,13 @@ export async function generateArticleByAIWithFacts(
   // // previewでは指定された keyword をそのまま中心テーマにする
   const center = keyword;
 
+  // 対策①：明らかなエラー文を除外
+  const cleanedFacts = facts.filter(f =>
+    !/warning|error|invalid argument|\/wp-content\//i.test(f.content)
+  );
+
   // ③ プロンプト生成（facts版）
-  const prompt = buildUnifiedPromptWithFacts(center, facts, aiConfig);
+  const prompt = buildUnifiedPromptWithFacts(center, cleanedFacts, aiConfig);
 
   // ④ AI呼び出し
   const raw = await callAI(aiConfig, prompt);
@@ -57,7 +62,7 @@ export async function generateArticleByAIWithFacts(
   // ⑥ ファクトチェック（1回目）
   const checkResult = await factCheckArticle(
     article,
-    facts,
+    cleanedFacts,
     (prompt) => callAI(aiConfig, prompt)
   );
 
@@ -82,7 +87,7 @@ export async function generateArticleByAIWithFacts(
   // ===== 2回目のファクトチェック =====
   const secondCheckResult = await factCheckArticle(
     article,
-    facts,
+    cleanedFacts,
     (p) => callAI(aiConfig, p)
   );
 
@@ -137,16 +142,21 @@ export async function generateArticleByAI(
   const center = selectedKeyword;
 
   // ② facts取得（選んだキーワードで検索）
-  const facts = await searchFactsByKeyword(center);
+  const rawFacts = await searchFactsByKeyword(center);
 
-  if (!facts || facts.length === 0) {
+  // 対策①：明らかなエラー文を除外
+  const cleanedFacts = rawFacts.filter(f =>
+    !/warning|error|invalid argument|\/wp-content\//i.test(f.content)
+  );
+
+  if (!cleanedFacts || cleanedFacts.length === 0) {
     throw new Error(`キーワード「${center}」の検索結果（facts）が取得できませんでした`);
   }
 
-  console.log(`[generateArticleByAI] キーワード「${center}」: ${facts.length}件のfactsを取得`);
+  console.log(`[generateArticleByAI] キーワード「${center}」: ${rawFacts.length}件 → フィルタリング後 ${cleanedFacts.length}件のfactsを取得`);
 
   // ③ プロンプト生成（facts版）
-  const prompt = buildUnifiedPromptWithFacts(center, facts, aiConfig);
+  const prompt = buildUnifiedPromptWithFacts(center, cleanedFacts, aiConfig);
 
   // ④ AI呼び出し
   const raw = await callAI(aiConfig, prompt);
@@ -157,7 +167,7 @@ export async function generateArticleByAI(
   // ⑥ ファクトチェック（1回目）
   const checkResult = await factCheckArticle(
     article,
-    facts,
+    cleanedFacts,
     (prompt) => callAI(aiConfig, prompt)
   );
 
@@ -182,7 +192,7 @@ export async function generateArticleByAI(
   // ===== 2回目のファクトチェック =====
   const secondCheckResult = await factCheckArticle(
     article,
-    facts,
+    cleanedFacts,
     (p) => callAI(aiConfig, p)
   );
 
