@@ -57,8 +57,7 @@ export function buildUnifiedPromptWithFacts(
   const lengthRule = buildLengthInstruction(aiConfig.article_length || "");
   const factsText = facts.map((f, i) => `${i + 1}. ${f.content}`).join("\n");
 
-  // 短縮版プロンプト（コメントアウト）
-  /*
+  // 短縮版プロンプト（タイムアウト対策）
   return `あなたはSEO記事を書くプロライターです。日本語で記事を書いてください。
 
 【テーマ】${center}
@@ -72,32 +71,6 @@ ${lengthRule}
 
 以下のJSONのみを出力してください。
 {"title": "記事タイトル", "content": "<p>本文</p><h3>見出し</h3><p>内容</p>"}`;
-  */
-
-  // 元の長いプロンプト（デフォルト）
-  return `
-あなたはSEO記事を書くプロライターです。
-日本語で記事を書いてください。
-
-【テーマ】
-${center}
-
-【参考情報】
-${factsText}
-
-${lengthRule}
-
-${hallucinationRules()}
-
-${outputRules()}
-
-以下のJSONのみを出力してください。
-
-{
-  "title": "記事タイトル",
-  "content": "<p>導入文。<br><br>続く文。</p><h3>見出し</h3><p>本文。</p><h3>まとめ</h3><p>まとめ。</p>"
-}
-`;
 }
 
 /* -----------------------------------------------
@@ -117,8 +90,7 @@ export async function callAI(aiConfig: any, prompt: string) {
           contents: [{ parts: [{ text: prompt }] }],
           generationConfig: {
             temperature: aiConfig.temperature ?? 0.5,
-            maxOutputTokens: aiConfig.max_tokens ?? 6000, // タイムアウト対策で制限（コメントアウト）
-            // maxOutputTokens: aiConfig.max_tokens ?? 4000, // タイムアウト対策で制限
+            maxOutputTokens: aiConfig.max_tokens ?? 4000, // タイムアウト対策で制限
           },
         }),
       }
@@ -146,8 +118,7 @@ export async function callAI(aiConfig: any, prompt: string) {
           model: aiConfig.model,
           messages: [{ role: "user", content: prompt }],
           temperature: aiConfig.temperature ?? 0.5,
-          max_tokens: aiConfig.max_tokens ?? 6000, // タイムアウト対策で制限（コメントアウト）
-          // max_tokens: aiConfig.max_tokens ?? 4000, // タイムアウト対策で制限
+          max_tokens: aiConfig.max_tokens ?? 4000, // タイムアウト対策で制限
         }),
     });
 
@@ -167,8 +138,7 @@ export async function callAI(aiConfig: any, prompt: string) {
 /* -----------------------------------------------
   JSON抽出（最小・安全）
 ------------------------------------------------ */
-// 改善版parseArticle（コメントアウト）
-/*
+// 改善版parseArticle（タイムアウト対策有効化）
 export function parseArticle(rawText: string) {
   // デバッグ用ログ（本番では削除可能）
   console.log("[parseArticle] 入力長:", rawText.length);
@@ -238,30 +208,6 @@ export function parseArticle(rawText: string) {
     .trim();
 
   console.log("[parseArticle] パース成功:", article.title.substring(0, 50) + "...");
-  return article;
-}
-*/
-
-// 元のシンプル版parseArticle（デフォルト）
-export function parseArticle(rawText: string) {
-  const start = rawText.indexOf("{");
-  const end = rawText.lastIndexOf("}");
-
-  if (start === -1 || end === -1 || end <= start) {
-    throw new Error("JSON構造が見つかりませんでした");
-  }
-
-  const jsonString = rawText.slice(start, end + 1);
-  const article = JSON.parse(jsonString);
-
-  if (typeof article.title !== "string" || typeof article.content !== "string") {
-    throw new Error("title/content が不正です");
-  }
-
-  article.content = article.content
-    .replace(/\n|\r|\t/g, "")
-    .trim();
-
   return article;
 }
 
