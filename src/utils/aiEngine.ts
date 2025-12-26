@@ -71,7 +71,7 @@ export function buildUnifiedPromptWithFacts(
   const lengthRule = buildLengthInstruction(aiConfig.article_length || "");
   const factsText = facts.map((f, i) => `${i + 1}. ${f.content}`).join("\n");
 
-  // 短縮版プロンプト（タイムアウト対策 + 文字数厳守）
+  // 短縮版プロンプト（タイムアウト対策 + 文字数厳守 + Markdown禁止）
   return `あなたはSEO記事を書くプロライターです。日本語で記事を書いてください。
 
 【テーマ】${center}
@@ -82,6 +82,8 @@ export function buildUnifiedPromptWithFacts(
 ${lengthRule}
 ・事実に基づいて正確に書く
 ・JSON以外の出力は禁止
+・Markdown記法（\`\`\`jsonなど）は使用しない
+・JSONを直接出力する
 ・文字数制限を厳守してください
 
 以下のJSONのみを出力してください。
@@ -175,8 +177,17 @@ export function parseArticle(rawText: string) {
   console.log("[parseArticle] 入力長:", rawText.length);
   console.log("[parseArticle] 開始部分:", rawText.substring(0, 200));
 
+  // Markdownのコードブロックを除去
+  let cleanedText = rawText
+    .replace(/^```json\s*/i, '')  // ```json を除去
+    .replace(/^```\s*/i, '')      // ``` を除去
+    .replace(/\s*```\s*$/i, '')   // 末尾の ``` を除去
+    .trim();
+
+  console.log("[parseArticle] クリーン後開始部分:", cleanedText.substring(0, 200));
+
   // より堅牢なJSON抽出
-  let start = rawText.indexOf("{");
+  let start = cleanedText.indexOf("{");
   if (start === -1) {
     throw new Error("JSON開始が見つかりません");
   }
@@ -184,10 +195,10 @@ export function parseArticle(rawText: string) {
   // JSONの終わりを探す（ネスト対応）
   let braceCount = 0;
   let end = -1;
-  for (let i = start; i < rawText.length; i++) {
-    if (rawText[i] === "{") {
+  for (let i = start; i < cleanedText.length; i++) {
+    if (cleanedText[i] === "{") {
       braceCount++;
-    } else if (rawText[i] === "}") {
+    } else if (cleanedText[i] === "}") {
       braceCount--;
       if (braceCount === 0) {
         end = i;
@@ -197,11 +208,11 @@ export function parseArticle(rawText: string) {
   }
 
   if (end === -1 || braceCount !== 0) {
-    console.error("[parseArticle] 不完全JSON:", rawText.substring(start, Math.min(start + 500, rawText.length)));
+    console.error("[parseArticle] 不完全JSON:", cleanedText.substring(start, Math.min(start + 500, cleanedText.length)));
     throw new Error("JSON構造が不完全です");
   }
 
-  const jsonString = rawText.slice(start, end + 1);
+  const jsonString = cleanedText.slice(start, end + 1);
   console.log("[parseArticle] 抽出JSON長:", jsonString.length);
 
   let article;
@@ -214,7 +225,9 @@ export function parseArticle(rawText: string) {
     // 簡易的なJSON修復を試みる
     const repaired = jsonString
       .replace(/,\s*}/g, "}")  // 末尾のカンマを除去
-      .replace(/{\s*,/g, "{"); // 先頭のカンマを除去
+      .replace(/{\s*,/g, "{")  // 先頭のカンマを除去
+      .replace(/,\s*]/g, "]")  // 配列の末尾カンマを除去
+      .replace(/\[\s*,/g, "["); // 配列の先頭カンマを除去
 
     if (repaired !== jsonString) {
       console.log("[parseArticle] JSON修復を試行");
