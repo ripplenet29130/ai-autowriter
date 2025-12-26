@@ -14,7 +14,7 @@ type Fact = {
       engine: "google",
       hl: "ja",
       gl: "jp",
-      num: "5",
+      num: "3",
       api_key: process.env.SERPAPI_API_KEY!,
     });
   

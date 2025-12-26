@@ -96,55 +96,83 @@ export async function callAI(aiConfig: any, prompt: string) {
 
   // --- Gemini ---
   if (provider.includes("gemini")) {
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${aiConfig.model}:generateContent?key=${aiConfig.api_key}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: {
-            temperature: aiConfig.temperature ?? 0.5,
-            maxOutputTokens: aiConfig.max_tokens ?? 3500, // 文字数対策で適度に制限
-          },
-        }),
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 8000); // 8秒タイムアウト
+
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${aiConfig.model}:generateContent?key=${aiConfig.api_key}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: {
+              temperature: aiConfig.temperature ?? 0.5,
+              maxOutputTokens: aiConfig.max_tokens ?? 2500, // タイムアウト対策で制限
+            },
+          }),
+          signal: controller.signal,
+        }
+      );
+
+      clearTimeout(timeoutId);
+
+      if (!res.ok) {
+        const errorText = await res.text().catch(() => "Unknown error");
+        throw new Error(`Gemini API Error: ${errorText}`);
       }
-    );
 
-    if (!res.ok) {
-      throw new Error(`Gemini API Error: ${await res.text()}`);
+      const data = await res.json();
+      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+      if (!text.trim()) throw new Error("Gemini response empty");
+      return text;
+    } catch (error) {
+      if (error.name === 'AbortError') {
+        throw new Error("AI応答がタイムアウトしました（8秒）");
+      }
+      throw error;
     }
-
-    const data = await res.json();
-    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
-    if (!text.trim()) throw new Error("Gemini response empty");
-    return text;
   }
 
   // --- OpenAI ---
   if (provider.includes("openai")) {
-    const res = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${aiConfig.api_key}`,
-      },
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 8000); // 8秒タイムアウト
+
+      const res = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${aiConfig.api_key}`,
+        },
         body: JSON.stringify({
           model: aiConfig.model,
           messages: [{ role: "user", content: prompt }],
           temperature: aiConfig.temperature ?? 0.5,
-          max_tokens: aiConfig.max_tokens ?? 3500, // 文字数対策で適度に制限
+          max_tokens: aiConfig.max_tokens ?? 2500, // タイムアウト対策で制限
         }),
-    });
+        signal: controller.signal,
+      });
 
-    if (!res.ok) {
-      throw new Error(`OpenAI API Error: ${await res.text()}`);
+      clearTimeout(timeoutId);
+
+      if (!res.ok) {
+        const errorText = await res.text().catch(() => "Unknown error");
+        throw new Error(`OpenAI API Error: ${errorText}`);
+      }
+
+      const data = await res.json();
+      const text = data?.choices?.[0]?.message?.content || "";
+      if (!text.trim()) throw new Error("OpenAI response empty");
+      return text;
+    } catch (error) {
+      if (error.name === 'AbortError') {
+        throw new Error("AI応答がタイムアウトしました（8秒）");
+      }
+      throw error;
     }
-
-    const data = await res.json();
-    const text = data?.choices?.[0]?.message?.content || "";
-    if (!text.trim()) throw new Error("OpenAI response empty");
-    return text;
   }
 
   throw new Error("Unknown AI provider");
