@@ -162,8 +162,7 @@ export async function callAI(aiConfig: any, prompt: string) {
           contents: [{ parts: [{ text: prompt }] }],
           generationConfig: {
             temperature: aiConfig.temperature ?? 0.5,
-            maxOutputTokens: aiConfig.max_tokens ?? 4000,
-            responseMimeType: "application/json",
+            maxOutputTokens: aiConfig.max_tokens ?? 8000,
           },
         }),
       }
