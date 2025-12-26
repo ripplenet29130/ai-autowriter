@@ -40,10 +40,24 @@ function outputRules() {
   文字数指定
 ------------------------------------------------ */
 function buildLengthInstruction(length: string) {
-  if (length.includes("2000")) return "本文は2000〜2300文字で作成してください。";
-  if (length.includes("1000")) return "本文は1000〜1500文字で作成してください。";
-  if (length.includes("500")) return "本文は500〜800文字で作成してください。";
-  return "本文は適切な分量で作成してください。";
+  if (length.includes("2000")) {
+    return `【文字数目安】
+・本文は2000〜2300文字程度を目安に作成してください
+・見出し構成を調整して自然な長さにまとめてください`;
+  }
+  if (length.includes("1000")) {
+    return `【文字数目安】
+・本文は1000〜1500文字程度を目安に作成してください
+・見出し構成を調整して自然な長さにまとめてください`;
+  }
+  if (length.includes("500")) {
+    return `【文字数目安】
+・本文は500〜800文字程度を目安に作成してください
+・見出し構成を調整して自然な長さにまとめてください`;
+  }
+  return `【文字数目安】
+・本文は1000〜2000文字程度を目安に作成してください
+・見出し構成を調整して自然な長さにまとめてください`;
 }
 
 /* -----------------------------------------------
@@ -57,7 +71,7 @@ export function buildUnifiedPromptWithFacts(
   const lengthRule = buildLengthInstruction(aiConfig.article_length || "");
   const factsText = facts.map((f, i) => `${i + 1}. ${f.content}`).join("\n");
 
-  // 短縮版プロンプト（タイムアウト対策）
+  // 短縮版プロンプト（タイムアウト対策 + 文字数厳守）
   return `あなたはSEO記事を書くプロライターです。日本語で記事を書いてください。
 
 【テーマ】${center}
@@ -68,6 +82,7 @@ export function buildUnifiedPromptWithFacts(
 ${lengthRule}
 ・事実に基づいて正確に書く
 ・JSON以外の出力は禁止
+・文字数制限を厳守してください
 
 以下のJSONのみを出力してください。
 {"title": "記事タイトル", "content": "<p>本文</p><h3>見出し</h3><p>内容</p>"}`;
@@ -90,7 +105,7 @@ export async function callAI(aiConfig: any, prompt: string) {
           contents: [{ parts: [{ text: prompt }] }],
           generationConfig: {
             temperature: aiConfig.temperature ?? 0.5,
-            maxOutputTokens: aiConfig.max_tokens ?? 4000, // タイムアウト対策で制限
+            maxOutputTokens: aiConfig.max_tokens ?? 3500, // 文字数対策で適度に制限
           },
         }),
       }
@@ -118,7 +133,7 @@ export async function callAI(aiConfig: any, prompt: string) {
           model: aiConfig.model,
           messages: [{ role: "user", content: prompt }],
           temperature: aiConfig.temperature ?? 0.5,
-          max_tokens: aiConfig.max_tokens ?? 4000, // タイムアウト対策で制限
+          max_tokens: aiConfig.max_tokens ?? 3500, // 文字数対策で適度に制限
         }),
     });
 
