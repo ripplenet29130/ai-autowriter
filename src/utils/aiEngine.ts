@@ -41,23 +41,35 @@ function outputRules() {
 ------------------------------------------------ */
 function buildLengthInstruction(length: string) {
   if (length.includes("2000")) {
-    return `【文字数目安】
-・本文は2000〜2300文字程度を目安に作成してください
-・見出し構成を調整して自然な長さにまとめてください`;
+    return `【文字数制限（厳守）】
+・本文は必ず2000〜2300文字以内に収めてください
+・文字数はHTMLタグを含めてカウントします
+・2000文字未満または2300文字を超えた場合は修正対象となります
+・見出し数を調整して文字数をコントロールしてください
+・冗長な表現は避け、核心を明確に記述してください`;
   }
   if (length.includes("1000")) {
-    return `【文字数目安】
-・本文は1000〜1500文字程度を目安に作成してください
-・見出し構成を調整して自然な長さにまとめてください`;
+    return `【文字数制限（厳守）】
+・本文は必ず1000〜1500文字以内に収めてください
+・文字数はHTMLタグを含めてカウントします
+・1000文字未満または1500文字を超えた場合は修正対象となります
+・見出し数を調整して文字数をコントロールしてください
+・冗長な表現は避け、核心を明確に記述してください`;
   }
   if (length.includes("500")) {
-    return `【文字数目安】
-・本文は500〜800文字程度を目安に作成してください
-・見出し構成を調整して自然な長さにまとめてください`;
+    return `【文字数制限（厳守）】
+・本文は必ず500〜800文字以内に収めてください
+・文字数はHTMLタグを含めてカウントします
+・500文字未満または800文字を超えた場合は修正対象となります
+・見出し数を調整して文字数をコントロールしてください
+・冗長な表現は避け、核心を明確に記述してください`;
   }
-  return `【文字数目安】
-・本文は1000〜2000文字程度を目安に作成してください
-・見出し構成を調整して自然な長さにまとめてください`;
+  return `【文字数制限（厳守）】
+・本文は必ず1000〜2000文字以内に収めてください
+・文字数はHTMLタグを含めてカウントします
+・1000文字未満または2000文字を超えた場合は修正対象となります
+・見出し数を調整して文字数をコントロールしてください
+・冗長な表現は避け、核心を明確に記述してください`;
 }
 
 /* -----------------------------------------------
@@ -84,7 +96,7 @@ ${lengthRule}
 ・JSON以外の出力は禁止
 ・Markdown記法（\`\`\`jsonなど）は使用しない
 ・JSONを直接出力する
-・文字数制限を厳守してください
+・指定文字数を必ず厳守してください
 
 以下のJSONのみを出力してください。
 {"title": "記事タイトル", "content": "<p>本文</p><h3>見出し</h3><p>内容</p>"}`;
@@ -108,7 +120,7 @@ export async function callAI(aiConfig: any, prompt: string) {
           contents: [{ parts: [{ text: prompt }] }],
           generationConfig: {
             temperature: aiConfig.temperature ?? 0.5,
-            maxOutputTokens: aiConfig.max_tokens ?? 4500, // 記事生成に十分なトークン数を確保
+            maxOutputTokens: aiConfig.max_tokens ?? 4000, // 文字数制限を守らせるため適切なトークン数に制限
           },
         }),
       }
@@ -141,7 +153,7 @@ export async function callAI(aiConfig: any, prompt: string) {
           model: aiConfig.model,
           messages: [{ role: "user", content: prompt }],
           temperature: aiConfig.temperature ?? 0.5,
-          max_tokens: aiConfig.max_tokens ?? 4500, // 記事生成に十分なトークン数を確保
+          max_tokens: aiConfig.max_tokens ?? 4000, // 文字数制限を守らせるため適切なトークン数に制限
         }),
         signal: controller.signal,
       });
