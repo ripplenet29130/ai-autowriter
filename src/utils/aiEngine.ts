@@ -189,45 +189,88 @@ export async function callAI(aiConfig: any, prompt: string) {
   JSON抽出・整形
 ------------------------------------------------ */
 export function parseArticle(rawText: string) {
+  console.log("[parseArticle] 入力テキスト長:", rawText.length);
+  console.log("[parseArticle] 入力テキスト先頭100文字:", rawText.substring(0, 100));
+  console.log("[parseArticle] 入力テキスト末尾100文字:", rawText.substring(Math.max(0, rawText.length - 100)));
+
   // 対策: JSON のみを正確に抽出するロジック
   let jsonStart = -1;
   let jsonEnd = -1;
   let braceCount = 0;
+  let foundCompleteJson = false;
 
-  // JSON の開始位置を特定
-  for (let i = 0; i < rawText.length; i++) {
+  // JSON の開始位置を特定（最初の { を探す）
+  const firstBraceIndex = rawText.indexOf('{');
+  if (firstBraceIndex === -1) {
+    console.error("[parseArticle] JSON開始の { が見つからない");
+    throw new Error("JSON構造が見つかりませんでした");
+  }
+  jsonStart = firstBraceIndex;
+
+  // JSON の終了位置を特定（braceCount が 0 になる位置）
+  for (let i = jsonStart; i < rawText.length; i++) {
     if (rawText[i] === '{') {
-      if (jsonStart === -1) {
-        jsonStart = i;
-      }
       braceCount++;
     } else if (rawText[i] === '}') {
       braceCount--;
-      if (braceCount === 0 && jsonStart !== -1) {
+      if (braceCount === 0) {
         jsonEnd = i + 1;
+        foundCompleteJson = true;
+        console.log("[parseArticle] 完全なJSON構造を発見: start=", jsonStart, "end=", jsonEnd);
         break;
       }
     }
   }
 
-  if (jsonStart === -1 || jsonEnd === -1) {
-    console.error("[parseArticle] JSON構造が見つからない rawText:", rawText);
-    throw new Error("JSON構造が見つかりませんでした");
+  if (!foundCompleteJson) {
+    console.error("[parseArticle] 完全なJSON構造が見つからない。braceCount:", braceCount);
+    console.error("[parseArticle] JSON開始位置:", jsonStart);
+    console.error("[parseArticle] テキスト長:", rawText.length);
+
+    // 不完全なJSONの場合、最後の } までを仮定して抽出を試みる
+    const lastBraceIndex = rawText.lastIndexOf('}');
+    if (lastBraceIndex > jsonStart) {
+      jsonEnd = lastBraceIndex + 1;
+      console.log("[parseArticle] 不完全JSONを抽出: start=", jsonStart, "end=", jsonEnd);
+    } else {
+      throw new Error("JSON構造が見つかりませんでした");
+    }
   }
 
   const jsonString = rawText.substring(jsonStart, jsonEnd);
+  console.log("[parseArticle] 抽出されたJSON長:", jsonString.length);
+  console.log("[parseArticle] 抽出されたJSON先頭200文字:", jsonString.substring(0, 200));
+  console.log("[parseArticle] 抽出されたJSON末尾200文字:", jsonString.substring(Math.max(0, jsonString.length - 200)));
 
   let article;
   try {
     article = JSON.parse(jsonString);
+    console.log("[parseArticle] JSONパース成功: title長=", article.title?.length || 0, "content長=", article.content?.length || 0);
   } catch (e) {
     console.error("[parseArticle] JSONパースエラー:", e);
-    console.error("[parseArticle] 抽出されたJSON:", jsonString);
-    throw new Error("JSONのパースに失敗しました");
+    console.error("[parseArticle] 問題のあるJSON:", jsonString);
+
+    // パースエラーの場合、不完全なJSONを修復する試み
+    if (jsonString.includes('"content"') && !jsonString.trim().endsWith('}')) {
+      const repairedJson = jsonString.trim() + '\n}';
+      console.log("[parseArticle] JSON修復を試行:", repairedJson);
+      try {
+        article = JSON.parse(repairedJson);
+        console.log("[parseArticle] JSON修復成功");
+      } catch (repairError) {
+        console.error("[parseArticle] JSON修復失敗:", repairError);
+        throw new Error("JSONのパースに失敗しました");
+      }
+    } else {
+      throw new Error("JSONのパースに失敗しました");
+    }
   }
 
   if (typeof article.title !== "string" || typeof article.content !== "string") {
-    console.error("[parseArticle] title/content が不正:", article);
+    console.error("[parseArticle] title/content が不正:", {
+      title: article.title,
+      content: article.content?.substring(0, 100) + "..."
+    });
     throw new Error("title / content が不正です");
   }
 
@@ -242,6 +285,7 @@ export function parseArticle(rawText: string) {
     .replace(/&#39;/g, "'")
     .trim();
 
+  console.log("[parseArticle] 処理完了: title長=", article.title.length, "content長=", article.content.length);
   return article;
 }
 
