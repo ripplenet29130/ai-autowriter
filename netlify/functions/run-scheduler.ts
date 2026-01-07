@@ -74,7 +74,7 @@ async function postToWordPress(
     title: article.title,
     content: article.content,
     categories: [categoryId], // ★ 追加
-    status: schedule.post_status === "draft" ? "draft" : "publish",
+    status,
     date: article.date,
   };
 
