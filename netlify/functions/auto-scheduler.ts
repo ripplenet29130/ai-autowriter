@@ -280,11 +280,13 @@ export const handler: Handler = async () => {
         unused[Math.floor(Math.random() * unused.length)];
 
       // 記事生成
+      // relatedList を渡さない（空にする）
       const articleResult = await generateArticleByAI(
         schedule.ai_config_id,
         selectedKeyword,
-        relatedList
+        []
       );
+
 
       const { title, content, is_rejected, fact_check, center_keyword } = articleResult;
 
