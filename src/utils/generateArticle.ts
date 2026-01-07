@@ -159,8 +159,10 @@ export async function generateArticleByAI(
 
   // 対策①：明らかなエラー文を除外 + 件数制限（最大10件）
   const cleanedFacts = rawFacts
+    .filter(f => f.content && f.content.length >= 80 && f.content.length <= 1600)
     .filter(f => !/warning|error|invalid argument|\/wp-content\//i.test(f.content))
-    .slice(0, 10); // 最大10件に制限してプロンプトを短く
+    .slice(0, 10);
+
 
   if (!cleanedFacts || cleanedFacts.length === 0) {
     throw new Error(`キーワード「${center}」の検索結果（facts）が取得できませんでした`);
@@ -231,5 +233,6 @@ export async function generateArticleByAI(
     is_rejected: false,
   };
 }
+
 
 
