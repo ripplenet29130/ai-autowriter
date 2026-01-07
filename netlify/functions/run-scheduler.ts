@@ -35,11 +35,50 @@ async function postToWordPress(
   status: "draft" | "publish"
 ) {
   console.log(`🌐 WordPress投稿開始: ${wp.url}`);
-  const endpoint = `${wp.url.replace(/\/$/, "")}/wp-json/wp/v2/posts`;
+  const baseUrl = wp.url.replace(/\/$/, "");
+  const endpoint = `${baseUrl}/wp-json/wp/v2/posts`;
 
   const credential = Buffer.from(
     `${wp.username}:${wp.app_password}`
   ).toString("base64");
+
+  async function getCategoryIdBySlug(slug: string) {
+    try {
+      const res = await fetch(
+        `${baseUrl}/wp-json/wp/v2/categories?slug=${encodeURIComponent(slug)}`,
+        { headers: { Authorization: `Basic ${credential}` } }
+      );
+      if (!res.ok) return 1;
+      const categories = await res.json();
+      return categories.length > 0 ? categories[0].id : 1;
+    } catch (e) {
+      console.error("カテゴリ取得エラー:", e);
+      return 1;
+    }
+  }
+
+  let categoryId = 1;
+
+  if (wp.default_category) {
+    const v = String(wp.default_category).trim();
+    if (!isNaN(Number(v))) {
+      categoryId = Number(v);
+    } else {
+      categoryId = await getCategoryIdBySlug(v);
+    }
+  }
+
+  console.log("✅ default_category:", wp.default_category, "=> categoryId:", categoryId);
+
+  const payload = {
+    title: article.title,
+    content: article.content,
+    categories: [categoryId], // ★ 追加
+    status: schedule.post_status === "draft" ? "draft" : "publish",
+    date: article.date,
+  };
+
+  console.log("🧾 WP payload:", JSON.stringify(payload, null, 2));
 
   const response = await fetch(endpoint, {
     method: "POST",
@@ -47,12 +86,7 @@ async function postToWordPress(
       "Content-Type": "application/json",
       Authorization: `Basic ${credential}`,
     },
-    body: JSON.stringify({
-      title: article.title,
-      content: article.content,
-      status,
-      date: article.date, // JST(+09:00)
-    }),
+    body: JSON.stringify(payload),
   });
 
   if (!response.ok) {
@@ -62,6 +96,7 @@ async function postToWordPress(
 
   return await response.json();
 }
+
 
 // ============================
 // 即時実行ハンドラ

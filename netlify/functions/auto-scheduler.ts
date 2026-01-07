@@ -42,40 +42,43 @@ async function postToWordPress(
   },
   status: "draft" | "publish"
 ) {
-  console.log(`🌐 WordPress投稿開始: ${wp.url}`);
-  const endpoint = `${wp.url.replace(/\/$/, "")}/wp-json/wp/v2/posts`;
+console.log(`🌐 WordPress投稿開始: ${wp.url}`);
+const baseUrl = wp.url.replace(/\/$/, "");
+const endpoint = `${baseUrl}/wp-json/wp/v2/posts`;
 
-  const credential = Buffer.from(
-    `${wp.username}:${wp.app_password}`
-  ).toString("base64");
+const credential = Buffer.from(
+  `${wp.username}:${wp.app_password}`
+).toString("base64");
 
-  async function getCategoryIdByName(name: string) {
-    try {
-      const res = await fetch(
-        `${wp.url}/wp-json/wp/v2/categories?search=${encodeURIComponent(
-          name
-        )}`,
-        { headers: { Authorization: `Basic ${credential}` } }
-      );
-      if (!res.ok) return 1;
-      const categories = await res.json();
-      return categories.length > 0 ? categories[0].id : 1;
-    } catch {
-      return 1;
-    }
+async function getCategoryIdBySlug(slug: string) {
+  try {
+    const res = await fetch(
+      `${baseUrl}/wp-json/wp/v2/categories?slug=${encodeURIComponent(slug)}`,
+      { headers: { Authorization: `Basic ${credential}` } }
+    );
+
+    if (!res.ok) return 1;
+
+    const categories = await res.json();
+    return categories.length > 0 ? categories[0].id : 1;
+  } catch (e) {
+    console.error("カテゴリ取得エラー:", e);
+    return 1;
   }
+}
 
-  let categoryId = 1;
+let categoryId = 1;
 
-  if (wp.default_category) {
-    if (!isNaN(Number(wp.default_category))) {
-      // 数値ID
-      categoryId = Number(wp.default_category);
-    } else {
-      // カテゴリ名
-      categoryId = await getCategoryIdByName(wp.default_category);
-    }
+if (wp.default_category) {
+  const v = String(wp.default_category).trim(); // ← 念のためトリム
+  if (!isNaN(Number(v))) {
+    categoryId = Number(v);
+  } else {
+    categoryId = await getCategoryIdBySlug(v);
   }
+}
+
+console.log("✅ default_category:", wp.default_category, "=> categoryId:", categoryId);
 
   const response = await fetch(endpoint, {
     method: "POST",
