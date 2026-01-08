@@ -20,6 +20,24 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_KEY!
 );
 
+function enforceSentenceBreaks(html: string): string {
+  if (!html) return html;
+
+  return html.replace(/<p>([\s\S]*?)<\/p>/g, (full, inner) => {
+    const s = String(inner).trim();
+
+    // 既に<br>がある段落は触らない（二重改行防止）
+    if (/<br\s*\/?>/i.test(s)) return `<p>${s}</p>`;
+
+    // 「。」が無ければそのまま
+    if (!s.includes("。")) return `<p>${s}</p>`;
+
+    // 「。」の直後に <br><br> を入れる
+    const fixed = s.replace(/。/g, "。<br><br>");
+    return `<p>${fixed}</p>`;
+  });
+}
+
 /**
  * プレビュー用：記事生成（facts使用版）
  * @param ai_config_id - AI設定ID
@@ -60,7 +78,8 @@ export async function generateArticleByAIWithFacts(
 
   // ⑤ JSON解析
   const article = parseArticle(raw);
-
+  article.content = enforceSentenceBreaks(article.content);
+  
   // ファクトチェックOFF - 常にOKとして扱う
   /*
   // ⑥ ファクトチェック（1回目）
@@ -178,6 +197,7 @@ export async function generateArticleByAI(
 
   // ⑤ JSON解析
   const article = parseArticle(raw);
+  article.content = enforceSentenceBreaks(article.content);
 
   // ファクトチェックOFF - 常にOKとして扱う
   /*
@@ -233,6 +253,7 @@ export async function generateArticleByAI(
     is_rejected: false,
   };
 }
+
 
 
 
