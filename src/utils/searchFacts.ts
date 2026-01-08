@@ -24,7 +24,7 @@ const FETCH_TIMEOUT_MS = 4500;
 const MAX_EXTRACT_CHARS = 1400;
 
 // SerpAPIで取る検索結果件数（URL候補）
-const SERP_NUM = 5;
+const SERP_NUM = 2;
 
 function normalizeKeyword(k: string) {
   return (k || "").trim();
