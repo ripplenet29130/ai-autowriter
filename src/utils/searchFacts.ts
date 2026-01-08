@@ -15,7 +15,7 @@ const supabase = createClient(
 const CACHE_TTL_HOURS = 24;
 
 // 本文取得 最大件数（Netlify 30秒対策）
-const MAX_FETCH_PAGES = 2;
+const MAX_FETCH_PAGES = 1;
 
 // 1ページあたりのfetchタイムアウト（ms）
 const FETCH_TIMEOUT_MS = 4500;
