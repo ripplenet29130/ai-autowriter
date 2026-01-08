@@ -1,5 +1,5 @@
 // ===============================================
-// aiEngine.ts（文字数安定・最終版）
+// aiEngine.ts（文字数安定・Gutenberg向け整形強化版）
 // ===============================================
 
 import { createClient } from "@supabase/supabase-js";
@@ -74,7 +74,7 @@ export function buildUnifiedPromptWithFacts(
 【テーマ】
 ${center}
 
-【参考情報】
+【参考情報（必ず参照して要点を反映）】
 ${factsText}
 
 ${lengthRule}
@@ -83,18 +83,30 @@ ${lengthRule}
 ・出力は JSON のみ
 ・キーは title, content の2つだけ
 ・title はテキストのみ
-・content は <p> と <h3> のみ使用
-・段落内は1文ごとに <br><br>
+・content は HTML（<p> と <h3> のみ使用、他のタグ禁止）
 ・Markdown、説明文、前置きは禁止
 
-【最終チェック】
+【HTML整形ルール（最重要・Gutenberg向け）】
+・<p> の中は「1文」書いたら必ず <br><br> を入れる（最後の文にも付ける）
+・「。」の直後は必ず <br><br> にする（例：〜です。<br><br>次の文…）
+・改行コード（\\n）は使わず、改行は必ず <br><br> で表現する
+・1つの <p> に複数文を書いてよいが、必ず1文ごとに <br><br> を入れる
+
+【出力例（この形式に合わせる）】
+{
+  "title": "記事タイトル",
+  "content": "<p>1文目。<br><br>2文目。<br><br></p><h3>見出し1</h3><p>本文1文目。<br><br>本文2文目。<br><br></p><h3>見出し2</h3><p>...</p><h3>まとめ</h3><p>まとめ1文目。<br><br>まとめ2文目。<br><br></p>"
+}
+
+【最終チェック（必須）】
 ・出力前に必ず本文の文字数を確認してください
 ・指定範囲に収まらない場合は削除または補足して調整してください
+・<p>内の「。」の後に <br><br> が入っているか確認してください
 
 以下の JSON のみを出力してください。
 {
   "title": "記事タイトル",
-  "content": "<p>導入文</p><h3>見出し</h3><p>本文</p><h3>まとめ</h3><p>まとめ</p>"
+  "content": "HTML本文"
 }
 `;
 }
@@ -167,7 +179,6 @@ export async function callAI(aiConfig: any, prompt: string) {
   JSONパース（最小・安定）
 ------------------------------------------------ */
 export function parseArticle(rawText: string) {
-  // ```json 対策
   const cleaned = rawText
     .replace(/^```json/i, "")
     .replace(/^```/i, "")
@@ -200,7 +211,10 @@ export function parseArticle(rawText: string) {
     throw new Error("title/content 不正");
   }
 
-  article.content = article.content.replace(/\n|\r|\t/g, "").trim();
+  // ※改行コードは消す（<br><br>は残る）
+  article.content = String(article.content).replace(/\n|\r|\t/g, "").trim();
+  article.title = String(article.title).trim();
+
   return article;
 }
 
@@ -215,16 +229,17 @@ export function buildRewritePrompt(
 以下の記事を修正してください。
 
 【修正理由】
-${reasons.map(r => `- ${r}`).join("\n")}
+${reasons.map((r) => `- ${r}`).join("\n")}
 
 【出力条件】
 ・JSONのみ
 ・title, contentのみ
-・文字数条件は元記事と同じ
+・content は HTML（<p> と <h3> のみ）
+・<p>内は1文ごとに必ず <br><br>
 
 {
   "title": "修正後タイトル",
-  "content": "<p>修正文</p><h3>見出し</h3><p>本文</p><h3>まとめ</h3><p>まとめ</p>"
+  "content": "<p>1文目。<br><br>2文目。<br><br></p><h3>見出し</h3><p>...</p>"
 }
 
 【元記事】
