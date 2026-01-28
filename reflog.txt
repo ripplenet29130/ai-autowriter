@@ -1,0 +1,4 @@
+﻿4b5798f HEAD@{0}: pull origin main --rebase (finish): returning to refs/heads/main
+4b5798f HEAD@{1}: pull origin main --rebase (start): checkout 4b5798f6d50f17eaf855a4aef7c2ab77af9b8580
+9d355b3 HEAD@{2}: Branch: renamed refs/heads/master to refs/heads/main
+9d355b3 HEAD@{4}: commit (initial): Update: Improved Scheduler UI with better card layout and organization

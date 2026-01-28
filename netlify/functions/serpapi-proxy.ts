@@ -1,12 +1,10 @@
-const fetch = require('node-fetch');
-
-exports.handler = async (event, context) => {
+export const handler = async (event: any) => {
     if (event.httpMethod !== 'POST') {
         return { statusCode: 405, body: 'Method Not Allowed' };
     }
 
     try {
-        const params = JSON.parse(event.body);
+        const params = JSON.parse(event.body || '{}');
         const qs = new URLSearchParams(params).toString();
 
         console.log('Proxying request to SerpAPI...');
@@ -22,7 +20,7 @@ exports.handler = async (event, context) => {
             },
             body: JSON.stringify(data)
         };
-    } catch (error) {
+    } catch (error: any) {
         console.error('Proxy error:', error);
         return {
             statusCode: 500,
