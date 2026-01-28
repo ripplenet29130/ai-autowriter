@@ -1,0 +1,11 @@
+[build]
+  functions = "netlify/functions"
+  publish = "dist"
+  command = "npx vite build"
+
+[functions]
+  node_bundler = "esbuild"
+
+# === scheduler.ts を毎分実行（テスト） ===
+[functions."scheduler"]
+  schedule = "*/1 * * * *"

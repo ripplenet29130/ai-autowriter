@@ -1,0 +1,100 @@
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Noto Sans JP', sans-serif;
+  margin: 0;
+  padding: 0;
+  background-color: #f9fafb;
+  color: #111827;
+}
+
+.input-field {
+  @apply block w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm;
+}
+
+.btn-primary {
+  @apply inline-flex items-center px-6 py-2.5 border border-transparent text-base font-medium rounded-lg shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors duration-200;
+}
+
+.btn-secondary {
+  @apply inline-flex items-center px-6 py-2.5 border border-gray-300 text-base font-medium rounded-lg shadow-sm text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors duration-200;
+}
+
+.card {
+  @apply bg-white rounded-xl shadow-sm border border-gray-200 p-6;
+}
+
+.text-gradient {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Prose styles for markdown content */
+.article-prose {
+  color: #374151;
+  line-height: 1.8;
+  font-size: 1.1rem;
+}
+
+.article-prose h1 {
+  @apply text-3xl font-bold mt-10 mb-6 text-gray-900;
+}
+
+.article-prose h2 {
+  @apply text-2xl font-bold mt-10 mb-5 pb-2 border-b-2 border-blue-100 text-gray-900;
+}
+
+.article-prose h3 {
+  @apply text-xl font-bold mt-8 mb-4 border-l-4 border-blue-500 pl-3 text-gray-800;
+}
+
+.article-prose p {
+  @apply mb-6;
+}
+
+.article-prose ul {
+  @apply list-disc list-inside mb-6 space-y-2 pl-4;
+}
+
+.article-prose ol {
+  @apply list-decimal list-inside mb-6 space-y-2 pl-4;
+}
+
+.article-prose li {
+  @apply text-gray-700;
+}
+
+.article-prose hr {
+  @apply my-10 border-gray-200;
+}
+
+.article-prose strong {
+  @apply font-bold text-gray-900 bg-yellow-50 px-1;
+}
+
+.article-prose blockquote {
+  @apply pl-6 border-l-4 border-blue-200 italic text-gray-600 my-8 py-2 bg-blue-50/30 rounded-r-lg;
+}
+
+.article-card {
+  @apply border border-gray-200 rounded-lg p-5 hover:shadow-lg transition-all duration-300 bg-white cursor-pointer hover:border-blue-300 hover:-translate-y-0.5 relative overflow-hidden;
+}
+
+.article-card::after {
+  content: "";
+  @apply absolute top-0 left-0 w-1 h-full bg-blue-500 opacity-0 transition-opacity duration-300;
+}
+
+.article-card:hover::after {
+  @apply opacity-100;
+}
