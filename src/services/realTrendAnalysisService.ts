@@ -164,11 +164,27 @@ export class RealTrendAnalysisService {
       hl: 'ja'
     };
 
-    const qs = new URLSearchParams(params as any);
-    const response = await fetch(`/api-serp?${qs}`);
-    if (!response.ok) throw new Error(`SerpAPI search error: ${response.status}`);
+    let data;
+    if (import.meta.env.DEV) {
+      // ローカル開発環境: Vite Proxy (GET)
+      const qs = new URLSearchParams(params as any);
+      const response = await fetch(`/api-serp?${qs}`);
+      if (!response.ok) throw new Error(`SerpAPI search error: ${response.status}`);
+      data = await response.json();
+    } else {
+      // 本番環境: Netlify Function (POST)
+      const response = await fetch('/.netlify/functions/serpapi-proxy', {
+        method: 'POST',
+        body: JSON.stringify(params),
+        headers: { 'Content-Type': 'application/json' }
+      });
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(`SerpAPI Proxy error: ${err.error || response.status}`);
+      }
+      data = await response.json();
+    }
 
-    const data = await response.json();
     const items = data.organic_results || [];
 
     const articles: CompetitorArticle[] = items.map((item: any) => ({
@@ -184,7 +200,7 @@ export class RealTrendAnalysisService {
       keyword,
       articles,
       averageLength: articles.length > 0 ? 2500 : 0,
-      commonTopics: this.extractKeywordsFromText(items.map(i => i.title + ' ' + i.snippet).join(' '), keyword)
+      commonTopics: this.extractKeywordsFromText(items.map((i: any) => i.title + ' ' + i.snippet).join(' '), keyword)
     };
   }
 
@@ -200,11 +216,27 @@ export class RealTrendAnalysisService {
       gl: 'jp'
     };
 
-    const qs = new URLSearchParams(params as any);
-    const response = await fetch(`/api-google?${qs}`);
-    if (!response.ok) throw new Error(`Google API error: ${response.status}`);
+    let data;
+    if (import.meta.env.DEV) {
+      // ローカル: Vite Proxy (GET)
+      const qs = new URLSearchParams(params as any);
+      const response = await fetch(`/api-google?${qs}`);
+      if (!response.ok) throw new Error(`Google API error: ${response.status}`);
+      data = await response.json();
+    } else {
+      // 本番: Netlify Function (POST)
+      const response = await fetch('/.netlify/functions/google-search-proxy', {
+        method: 'POST',
+        body: JSON.stringify(params),
+        headers: { 'Content-Type': 'application/json' }
+      });
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(`Google Proxy error: ${err.error || response.status}`);
+      }
+      data = await response.json();
+    }
 
-    const data = await response.json();
     const items = data.items || [];
 
     const articles: CompetitorArticle[] = items.map((item: any) => ({
@@ -220,7 +252,7 @@ export class RealTrendAnalysisService {
       keyword,
       articles,
       averageLength: articles.length > 0 ? 2500 : 0,
-      commonTopics: this.extractKeywordsFromText(items.map(i => i.title + ' ' + i.snippet).join(' '), keyword)
+      commonTopics: this.extractKeywordsFromText(items.map((i: any) => i.title + ' ' + i.snippet).join(' '), keyword)
     };
   }
 
@@ -234,12 +266,26 @@ export class RealTrendAnalysisService {
       num: '10'
     };
 
-    const qs = new URLSearchParams(params as any);
-    const response = await fetch(`/api-google?${qs}`);
-    if (!response.ok) throw new Error('Proxy failed');
-
-    const data = await response.json();
-    return this.extractKeywordsFromText(data.items?.map((i: any) => i.title + ' ' + i.snippet).join(' ') || '', keyword);
+    try {
+      let data;
+      if (import.meta.env.DEV) {
+        const qs = new URLSearchParams(params as any);
+        const response = await fetch(`/api-google?${qs}`);
+        if (!response.ok) throw new Error('Proxy failed');
+        data = await response.json();
+      } else {
+        const response = await fetch('/.netlify/functions/google-search-proxy', {
+          method: 'POST',
+          body: JSON.stringify(params),
+          headers: { 'Content-Type': 'application/json' }
+        });
+        if (!response.ok) throw new Error('Proxy failed');
+        data = await response.json();
+      }
+      return this.extractKeywordsFromText(data.items?.map((i: any) => i.title + ' ' + i.snippet).join(' ') || '', keyword);
+    } catch {
+      return [];
+    }
   }
 
   private async analyzeSEOViaDataForSeo(keyword: string): Promise<{
