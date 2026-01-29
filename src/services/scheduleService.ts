@@ -23,7 +23,8 @@ class ScheduleService {
                 post_status: schedule.post_status,
                 start_date: schedule.start_date || null,
                 end_date: schedule.end_date || null,
-                chatwork_room_id: schedule.chatwork_room_id,
+                chatwork_room_id: schedule.chatwork_room_id || null,
+                prompt_set_id: schedule.prompt_set_id || null,
             })
             .select()
             .single();
@@ -90,10 +91,12 @@ class ScheduleService {
             throw new Error('Supabase is not initialized');
         }
 
-        // Clean up date fields
+        // Clean up date and uuid fields
         const cleanUpdates = { ...updates };
         if (cleanUpdates.start_date === '') cleanUpdates.start_date = null as any;
         if (cleanUpdates.end_date === '') cleanUpdates.end_date = null as any;
+        if (cleanUpdates.prompt_set_id === '') cleanUpdates.prompt_set_id = null as any;
+        if (cleanUpdates.chatwork_room_id === '') cleanUpdates.chatwork_room_id = null as any;
 
         const { data, error } = await supabase
             .from('schedule_settings')
