@@ -77,7 +77,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
       {/* Sidebar Navigation */}
       <div className="w-64 bg-white shadow-lg border-r border-gray-200">
         <div className="p-6 border-b border-gray-200">
-          <h1 className="text-xl font-bold text-gray-900">AI WordPress システム</h1>
+          <h1 className="text-xl font-bold text-gray-900">AI Auto Writer</h1>
           <p className="text-sm text-gray-600 mt-1">自動記事生成・投稿ツール</p>
         </div>
 

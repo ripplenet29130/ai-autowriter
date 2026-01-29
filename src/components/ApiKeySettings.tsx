@@ -67,22 +67,19 @@ export const ApiKeySettings: React.FC = () => {
 
     return (
         <div className="space-y-6">
-            <div>
-                <h3 className="text-lg font-semibold text-gray-900 mb-2 flex items-center space-x-2">
-                    <Key className="w-5 h-5 text-blue-600" />
-                    <span>API設定</span>
-                </h3>
+            <div className="mb-4">
                 <p className="text-sm text-gray-600">
                     トレンド分析と競合調査に使用するAPIキーを設定します
                 </p>
             </div>
 
             {/* ステータス表示 */}
+
             {validationStatus && (
                 <div
                     className={`p-4 rounded-lg border ${validationStatus.isValid
-                            ? 'bg-green-50 border-green-200'
-                            : 'bg-yellow-50 border-yellow-200'
+                        ? 'bg-green-50 border-green-200'
+                        : 'bg-yellow-50 border-yellow-200'
                         }`}
                 >
                     <div className="flex items-start space-x-2">

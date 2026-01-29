@@ -82,6 +82,25 @@ async function postToWordPress(config: any, article: { title: string; content: s
 }
 
 
+// === 日付範囲判定 ===
+function isWithinDateRange(startDate: string | null, endDate: string | null): boolean {
+  // JSTでの今日の日付を取得 (YYYY-MM-DD)
+  const now = new Date();
+  const jstStr = now.toLocaleDateString("ja-JP", {
+    timeZone: "Asia/Tokyo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).replace(/\//g, "-");
+
+  console.log(`📅 日付判定: 今日=${jstStr}, 開始=${startDate}, 終了=${endDate}`);
+
+  if (startDate && startDate > jstStr) return false; // 開始日前
+  if (endDate && endDate < jstStr) return false; // 終了日後
+
+  return true;
+}
+
 // === メイン処理 ===
 export const handler: Handler = async () => {
   console.log("✅ スケジューラー起動");
@@ -121,7 +140,11 @@ export const handler: Handler = async () => {
     if (!schedules?.length) return { statusCode: 200, body: "No active schedules" };
 
     // --- 現在時刻に該当するスケジュールのみ抽出 ---
-    const available = schedules.filter(s => isWithinOneMinute(s.time));
+    // 時刻判定 AND 日付判定
+    const available = schedules.filter(s =>
+      isWithinOneMinute(s.time) && isWithinDateRange(s.start_date, s.end_date)
+    );
+
     if (available.length === 0)
       return { statusCode: 200, body: "⏸ 条件に合うスケジュールはありません" };
 
@@ -164,8 +187,8 @@ export const handler: Handler = async () => {
     const prompt = {
       topic: keyword,
       keywords: [keyword],
-      tone: "friendly",
-      length: "medium",
+      tone: "friendly" as const,
+      length: "medium" as const,
       includeIntroduction: true,
       includeConclusion: true,
       includeSources: false,

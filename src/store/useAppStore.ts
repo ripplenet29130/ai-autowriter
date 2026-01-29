@@ -24,9 +24,9 @@ interface AppState {
   updateWordPressConfig: (id: string, updates: Partial<WordPressConfig>) => void;
   deleteWordPressConfig: (id: string) => void;
   // Prompt Set Actions
-  addPromptSet: (promptSet: PromptSet) => void;
-  updatePromptSet: (id: string, updates: Partial<PromptSet>) => void;
-  deletePromptSet: (id: string) => void;
+  addPromptSet: (promptSet: PromptSet) => Promise<void>;
+  updatePromptSet: (id: string, updates: Partial<PromptSet>) => Promise<void>;
+  deletePromptSet: (id: string) => Promise<void>;
   // Keyword Set Actions
   addKeywordSet: (set: KeywordSet) => void;
   updateKeywordSet: (id: string, updates: Partial<KeywordSet>) => void;
@@ -151,24 +151,52 @@ export const useAppStore = create<AppState>()(
         }
       },
 
-      addPromptSet: (promptSet) => {
-        set((state) => ({
-          promptSets: [...state.promptSets, promptSet]
-        }));
+      addPromptSet: async (promptSet) => {
+        try {
+          const { promptSetService } = await import('../services/promptSetService');
+          const saved = await promptSetService.savePromptSet(promptSet);
+          if (saved) {
+            set((state) => ({
+              promptSets: [saved, ...state.promptSets]
+            }));
+          } else {
+            set((state) => ({
+              promptSets: [promptSet, ...state.promptSets]
+            }));
+          }
+        } catch (error) {
+          console.error('Error adding prompt set:', error);
+        }
       },
 
-      updatePromptSet: (id, updates) => {
-        set((state) => ({
-          promptSets: state.promptSets.map((ps) =>
-            ps.id === id ? { ...ps, ...updates } : ps
-          ),
-        }));
+      updatePromptSet: async (id, updates) => {
+        try {
+          const { promptSetService } = await import('../services/promptSetService');
+          const current = get().promptSets.find(ps => ps.id === id);
+          if (current) {
+            const updated = { ...current, ...updates };
+            await promptSetService.savePromptSet(updated);
+            set((state) => ({
+              promptSets: state.promptSets.map((ps) =>
+                ps.id === id ? updated : ps
+              ),
+            }));
+          }
+        } catch (error) {
+          console.error('Error updating prompt set:', error);
+        }
       },
 
-      deletePromptSet: (id) => {
-        set((state) => ({
-          promptSets: state.promptSets.filter((ps) => ps.id !== id),
-        }));
+      deletePromptSet: async (id) => {
+        try {
+          const { promptSetService } = await import('../services/promptSetService');
+          await promptSetService.deletePromptSet(id);
+          set((state) => ({
+            promptSets: state.promptSets.filter((ps) => ps.id !== id),
+          }));
+        } catch (error) {
+          console.error('Error deleting prompt set:', error);
+        }
       },
 
       addKeywordSet: (keywordSet) => {
@@ -268,11 +296,12 @@ export const useAppStore = create<AppState>()(
       loadFromSupabase: async () => {
         try {
           set({ isLoading: true });
-          const [wpConfigs, aiConfigs, articles, kSets] = await Promise.all([
+          const [wpConfigs, aiConfigs, articles, kSets, pSets] = await Promise.all([
             supabaseSchedulerService.loadWordPressConfigs(),
             supabaseSchedulerService.loadAIConfigs(),
             articlesService.getAllArticles(),
-            import('../services/keywordSetService').then(m => m.keywordSetService.getKeywordSets())
+            import('../services/keywordSetService').then(m => m.keywordSetService.getKeywordSets()),
+            import('../services/promptSetService').then(m => m.promptSetService.getPromptSets())
           ]);
           set({
             wordPressConfigs: wpConfigs,
@@ -280,6 +309,7 @@ export const useAppStore = create<AppState>()(
             aiConfig: aiConfigs.find(c => c.isActive) || (aiConfigs.length > 0 ? aiConfigs[0] : null),
             articles: articles,
             keywordSets: kSets,
+            promptSets: pSets,
             isLoading: false
           });
         } catch (error) {

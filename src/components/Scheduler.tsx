@@ -526,6 +526,10 @@ export const Scheduler: React.FC = () => {
                         </div>
                       </div>
 
+                      {/* Divider (Desktop) removed from here */}
+
+                      {/* Additional Info Block removed from here */}
+
                     </div>
 
                     <div className="flex items-center space-x-2 lg:ml-4 border-t lg:border-t-0 lg:border-l border-gray-100 pt-4 lg:pt-0 lg:pl-6">
@@ -557,7 +561,25 @@ export const Scheduler: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* NOTE: Removing the previous separate grid block entirely */}
+                  {/* Additional Info Block (Moved to bottom) */}
+                  {(schedule.start_date || schedule.chatwork_room_id) && (
+                    <div className="mb-4 pt-4 border-t border-gray-100 flex flex-wrap gap-6">
+                      {schedule.start_date && (
+                        <div className="flex items-center space-x-2 text-sm">
+                          <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Start Date:</span>
+                          <span className="font-semibold text-gray-700 bg-gray-50 px-2 py-0.5 rounded border border-gray-100">{schedule.start_date}</span>
+                        </div>
+                      )}
+                      {schedule.chatwork_room_id && (
+                        <div className="flex items-center space-x-2 text-sm">
+                          <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">ChatWork ID:</span>
+                          <span className="font-mono text-xs bg-gray-50 text-gray-600 px-2 py-0.5 rounded border border-gray-200">{schedule.chatwork_room_id}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+
 
                   <div>
                     <div className="flex items-center justify-between mb-2">
@@ -597,8 +619,9 @@ export const Scheduler: React.FC = () => {
               );
             })}
           </div>
-        )}
+        )
+        }
       </div>
-    </div>
+    </div >
   );
 };
