@@ -133,7 +133,7 @@ export const handler: Handler = async () => {
     // --- 有効スケジュール取得 ---
     const { data: schedules, error: scheduleError } = await supabase
       .from("schedule_settings")
-      .select("*, wordpress_id")
+      .select("*, wordpress_id, prompt_set_id")
       .eq("enabled", true);
 
     if (scheduleError) throw new Error("スケジュール取得失敗: " + scheduleError.message);
@@ -151,6 +151,21 @@ export const handler: Handler = async () => {
     // --- ✅ ランダムに1件だけ選択 ---
     const schedule = available[Math.floor(Math.random() * available.length)];
     console.log(`🎯 今回選ばれたスケジュール: ID ${schedule.id} (${schedule.time})`);
+
+    // --- プロンプトセット取得 ---
+    let customInstructions = undefined;
+    if (schedule.prompt_set_id) {
+      const { data: promptSet } = await supabase
+        .from("prompt_sets")
+        .select("custom_instructions")
+        .eq("id", schedule.prompt_set_id)
+        .single();
+
+      if (promptSet) {
+        customInstructions = promptSet.custom_instructions;
+        console.log(`📜 プロンプトセット使用: ID ${schedule.prompt_set_id}`);
+      }
+    }
 
     // --- WordPress設定取得 ---
     const { data: wp, error: wpError } = await supabase
@@ -192,6 +207,7 @@ export const handler: Handler = async () => {
       includeIntroduction: true,
       includeConclusion: true,
       includeSources: false,
+      customInstructions: customInstructions, // カスタム指示を追加
     };
 
     const article = await aiService.generateArticle(prompt);

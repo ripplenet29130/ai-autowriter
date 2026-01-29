@@ -116,6 +116,7 @@ export interface ScheduleSettings {
   targetKeywords: string[];
   publishStatus: 'publish' | 'draft';
   titleGenerationCount?: number;
+  promptSetId?: string; // Prompt Set ID
 }
 
 export interface ScheduleSetting {
@@ -133,6 +134,7 @@ export interface ScheduleSetting {
   chatwork_room_id?: string;
   created_at?: string;
   updated_at?: string;
+  prompt_set_id?: string; // DB column name
 }
 
 export interface TitleSuggestion {

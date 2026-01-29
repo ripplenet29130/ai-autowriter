@@ -1,17 +1,19 @@
 import React, { useState, useEffect } from 'react';
-import { Calendar, Globe, Clock, Tag, Trash2, Edit2, Power } from 'lucide-react';
+import { Calendar, Globe, Clock, Tag, Trash2, Edit2, Power, MessageSquare, Zap } from 'lucide-react';
 import { scheduleService } from '../services/scheduleService';
 import { ScheduleSetting } from '../types';
 import { useAppStore } from '../store/useAppStore';
+import { PromptSetManager } from './AIGenerator/PromptSetManager';
 import toast from 'react-hot-toast';
 
 export const Scheduler: React.FC = () => {
-  const { aiConfigs, wordPressConfigs, keywordSets, loadKeywordSets } = useAppStore();
+  const { aiConfigs, wordPressConfigs, keywordSets, promptSets, loadKeywordSets, loadPromptSets } = useAppStore();
   const [schedules, setSchedules] = useState<ScheduleSetting[]>([]);
   const [usedKeywordsMap, setUsedKeywordsMap] = useState<Record<string, string[]>>({});
 
   const [loading, setLoading] = useState(false);
   const [editingSchedule, setEditingSchedule] = useState<ScheduleSetting | null>(null);
+  const [isPromptManagerOpen, setIsPromptManagerOpen] = useState(false);
 
   // Form state
   const [formData, setFormData] = useState({
@@ -24,6 +26,7 @@ export const Scheduler: React.FC = () => {
     start_date: '',
     end_date: '',
     chatwork_room_id: '',
+    prompt_set_id: '',
     status: true,
   });
 
@@ -31,6 +34,7 @@ export const Scheduler: React.FC = () => {
   useEffect(() => {
     loadSchedules();
     loadKeywordSets();
+    loadPromptSets();
   }, []);
 
 
@@ -57,10 +61,6 @@ export const Scheduler: React.FC = () => {
       setLoading(false);
     }
   };
-
-  // ... (existing code until render method)
-
-
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -112,6 +112,7 @@ export const Scheduler: React.FC = () => {
       start_date: schedule.start_date || '',
       end_date: schedule.end_date || '',
       chatwork_room_id: schedule.chatwork_room_id || '',
+      prompt_set_id: schedule.prompt_set_id || '',
       status: schedule.status,
     });
     // Scroll to top to show the form
@@ -156,6 +157,7 @@ export const Scheduler: React.FC = () => {
       start_date: '',
       end_date: '',
       chatwork_room_id: '',
+      prompt_set_id: '',
       status: true,
     });
     setEditingSchedule(null);
@@ -173,6 +175,12 @@ export const Scheduler: React.FC = () => {
       config.provider === 'claude' ? 'Anthropic Claude' :
         config.provider === 'gemini' ? 'Google Gemini' : config.provider;
     return `${label} (${config.model})`;
+  };
+
+  const getPromptSetName = (promptSetId?: string) => {
+    if (!promptSetId) return null;
+    const ps = promptSets.find(p => p.id === promptSetId);
+    return ps ? ps.name : null;
   };
 
   // フィルタリングされたWordPress設定（アクティブのみ）
@@ -254,7 +262,39 @@ export const Scheduler: React.FC = () => {
             </div>
           </div>
 
-          {/* キーワードセット選択 */}
+          {/* プロンプトセット選択 (Independent Row) */}
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <label className="block text-sm font-medium text-gray-700">
+                プロンプトセット（任意）
+              </label>
+              <button
+                type="button"
+                onClick={() => setIsPromptManagerOpen(true)}
+                className="text-xs text-purple-600 font-bold hover:text-purple-800 flex items-center gap-1"
+              >
+                <Zap className="w-3 h-3" />
+                管理・作成
+              </button>
+            </div>
+            <select
+              value={formData.prompt_set_id}
+              onChange={(e) => setFormData({ ...formData, prompt_set_id: e.target.value })}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            >
+              <option value="">指定なし（デフォルト設定を使用）</option>
+              {promptSets.map((ps) => (
+                <option key={ps.id} value={ps.id}>
+                  {ps.name}
+                </option>
+              ))}
+            </select>
+            <p className="text-xs text-gray-500 mt-1">
+              記事生成時に適用するカスタム指示を選択できます
+            </p>
+          </div>
+
+          {/* キーワードセット選択 (Independent Row) */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               キーワードセット <span className="text-red-500">*</span>
@@ -452,6 +492,7 @@ export const Scheduler: React.FC = () => {
             {schedules.map((schedule) => {
               const keywordsList = schedule.keyword ? schedule.keyword.split(',').map(k => k.trim()).filter(k => k) : [];
               const usedList = schedule.id ? (usedKeywordsMap[schedule.id] || []) : [];
+              const promptSetName = getPromptSetName(schedule.prompt_set_id);
 
               return (
                 <div
@@ -562,7 +603,7 @@ export const Scheduler: React.FC = () => {
                   </div>
 
                   {/* Additional Info Block (Moved to bottom) */}
-                  {(schedule.start_date || schedule.chatwork_room_id) && (
+                  {(schedule.start_date || schedule.chatwork_room_id || promptSetName) && (
                     <div className="mb-4 pt-4 border-t border-gray-100 flex flex-wrap gap-6">
                       {schedule.start_date && (
                         <div className="flex items-center space-x-2 text-sm">
@@ -576,10 +617,17 @@ export const Scheduler: React.FC = () => {
                           <span className="font-mono text-xs bg-gray-50 text-gray-600 px-2 py-0.5 rounded border border-gray-200">{schedule.chatwork_room_id}</span>
                         </div>
                       )}
+                      {promptSetName && (
+                        <div className="flex items-center space-x-2 text-sm">
+                          <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Prompt Set:</span>
+                          <div className="flex items-center space-x-1 text-xs text-purple-700 bg-purple-50 px-2 py-0.5 rounded border border-purple-100">
+                            <MessageSquare className="w-3 h-3" />
+                            <span className="font-medium">{promptSetName}</span>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
-
-
 
                   <div>
                     <div className="flex items-center justify-between mb-2">
@@ -622,6 +670,12 @@ export const Scheduler: React.FC = () => {
         )
         }
       </div>
+
+      <PromptSetManager
+        isOpen={isPromptManagerOpen}
+        onClose={() => setIsPromptManagerOpen(false)}
+        onSelect={(ps) => setFormData(prev => ({ ...prev, prompt_set_id: ps.id }))}
+      />
     </div >
   );
 };

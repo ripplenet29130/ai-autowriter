@@ -39,6 +39,7 @@ interface AppState {
   setIsGenerating: (generating: boolean) => void;
   loadFromSupabase: () => Promise<void>;
   syncToSupabase: () => Promise<void>;
+  loadPromptSets: () => Promise<void>;
   loadArticlesFromSupabase: () => Promise<void>;
 }
 
@@ -324,6 +325,16 @@ export const useAppStore = create<AppState>()(
           set({ articles });
         } catch (error) {
           console.error('Error loading articles from Supabase:', error);
+        }
+      },
+
+      loadPromptSets: async () => {
+        try {
+          const { promptSetService } = await import('../services/promptSetService');
+          const promptSets = await promptSetService.getPromptSets();
+          set({ promptSets });
+        } catch (error) {
+          console.error('Error loading prompt sets:', error);
         }
       },
 

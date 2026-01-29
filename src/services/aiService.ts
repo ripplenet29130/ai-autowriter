@@ -169,87 +169,71 @@ JSON形式の配列（文字列の配列）で出力してください。
     }
   }
 
+  // === Proxy呼び出しヘルパー ===
+  private async callProxy(payload: any): Promise<any> {
+    const response = await fetch('/.netlify/functions/ai-proxy', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      if (response.status === 429) {
+        throw new Error("RATE_LIMIT_ERROR: APIの利用制限に達しました。しばらく待ってから再度お試しください。");
+      }
+      throw new Error(`AI Proxy Error (${response.status}): ${errorData.error || 'Unknown error'}`);
+    }
+
+    return await response.json();
+  }
+
   // 生のテキストを取得するためのヘルパー
   private async callRawGemini(prompt: string): Promise<string> {
     const { apiKey, model, temperature, maxTokens } = this.config!;
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${model || 'gemini-3.0-flash'}:generateContent?key=${apiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { temperature, maxOutputTokens: maxTokens },
-        }),
-      }
-    );
-    if (!response.ok) {
-      if (response.status === 429) {
-        throw new Error("RATE_LIMIT_ERROR: Gemini APIの利用制限に達しました。しばらく待ってから再度お試しください。");
-      }
-      if (response.status === 400 || response.status === 401) {
-        throw new Error("AUTH_ERROR: APIキーが無効であるか、モデル名が正しくありません。設定を確認してください。");
-      }
-      throw new Error(`Gemini API error: ${response.status}`);
-    }
-    const data = await response.json();
+
+    // Proxy経由でGeminiを呼び出し
+    const data = await this.callProxy({
+      provider: 'gemini',
+      apiKey,
+      model,
+      temperature,
+      maxTokens,
+      prompt // Gemini用のプロンプト
+    });
+
     return data.candidates?.[0]?.content?.parts?.[0]?.text || "";
   }
 
   private async callRawClaude(prompt: string): Promise<string> {
     const { apiKey, model, temperature, maxTokens } = this.config!;
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model,
-        temperature,
-        max_tokens: maxTokens,
-        messages: [{ role: "user", content: prompt }],
-      }),
+
+    // Proxy経由でClaudeを呼び出し
+    const data = await this.callProxy({
+      provider: 'claude',
+      apiKey,
+      model,
+      temperature,
+      maxTokens,
+      messages: [{ role: "user", content: prompt }]
     });
-    if (!response.ok) {
-      if (response.status === 429) {
-        throw new Error("RATE_LIMIT_ERROR: Claude APIの利用制限に達しました。しばらく待ってから再度お試しください。");
-      }
-      if (response.status === 401 || response.status === 403) {
-        throw new Error("AUTH_ERROR: APIキーが無効です。設定を確認してください。");
-      }
-      throw new Error(`Claude API error: ${response.status}`);
-    }
-    const data = await response.json();
+
     return data.content?.[0]?.text || "";
   }
 
   private async callRawOpenAI(prompt: string): Promise<string> {
     const { apiKey, model, temperature, maxTokens } = this.config!;
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model,
-        temperature,
-        max_tokens: maxTokens,
-        messages: [{ role: "user", content: prompt }],
-      }),
+
+    // Proxy経由でOpenAIを呼び出し
+    const data = await this.callProxy({
+      provider: 'openai',
+      apiKey,
+      model,
+      temperature,
+      maxTokens,
+      messages: [{ role: "user", content: prompt }]
     });
-    if (!response.ok) {
-      if (response.status === 429) {
-        throw new Error("RATE_LIMIT_ERROR: OpenAI APIの利用制限に達しました。しばらく待ってから再度お試しください。");
-      }
-      if (response.status === 401) {
-        throw new Error("AUTH_ERROR: APIキーが無効です。設定を確認してください。");
-      }
-      throw new Error(`OpenAI API error: ${response.status}`);
-    }
-    const data = await response.json();
+
     return data.choices?.[0]?.message?.content || "";
   }
 
