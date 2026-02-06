@@ -14,6 +14,7 @@ interface GenerationOptions {
     tone?: 'professional' | 'casual' | 'technical' | 'friendly';
     length?: 'short' | 'medium' | 'long';
     customInstructions?: string;
+    targetWordCount?: number;
 }
 
 /**
@@ -41,7 +42,8 @@ export function useArticleGeneration() {
                 includeIntroduction: true,
                 includeConclusion: true,
                 includeSources: false,
-                customInstructions: options.customInstructions, // 追加
+                customInstructions: options.customInstructions,
+                targetWordCount: options.targetWordCount
             });
 
             if (article) {

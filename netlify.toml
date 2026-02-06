@@ -6,6 +6,13 @@
 [functions]
   node_bundler = "esbuild"
 
+# === Development server configuration ===
+[dev]
+  command = "npm run dev"
+  port = 8888
+  targetPort = 5173
+  framework = "#custom"
+
 # === scheduler.ts を毎分実行（テスト） ===
 [functions."scheduler"]
   schedule = "*/1 * * * *"

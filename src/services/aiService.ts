@@ -40,7 +40,7 @@ export class AIService {
         apiKey: data.api_key,
         model: data.model,
         temperature: data.temperature ?? 0.7,
-        maxTokens: data.max_tokens ?? 4000,
+        maxTokens: data.max_tokens ?? 16384,
         imageGenerationEnabled: data.image_enabled ?? false,
         imageProvider: data.image_provider,
       };
@@ -141,6 +141,8 @@ JSON形式の配列（文字列の配列）で出力してください。
       if (!this.config?.apiKey) throw new Error("APIキーが設定されていません。");
       if (!this.config?.model) throw new Error("モデルが設定されていません。");
 
+      // 初回生成
+      console.log('📝 記事生成開始:', { topic: prompt.topic, length: prompt.length });
       let result;
       switch (this.config.provider) {
         case "openai":
@@ -156,7 +158,30 @@ JSON形式の配列（文字列の配列）で出力してください。
           throw new Error(`未対応のAIプロバイダです: ${this.config.provider}`);
       }
 
-      const { title, content } = result;
+      let { title, content } = result;
+
+      // 文字数チェック（要約は無効化）
+      const targetWordCount = prompt.targetWordCount || this.getTargetWordCount(prompt.length);
+      const actualWordCount = this.countWords(content);
+
+      console.log('📊 文字数チェック:', {
+        target: targetWordCount,
+        actual: actualWordCount
+      });
+
+      // 要約処理は無効化（AIに正確な文字数で生成させる）
+      // if (actualWordCount > maxAllowed) {
+      //   console.log('✂️ 文字数超過のため要約を実行します...');
+      //   content = await this.summarizeToWordCount(
+      //     content,
+      //     title,
+      //     targetWordCount,
+      //     prompt.keywords || []
+      //   );
+      //   const newWordCount = this.countWords(content);
+      //   console.log('✅ 要約完了:', { before: actualWordCount, after: newWordCount });
+      // }
+
       const excerpt = this.generateExcerpt(content);
       const keywords = this.extractKeywords(content, prompt.topic);
       const seoScore = this.calculateSEOScore(title, content, keywords);
@@ -169,9 +194,114 @@ JSON形式の配列（文字列の配列）で出力してください。
     }
   }
 
+  // === 文字数カウント ===
+  private countWords(content: string): number {
+    // Markdown記号を除外して文字数をカウント
+    const cleaned = content
+      .replace(/^#+\s+/gm, '') // 見出し記号
+      .replace(/\*\*/g, '')     // 太字
+      .replace(/\*/g, '')       // イタリック
+      .replace(/^[-*]\s+/gm, '') // リスト記号
+      .replace(/\n+/g, '\n')    // 連続改行を1つに
+      .trim();
+    return cleaned.length;
+  }
+
+  // === 目標文字数の取得 ===
+  private getTargetWordCount(length?: 'short' | 'medium' | 'long'): number {
+    switch (length) {
+      case 'short':
+        return 1000;
+      case 'medium':
+        return 2000;
+      case 'long':
+        return 4000;
+      default:
+        return 2000;
+    }
+  }
+
+  // === 指定文字数への要約 ===
+  private async summarizeToWordCount(
+    originalContent: string,
+    title: string,
+    targetWordCount: number,
+    keywords: string[]
+  ): Promise<string> {
+    const summaryPrompt = `
+以下の記事を、正確に${targetWordCount}文字にまとめ直してください。
+
+【元の記事タイトル】
+${title}
+
+【元の記事内容】
+${originalContent}
+
+【要約の条件】
+1. **文字数**: 正確に${targetWordCount}文字（±10%以内厳守）
+2. **キーワード維持**: 以下のキーワードを必ず自然な形で含める
+   ${keywords.length > 0 ? keywords.join('、') : '（指定なし）'}
+3. **構成維持**: 元の見出し構造（##）を可能な限り保持
+4. **情報密度**: 冗長な表現を削り、重要な情報のみを残す
+5. **自然な文章**: 途中で切れることなく、完結した文章にする
+
+【出力形式】
+- Markdown形式で出力
+- 見出しには ## を使用
+- タイトル行は出力しない（本文のみ）
+- 「本文:」などの接頭辞は禁止
+`;
+
+    try {
+      let summarizedText = '';
+      switch (this.config?.provider) {
+        case 'openai':
+          summarizedText = await this.callRawOpenAI(summaryPrompt);
+          break;
+        case 'gemini':
+          summarizedText = await this.callRawGemini(summaryPrompt);
+          break;
+        case 'claude':
+          summarizedText = await this.callRawClaude(summaryPrompt);
+          break;
+        default:
+          throw new Error('AI provider not configured');
+      }
+
+      return summarizedText.trim();
+    } catch (error) {
+      console.error('要約エラー:', error);
+      // 要約に失敗した場合は、段落単位で切り詰める
+      return this.truncateByParagraph(originalContent, targetWordCount);
+    }
+  }
+
+  // === 段落単位での切り詰め（フォールバック） ===
+  private truncateByParagraph(content: string, targetWordCount: number): string {
+    const paragraphs = content.split('\n\n');
+    let result = '';
+    let currentCount = 0;
+
+    for (const paragraph of paragraphs) {
+      const paragraphLength = this.countWords(paragraph);
+      if (currentCount + paragraphLength <= targetWordCount * 1.05) {
+        result += paragraph + '\n\n';
+        currentCount += paragraphLength;
+      } else {
+        break;
+      }
+    }
+
+    return result.trim();
+  }
+
   // === Proxy呼び出しヘルパー ===
   private async callProxy(payload: any): Promise<any> {
-    const response = await fetch('/.netlify/functions/ai-proxy', {
+    // 常にNetlify Functions経由で呼び出す（CORS回避のため）
+    const endpoint = '/.netlify/functions/ai-proxy';
+    console.log('🔍 Netlify Functions経由でAPI呼び出し', { endpoint, provider: payload.provider });
+
+    const response = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
@@ -179,6 +309,8 @@ JSON形式の配列（文字列の配列）で出力してください。
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
+      console.error('❌ AI Proxy Error:', { status: response.status, errorData });
+
       if (response.status === 429) {
         throw new Error("RATE_LIMIT_ERROR: APIの利用制限に達しました。しばらく待ってから再度お試しください。");
       }
@@ -186,6 +318,89 @@ JSON形式の配列（文字列の配列）で出力してください。
     }
 
     return await response.json();
+  }
+
+  // === 直接API呼び出し（ローカル開発用） ===
+  private async callDirectAPI(payload: any): Promise<any> {
+    const { provider, apiKey, model, temperature, maxTokens } = payload;
+
+    switch (provider) {
+      case 'gemini': {
+        const response = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: [{
+                parts: [{ text: payload.prompt || payload.messages?.[0]?.content }]
+              }],
+              generationConfig: {
+                temperature: temperature || 0.7,
+                maxOutputTokens: maxTokens || 16384,
+              }
+            })
+          }
+        );
+
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(`Gemini API Error: ${error.error?.message || 'Unknown error'}`);
+        }
+
+        return await response.json();
+      }
+
+      case 'openai': {
+        const response = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`
+          },
+          body: JSON.stringify({
+            model: model,
+            messages: payload.messages,
+            temperature: temperature || 0.7,
+            max_tokens: maxTokens || 16384
+          })
+        });
+
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(`OpenAI API Error: ${error.error?.message || 'Unknown error'}`);
+        }
+
+        return await response.json();
+      }
+
+      case 'claude': {
+        const response = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': apiKey,
+            'anthropic-version': '2023-06-01'
+          },
+          body: JSON.stringify({
+            model: model,
+            messages: payload.messages,
+            temperature: temperature || 0.7,
+            max_tokens: maxTokens || 16384
+          })
+        });
+
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(`Claude API Error: ${error.error?.message || 'Unknown error'}`);
+        }
+
+        return await response.json();
+      }
+
+      default:
+        throw new Error(`Unsupported provider: ${provider}`);
+    }
   }
 
   // 生のテキストを取得するためのヘルパー
@@ -331,6 +546,8 @@ ${toneText}
 【執筆の指示】
 - **重要: 指定された${prompt.isLead ? 'リード文' : '見出し'}の本文テキストのみを出力してください。**
 - **文字数制限（${targetChars}文字）を絶対に守ってください。冗長な表現は削り、情報密度を最大化してください。**
+- **【最重要】文章は必ず完結させてください。途中で切れたり、文が中途半端に終わることは絶対に避けてください。**
+- **文章の最後は必ず句点（。）で終わらせ、読者に完結した印象を与えてください。**
 - **「以上のように〜」「次に〜について解説します」といったセクション毎の前置きや結びの言葉は一切不要です。**
 - **キーワードスタッフィング（過剰な詰め込み）は厳禁です。出現率は自然な範囲（概ね3%以内）に留めてください。**
 - 文脈に応じて「この」「同施設」といった指示代名詞や類義語を適切に使い、文章のリズムを整えてください。
@@ -369,7 +586,10 @@ ${prompt.keywords?.join("、") || "（指定なし）"}
 ${toneText}
 
 【文字数】
-${lengthText}
+${prompt.targetWordCount
+        ? `**目標: ${prompt.targetWordCount}文字（±10%以内を厳守してください。${Math.floor(prompt.targetWordCount * 0.9)}〜${Math.ceil(prompt.targetWordCount * 1.1)}文字の範囲内で執筆してください）**`
+        : lengthText}
+**重要: 文字数は必ず上記の範囲内に収めてください。短すぎる記事は不可です。**
 
 【構成】
 ${sectionText}
@@ -379,6 +599,8 @@ ${prompt.customInstructions ? `\n【カスタム指示（優先）】\n${prompt.
 【指示】
 - 見出しには「##」を使用して構造化してください。
 - 内容をわかりやすく、段落を分けて書いてください。
+- **【最重要】記事は必ず完結させてください。途中で切れたり、文が中途半端に終わることは絶対に避けてください。**
+- **記事の最後は必ず適切な結論や締めくくりの文章で終わらせ、読者に完結した印象を与えてください。**
 - **キーワードを無理に詰め込まず（キーワードスタッフィング禁止）、指示代名詞や言い換えを用いて自然な日本語で執筆してください。**
 - 1行目にタイトル（または見出し）のみを出力してください（「タイトル:」などの接頭辞は禁止）。
 - 2行目以降に本文のみを出力してください（「本文:」「【本文】」などの接頭辞は禁止）。

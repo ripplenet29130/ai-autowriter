@@ -81,7 +81,7 @@ async function callOpenAI(apiKey: string, model: string, temperature: number, ma
         body: JSON.stringify({
             model: model || "gpt-3.5-turbo",
             temperature: temperature ?? 0.7,
-            max_tokens: max_tokens ?? 4000,
+            max_tokens: max_tokens ?? 16384,
             messages: messages,
         }),
     });
@@ -107,7 +107,7 @@ async function callClaude(apiKey: string, model: string, temperature: number, ma
         body: JSON.stringify({
             model: model || "claude-3-opus-20240229",
             temperature: temperature ?? 0.7,
-            max_tokens: max_tokens ?? 4000,
+            max_tokens: max_tokens ?? 16384,
             messages: messages,
         }),
     });
@@ -131,7 +131,7 @@ async function callGemini(apiKey: string, model: string, temperature: number, ma
             contents: [{ parts: [{ text: prompt }] }],
             generationConfig: {
                 temperature: temperature ?? 0.7,
-                maxOutputTokens: maxTokens ?? 4000,
+                maxOutputTokens: maxTokens ?? 16384,
             },
         }),
     });
