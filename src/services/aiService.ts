@@ -298,7 +298,7 @@ ${originalContent}
   // === Proxy呼び出しヘルパー ===
   private async callProxy(payload: any): Promise<any> {
     // 常にNetlify Functions経由で呼び出す（CORS回避のため）
-    const endpoint = '/.netlify/functions/ai-proxy';
+    const endpoint = '/.netlify/functions/proxy';
     console.log('🔍 Netlify Functions経由でAPI呼び出し', { endpoint, provider: payload.provider });
 
     const response = await fetch(endpoint, {

@@ -1,5 +1,7 @@
 
-export const handler = async (event: any) => {
+import { Handler } from "@netlify/functions";
+
+export const handler: Handler = async (event) => {
     // CORS handling
     if (event.httpMethod === 'OPTIONS') {
         return {
@@ -19,11 +21,16 @@ export const handler = async (event: any) => {
 
     try {
         const body = JSON.parse(event.body || '{}');
-        const { provider, apiKey, model, temperature, maxTokens, prompt, messages } = body;
+        // provider または type で機能を識別
+        // - AI生成: provider (openai, claude, gemini)
+        // - 検索: provider (google-search, serpapi)
+        // - その他: type (gemini-list)
+        const { provider, type, apiKey, model, temperature, maxTokens, prompt, messages, ...otherParams } = body;
 
-        console.log(`🤖 AI Proxy Request: ${provider} (${model})`);
+        console.log(`🤖 Unified Proxy Request: ${type || provider} (${model || 'no-model'})`);
 
         if (!apiKey) {
+            // gemini-list の場合、params.key で来ることもあるが、統一的に apiKey で受ける想定
             return {
                 statusCode: 400,
                 body: JSON.stringify({ error: "API key missing" })
@@ -32,7 +39,11 @@ export const handler = async (event: any) => {
 
         let responseData;
 
-        switch (provider) {
+        // 機能分岐
+        const actionType = type || provider;
+
+        switch (actionType) {
+            // --- AI Generation ---
             case 'openai':
                 responseData = await callOpenAI(apiKey, model, temperature, maxTokens, messages || [{ role: "user", content: prompt }]);
                 break;
@@ -42,10 +53,25 @@ export const handler = async (event: any) => {
             case 'gemini':
                 responseData = await callGemini(apiKey, model, temperature, maxTokens, prompt);
                 break;
+
+            // --- Search & Utils ---
+            case 'google-search':
+                // google-search-proxy.ts logic
+                responseData = await callGoogleSearch(body);
+                break;
+            case 'serpapi':
+                // serpapi-proxy.ts logic
+                responseData = await callSerpApi(body);
+                break;
+            case 'gemini-list':
+                // gemini-list.ts logic
+                responseData = await getGeminiModels(apiKey);
+                break;
+
             default:
                 return {
                     statusCode: 400,
-                    body: JSON.stringify({ error: `Unsupported provider: ${provider}` })
+                    body: JSON.stringify({ error: `Unsupported provider/type: ${actionType}` })
                 };
         }
 
@@ -59,17 +85,19 @@ export const handler = async (event: any) => {
         };
 
     } catch (error: any) {
-        console.error("🔥 AI Proxy Error:", error);
+        console.error("🔥 Proxy Error:", error);
         return {
             statusCode: 500,
             headers: {
                 'Access-Control-Allow-Origin': '*',
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({ error: error.message || "Internal Server Error" })
+            body: JSON.stringify({ error: error.message || "Internal Server Error", details: error })
         };
     }
 };
+
+// --- Helper Functions ---
 
 async function callOpenAI(apiKey: string, model: string, temperature: number, max_tokens: number, messages: any[]) {
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -91,9 +119,7 @@ async function callOpenAI(apiKey: string, model: string, temperature: number, ma
         throw new Error(`OpenAI API error (${response.status}): ${JSON.stringify(errorData)}`);
     }
 
-    const data = await response.json();
-    // Standardize response extraction if needed here, but returning raw is fine if client handles it
-    return data;
+    return await response.json();
 }
 
 async function callClaude(apiKey: string, model: string, temperature: number, max_tokens: number, messages: any[]) {
@@ -142,4 +168,40 @@ async function callGemini(apiKey: string, model: string, temperature: number, ma
     }
 
     return await response.json();
+}
+
+async function callGoogleSearch(params: any) {
+    // google-search-proxy は body のパラメータをクエリパラメータとして転送していた
+    // params には provider: 'google-search' などが含まれるが、URLSearchParams は余計なものを無視するか文字列化するだけなので注意
+    // 必要なパラメータ: key, cx, q, dateRestrict, etc.
+    const { provider, type, ...queryParams } = params;
+    const qs = new URLSearchParams(queryParams).toString();
+    console.log('Proxying request to Google Custom Search API...');
+
+    const response = await fetch(`https://www.googleapis.com/customsearch/v1?${qs}`);
+    const data = await response.json();
+
+    if (!response.ok) {
+        throw new Error(data.error?.message || response.statusText);
+    }
+    return data;
+}
+
+async function callSerpApi(params: any) {
+    const { provider, type, ...queryParams } = params;
+    const qs = new URLSearchParams(queryParams).toString();
+    console.log('Proxying request to SerpAPI...');
+
+    const response = await fetch(`https://serpapi.com/search.json?${qs}`);
+    const data = await response.json();
+    return data;
+}
+
+async function getGeminiModels(apiKey: string) {
+    const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta1/models?key=${apiKey}`
+    );
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error?.message || "Failed to fetch models");
+    return data;
 }

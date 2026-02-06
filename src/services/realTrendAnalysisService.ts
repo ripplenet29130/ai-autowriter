@@ -173,9 +173,9 @@ export class RealTrendAnalysisService {
       data = await response.json();
     } else {
       // 本番環境: Netlify Function (POST)
-      const response = await fetch('/.netlify/functions/serpapi-proxy', {
+      const response = await fetch('/.netlify/functions/proxy', {
         method: 'POST',
-        body: JSON.stringify(params),
+        body: JSON.stringify({ ...params, provider: 'serpapi' }),
         headers: { 'Content-Type': 'application/json' }
       });
       if (!response.ok) {
@@ -225,9 +225,9 @@ export class RealTrendAnalysisService {
       data = await response.json();
     } else {
       // 本番: Netlify Function (POST)
-      const response = await fetch('/.netlify/functions/google-search-proxy', {
+      const response = await fetch('/.netlify/functions/proxy', {
         method: 'POST',
-        body: JSON.stringify(params),
+        body: JSON.stringify({ ...params, provider: 'google-search' }),
         headers: { 'Content-Type': 'application/json' }
       });
       if (!response.ok) {
@@ -274,9 +274,9 @@ export class RealTrendAnalysisService {
         if (!response.ok) throw new Error('Proxy failed');
         data = await response.json();
       } else {
-        const response = await fetch('/.netlify/functions/google-search-proxy', {
+        const response = await fetch('/.netlify/functions/proxy', {
           method: 'POST',
-          body: JSON.stringify(params),
+          body: JSON.stringify({ ...params, provider: 'google-search' }),
           headers: { 'Content-Type': 'application/json' }
         });
         if (!response.ok) throw new Error('Proxy failed');
