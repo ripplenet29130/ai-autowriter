@@ -297,13 +297,24 @@ ${originalContent}
 
   // === Proxy呼び出しヘルパー ===
   private async callProxy(payload: any): Promise<any> {
-    // 常にNetlify Functions経由で呼び出す（CORS回避のため）
-    const endpoint = '/.netlify/functions/proxy';
-    console.log('🔍 Netlify Functions経由でAPI呼び出し', { endpoint, provider: payload.provider });
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+    const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+    if (!supabaseUrl || !supabaseAnonKey) {
+      throw new Error("Supabase configurations are missing");
+    }
+
+    // Supabase Edge Functionのエンドポイント
+    const endpoint = `${supabaseUrl}/functions/v1/ai-proxy`;
+
+    console.log('🔍 Supabase Edge Function経由でAPI呼び出し', { endpoint, provider: payload.provider });
 
     const response = await fetch(endpoint, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${supabaseAnonKey}`
+      },
       body: JSON.stringify(payload)
     });
 

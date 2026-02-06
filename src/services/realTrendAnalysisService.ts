@@ -172,11 +172,16 @@ export class RealTrendAnalysisService {
       if (!response.ok) throw new Error(`SerpAPI search error: ${response.status}`);
       data = await response.json();
     } else {
-      // 本番環境: Netlify Function (POST)
-      const response = await fetch('/.netlify/functions/proxy', {
+      // Supabase Edge Function (POST)
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+      const response = await fetch(`${supabaseUrl}/functions/v1/ai-proxy`, {
         method: 'POST',
         body: JSON.stringify({ ...params, provider: 'serpapi' }),
-        headers: { 'Content-Type': 'application/json' }
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${supabaseAnonKey}`
+        }
       });
       if (!response.ok) {
         const err = await response.json().catch(() => ({}));
@@ -224,11 +229,16 @@ export class RealTrendAnalysisService {
       if (!response.ok) throw new Error(`Google API error: ${response.status}`);
       data = await response.json();
     } else {
-      // 本番: Netlify Function (POST)
-      const response = await fetch('/.netlify/functions/proxy', {
+      // Supabase Edge Function (POST)
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+      const response = await fetch(`${supabaseUrl}/functions/v1/ai-proxy`, {
         method: 'POST',
         body: JSON.stringify({ ...params, provider: 'google-search' }),
-        headers: { 'Content-Type': 'application/json' }
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${supabaseAnonKey}`
+        }
       });
       if (!response.ok) {
         const err = await response.json().catch(() => ({}));
@@ -274,10 +284,15 @@ export class RealTrendAnalysisService {
         if (!response.ok) throw new Error('Proxy failed');
         data = await response.json();
       } else {
-        const response = await fetch('/.netlify/functions/proxy', {
+        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+        const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+        const response = await fetch(`${supabaseUrl}/functions/v1/ai-proxy`, {
           method: 'POST',
           body: JSON.stringify({ ...params, provider: 'google-search' }),
-          headers: { 'Content-Type': 'application/json' }
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${supabaseAnonKey}`
+          }
         });
         if (!response.ok) throw new Error('Proxy failed');
         data = await response.json();
