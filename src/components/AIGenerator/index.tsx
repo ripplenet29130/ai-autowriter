@@ -316,7 +316,7 @@ export const AIGenerator: React.FC = () => {
                             className="input-field"
                         >
                             <option value="">（指定なし）</option>
-                            {promptSets.map(ps => (
+                            {(promptSets || []).map(ps => (
                                 <option key={ps.id} value={ps.id}>
                                     {ps.name}
                                 </option>
@@ -347,7 +347,7 @@ export const AIGenerator: React.FC = () => {
                             className="input-field"
                         >
                             <option value="">（指定なし）</option>
-                            {titleSets.map(ts => (
+                            {(titleSets || []).map(ts => (
                                 <option key={ts.id} value={ts.id}>
                                     {ts.name} ({ts.titles.length}個)
                                 </option>
@@ -374,7 +374,7 @@ export const AIGenerator: React.FC = () => {
                                         className="input-field"
                                     >
                                         <option value="">タイトルを選択してください...</option>
-                                        {selectedSet.titles.map((title, index) => (
+                                        {(selectedSet.titles || []).map((title, index) => (
                                             <option key={index} value={title}>
                                                 {title}
                                             </option>
@@ -405,7 +405,7 @@ export const AIGenerator: React.FC = () => {
                             className="input-field"
                         >
                             <option value="">(指定なし)</option>
-                            {keywordSets.map(ks => (
+                            {(keywordSets || []).map(ks => (
                                 <option key={ks.id} value={ks.id}>
                                     {ks.name} ({ks.keywords.length}個)
                                 </option>
@@ -419,7 +419,7 @@ export const AIGenerator: React.FC = () => {
                                         使用するキーワードを選択
                                     </label>
                                     <div className="space-y-2 max-h-48 overflow-y-auto p-3 bg-gray-50 rounded-lg border border-gray-200">
-                                        {selectedSet.keywords.map((keyword, index) => (
+                                        {(selectedSet.keywords || []).map((keyword, index) => (
                                             <label key={index} className="flex items-center space-x-2 cursor-pointer hover:bg-gray-100 p-1 rounded">
                                                 <input
                                                     type="checkbox"
