@@ -598,9 +598,17 @@ ${toneText}
 
 【文字数】
 ${prompt.targetWordCount
-        ? `**目標: ${prompt.targetWordCount}文字（±10%以内を厳守してください。${Math.floor(prompt.targetWordCount * 0.9)}〜${Math.ceil(prompt.targetWordCount * 1.1)}文字の範囲内で執筆してください）**`
+        ? `**目標: ${prompt.targetWordCount}文字（必ず${Math.floor(prompt.targetWordCount * 0.9)}文字以上、${Math.ceil(prompt.targetWordCount * 1.1)}文字以下で執筆してください）**`
         : lengthText}
-**重要: 文字数は必ず上記の範囲内に収めてください。短すぎる記事は不可です。**
+
+**【最重要】文字数制限について:**
+- 上記の目標文字数を厳守してください。最低文字数を下回ることは絶対に避けてください。
+- 内容が不足している場合は、以下を追加して文字数を確保してください:
+  - 具体例や事例の追加
+  - ユーザーメリットの詳細説明
+  - よくある質問（FAQ）や補足情報
+  - 関連する背景情報や歴史的経緯
+- 短すぎる記事は品質が低いと判断されます。必ず指定範囲内で執筆してください。
 
 【構成】
 ${sectionText}

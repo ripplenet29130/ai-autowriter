@@ -9,6 +9,8 @@ import { ArticleEditor } from './ArticleEditor';
 import { PublishControl } from './PublishControl';
 import { MultiStepGenerator } from '../MultiStepGenerator';
 import { FactCheckResultsDisplay } from '../FactCheckResultsDisplay';
+import { factCheckService } from '../../services/factCheckService';
+import { FactCheckResult } from '../../types';
 import toast from 'react-hot-toast';
 
 /**
@@ -27,6 +29,10 @@ export const AIGenerator: React.FC = () => {
     const [showMultiStep, setShowMultiStep] = useState(false);
     const [factCheckNote, setFactCheckNote] = useState('');
     const [factCheckModel, setFactCheckModel] = useState<'sonar' | 'sonar-reasoning'>('sonar');
+
+    // Fact Check State
+    const [factCheckResults, setFactCheckResults] = useState<FactCheckResult[]>([]);
+    const [isFactChecking, setIsFactChecking] = useState(false);
 
     // Publish Status State
     const [publishStatus, setPublishStatus] = useState<'publish' | 'draft' | 'future'>('publish');
