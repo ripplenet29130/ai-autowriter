@@ -9,7 +9,10 @@ import toast from 'react-hot-toast';
 import { format } from 'date-fns';
 import { useWordPressPublish } from '../hooks/useWordPressPublish';
 import { useWordPressConfig } from '../hooks/useWordPressConfig';
-import { Globe, Send, X as CloseIcon } from 'lucide-react';
+import { Globe, Send, X as CloseIcon, ShieldCheck } from 'lucide-react';
+import { FactCheckResult } from '../types/factCheck';
+import { factCheckService } from '../services/factCheckService';
+import { FactCheckResultsDisplay } from './FactCheckResultsDisplay';
 
 export const ArticlesList: React.FC = () => {
   const { deleteArticle } = useAppStore();
@@ -26,6 +29,10 @@ export const ArticlesList: React.FC = () => {
   const [selectedConfigId, setSelectedConfigId] = useState<string>('');
   const [publishStatus, setPublishStatus] = useState<'publish' | 'draft' | 'future'>('publish');
   const [scheduledDate, setScheduledDate] = useState<string>('');
+
+  // ファクトチェック用のstate
+  const [factCheckResults, setFactCheckResults] = useState<FactCheckResult[]>([]);
+  const [isFactChecking, setIsFactChecking] = useState(false);
 
   // 編集モード用のstate
   const [isEditing, setIsEditing] = useState(false);
@@ -110,6 +117,40 @@ export const ArticlesList: React.FC = () => {
         {badge.label}
       </span>
     );
+  };
+
+  const handleFactCheck = async () => {
+    if (!selectedArticle) return;
+
+    setIsFactChecking(true);
+    setFactCheckResults([]);
+
+    try {
+      const items = factCheckService.extractFacts(selectedArticle.content);
+      if (items.length === 0) {
+        toast('検証する事実情報が見つかりませんでした', { icon: 'ℹ️' });
+        setIsFactChecking(false);
+        return;
+      }
+
+      const keyword = selectedArticle.keywords && selectedArticle.keywords.length > 0
+        ? selectedArticle.keywords[0]
+        : selectedArticle.title;
+
+      const results = await factCheckService.verifyFacts(items, keyword);
+      setFactCheckResults(results);
+
+      if (results.length > 0) {
+        toast.success(`ファクトチェック完了: ${results.length}件を検証しました`);
+      } else {
+        toast.error('ファクトチェックに失敗したか、検証可能な項目がありませんでした');
+      }
+    } catch (error) {
+      console.error('Fact check error:', error);
+      toast.error('ファクトチェック中にエラーが発生しました');
+    } finally {
+      setIsFactChecking(false);
+    }
   };
 
   const handleStartEdit = () => {
@@ -264,6 +305,7 @@ export const ArticlesList: React.FC = () => {
                 key={article.id}
                 onClick={() => {
                   setSelectedArticle(article);
+                  setFactCheckResults([]); // Reset fact check results
                   setIsEditing(false); // Reset editing state when opening
                 }}
                 className="article-card"
@@ -416,13 +458,27 @@ export const ArticlesList: React.FC = () => {
                       <h1 className="text-3xl font-bold text-gray-900 mb-2 flex-1">
                         {selectedArticle.title}
                       </h1>
-                      <button
-                        onClick={handleStartEdit}
-                        className="p-2 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors shrink-0"
-                        title="編集"
-                      >
-                        <Edit className="w-5 h-5" />
-                      </button>
+
+                      <div className="flex gap-2 shrink-0">
+                        <button
+                          onClick={handleFactCheck}
+                          disabled={isFactChecking}
+                          className={`p-2 rounded-lg transition-colors ${isFactChecking
+                            ? 'text-gray-400 bg-gray-100 cursor-not-allowed'
+                            : 'text-gray-500 hover:text-green-600 hover:bg-green-50'
+                            }`}
+                          title="ファクトチェックを実行"
+                        >
+                          <ShieldCheck className={`w-5 h-5 ${isFactChecking ? 'animate-pulse' : ''}`} />
+                        </button>
+                        <button
+                          onClick={handleStartEdit}
+                          className="p-2 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                          title="編集"
+                        >
+                          <Edit className="w-5 h-5" />
+                        </button>
+                      </div>
                     </div>
                     <div className="flex items-center gap-4 text-sm text-gray-600">
                       {getStatusBadge(selectedArticle.status)}
@@ -446,6 +502,10 @@ export const ArticlesList: React.FC = () => {
                           WordPressで表示
                         </a>
                       )}
+                    </div>
+
+                    <div className="mt-4">
+                      <FactCheckResultsDisplay results={factCheckResults} />
                     </div>
                   </div>
                 )}

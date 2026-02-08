@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import { Type, Sparkles, ArrowRight, Check, MousePointer2, Info, ArrowLeft } from 'lucide-react';
-import { TitleSuggestion } from '../../types';
+import { TitleSuggestion, TitleSet } from '../../types';
 
 interface TitleSelectionStepProps {
     titles: TitleSuggestion[] | undefined;
+    titleSet?: TitleSet;
     isLoading: boolean;
     onGenerate: () => void;
     onSelect: (title: string) => void;
@@ -13,6 +14,7 @@ interface TitleSelectionStepProps {
 
 export const TitleSelectionStep: React.FC<TitleSelectionStepProps> = ({
     titles,
+    titleSet,
     isLoading,
     onGenerate,
     onSelect,
@@ -21,12 +23,31 @@ export const TitleSelectionStep: React.FC<TitleSelectionStepProps> = ({
 }) => {
     const [selectedId, setSelectedId] = useState<string | null>(null);
 
+    // タイトルセットがある場合はそれを変換して表示、なければ生成されたタイトルを使用
+    const displayTitles: TitleSuggestion[] | undefined = titleSet
+        ? titleSet.titles.map((t, i) => ({
+            id: `preset-${i}`,
+            title: t,
+            description: 'タイトルセットから選択',
+            // ダミーデータ
+            keyword: '',
+            trendScore: 0,
+            searchVolume: 0,
+            competition: 'medium',
+            seoScore: 0,
+            clickPotential: 0,
+            targetAudience: '',
+            contentAngle: '',
+            relatedKeywords: []
+        }))
+        : titles;
+
     const handleSelect = (title: TitleSuggestion) => {
         setSelectedId(title.id);
         onSelect(title.title);
     };
 
-    if (isLoading && (!titles || titles.length === 0)) {
+    if (isLoading && (!displayTitles || displayTitles.length === 0)) {
         return (
             <div className="flex flex-col items-center justify-center py-16">
                 <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mb-4" />
@@ -38,7 +59,7 @@ export const TitleSelectionStep: React.FC<TitleSelectionStepProps> = ({
         );
     }
 
-    if (!titles || titles.length === 0) {
+    if (!displayTitles || displayTitles.length === 0) {
         return (
             <div className="text-center py-12">
                 <div className="bg-blue-50 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
@@ -66,24 +87,29 @@ export const TitleSelectionStep: React.FC<TitleSelectionStepProps> = ({
                 <div>
                     <h3 className="text-xl font-bold text-gray-900 flex items-center space-x-2">
                         <Type className="w-6 h-6 text-blue-600" />
-                        <span>タイトル案の選択</span>
+                        <span>{titleSet ? 'タイトルの選択' : 'タイトル案の選択'}</span>
                     </h3>
                     <p className="text-gray-600 mt-1">
-                        AIが作成したタイトル案から、記事に最適なものを選んでください
+                        {titleSet
+                            ? `「${titleSet.name}」から記事にするタイトルを選んでください`
+                            : 'AIが作成したタイトル案から、記事に最適なものを選んでください'
+                        }
                     </p>
                 </div>
-                <button
-                    onClick={onGenerate}
-                    disabled={isLoading}
-                    className="text-sm text-blue-600 hover:text-blue-800 flex items-center space-x-1"
-                >
-                    <Sparkles className="w-4 h-4" />
-                    <span>再生成する</span>
-                </button>
+                {!titleSet && (
+                    <button
+                        onClick={onGenerate}
+                        disabled={isLoading}
+                        className="text-sm text-blue-600 hover:text-blue-800 flex items-center space-x-1"
+                    >
+                        <Sparkles className="w-4 h-4" />
+                        <span>再生成する</span>
+                    </button>
+                )}
             </div>
 
             <div className="grid grid-cols-1 gap-4">
-                {titles.map((suggestion) => (
+                {displayTitles.map((suggestion) => (
                     <div
                         key={suggestion.id}
                         onClick={() => handleSelect(suggestion)}
@@ -123,7 +149,7 @@ export const TitleSelectionStep: React.FC<TitleSelectionStepProps> = ({
                     className="btn-secondary flex items-center space-x-2"
                 >
                     <ArrowLeft className="w-4 h-4" />
-                    <span>競合調査に戻る</span>
+                    <span>{titleSet ? '設定に戻る' : '競合調査に戻る'}</span>
                 </button>
                 <div className="flex items-center text-sm text-gray-500">
                     <Info className="w-4 h-4 mr-1.5" />

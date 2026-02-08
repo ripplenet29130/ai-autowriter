@@ -4,13 +4,13 @@ import { useEffect } from 'react';
 import { Layout } from './components/Layout';
 import { Dashboard } from './components/Dashboard';
 import { AIGenerator } from './components/AIGenerator/index';
-import { TrendAnalysis } from './components/TrendAnalysis/index';
 import { Scheduler } from './components/Scheduler';
 import { WordPressConfigComponent } from './components/WordPressConfig/index';
 import { AIConfigComponent } from './components/AIConfig';
 import { SettingsComponent } from './components/Settings';
 import { ArticlesList } from './components/ArticlesList';
 import { KeywordSettings } from './components/KeywordSettings';
+import { TitleSettings } from './components/TitleSettings';
 import { useAppStore } from './store/useAppStore';
 
 function App() {
@@ -32,8 +32,7 @@ function App() {
           return <AIGenerator />;
         case 'articles':
           return <ArticlesList />;
-        case 'trends':
-          return <TrendAnalysis />;
+
         case 'scheduler':
           return <Scheduler />;
         case 'wordpress':
@@ -42,6 +41,8 @@ function App() {
           return <AIConfigComponent />;
         case 'keywords':
           return <KeywordSettings />;
+        case 'titles':
+          return <TitleSettings />;
         case 'settings':
           return <SettingsComponent />;
         default:

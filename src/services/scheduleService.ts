@@ -25,6 +25,13 @@ class ScheduleService {
                 end_date: schedule.end_date || null,
                 chatwork_room_id: schedule.chatwork_room_id || null,
                 prompt_set_id: schedule.prompt_set_id || null,
+                target_word_count: schedule.target_word_count,
+                writing_tone: schedule.writing_tone,
+                keyword_set_id: schedule.keyword_set_id || null,
+                title_set_id: schedule.title_set_id || null,
+                generation_mode: schedule.generation_mode || 'keyword',
+                enable_fact_check: schedule.enable_fact_check || false,
+                fact_check_note: schedule.fact_check_note || null,
             })
             .select()
             .single();
@@ -97,6 +104,9 @@ class ScheduleService {
         if (cleanUpdates.end_date === '') cleanUpdates.end_date = null as any;
         if (cleanUpdates.prompt_set_id === '') cleanUpdates.prompt_set_id = null as any;
         if (cleanUpdates.chatwork_room_id === '') cleanUpdates.chatwork_room_id = null as any;
+        if (cleanUpdates.keyword_set_id === '') cleanUpdates.keyword_set_id = null as any;
+        if (cleanUpdates.title_set_id === '') cleanUpdates.title_set_id = null as any;
+
 
         const { data, error } = await supabase
             .from('schedule_settings')
@@ -207,6 +217,29 @@ class ScheduleService {
         }
 
         return data.map(item => item.keyword_used);
+    }
+
+    /**
+     * 特定のスケジュールの最終実行日時を取得
+     */
+    async getLastExecution(scheduleId: string): Promise<string | null> {
+        if (!supabase) {
+            throw new Error('Supabase is not initialized');
+        }
+
+        const { data, error } = await supabase
+            .from('execution_history')
+            .select('executed_at')
+            .eq('schedule_id', scheduleId)
+            .order('executed_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+        if (error || !data) {
+            return null;
+        }
+
+        return data.executed_at;
     }
 }
 

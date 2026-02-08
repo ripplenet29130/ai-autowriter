@@ -1,7 +1,7 @@
 import axios from 'axios';
 import { Article, ScheduleSettings } from '../types';
 import { supabase } from './supabaseClient';
-import { convertMarkdownToHtml } from '../utils/markdownToHtml';
+import { convertToGutenbergBlocks } from '../utils/markdownToHtml';
 
 export interface WordPressConfig {
   id: string;
@@ -80,11 +80,18 @@ export class WordPressService {
     }
 
     try {
-      // MarkdownをHTMLに変換
-      const processedContent = convertMarkdownToHtml(article.content);
+      // Convert to Gutenberg blocks format
+      const processedContent = convertToGutenbergBlocks(article.content);
+
+      console.log('=== WordPress投稿デバッグ ===');
+      console.log('元のコンテンツ:', article.content.substring(0, 200));
+      console.log('変換後のコンテンツ:', processedContent.substring(0, 500));
 
       // Get category IDs - only use existing categories, don't create new ones
       const categoryIds = await this.getExistingCategoryIds(article.category);
+
+      // Get or create tags
+      const tagIds = await this.getOrCreateTags(article.keywords);
 
       const postData: any = {
         title: article.title,
@@ -92,6 +99,7 @@ export class WordPressService {
         excerpt: article.excerpt,
         status: publishStatus,
         categories: categoryIds,
+        tags: tagIds,
         meta: {
           _yoast_wpseo_focuskw: article.keywords.join(', '),
           _yoast_wpseo_metadesc: article.excerpt,
@@ -103,8 +111,11 @@ export class WordPressService {
         postData.date = publishDate.toISOString();
       }
 
+      const postType = this.config.postType || 'posts';
+      console.log(`WordPress投稿タイプ: ${postType}`);
+
       const response = await axios.post(
-        `${this.config.url}/wp-json/wp/v2/posts`,
+        `${this.config.url}/wp-json/wp/v2/${postType}`,
         postData,
         { headers: this.getAuthHeaders() }
       );
@@ -138,11 +149,14 @@ export class WordPressService {
       return { success: false, error: 'WordPress設定が見つかりません' };
     }
     try {
-      // MarkdownをHTMLに変換
-      const processedContent = convertMarkdownToHtml(article.content);
+      // Convert to Gutenberg blocks format
+      const processedContent = convertToGutenbergBlocks(article.content);
 
       // Get category IDs - only use existing categories, don't create new ones
       const categoryIds = await this.getExistingCategoryIds(article.category);
+
+      // Get or create tags
+      const tagIds = await this.getOrCreateTags(article.keywords);
 
       const postData = {
         title: article.title,
@@ -151,6 +165,7 @@ export class WordPressService {
         status: 'future',
         date: publishDate.toISOString(),
         categories: categoryIds,
+        tags: tagIds,
         meta: {
           _yoast_wpseo_focuskw: article.keywords.join(', '),
           _yoast_wpseo_metadesc: article.excerpt,
@@ -401,6 +416,53 @@ export class WordPressService {
   private async getCategoryId(categoryName: string): Promise<number[]> {
     const categoryId = await this.findExistingCategoryBySlugOrName(categoryName);
     return categoryId ? [categoryId] : [];
+  }
+
+  /**
+   * Get or create tags from keywords
+   */
+  private async getOrCreateTags(keywords: string[]): Promise<number[]> {
+    if (!this.config || !keywords || keywords.length === 0) return [];
+
+    try {
+      const tagIds: number[] = [];
+
+      for (const keyword of keywords) {
+        if (!keyword.trim()) continue;
+
+        // Search for existing tag
+        const searchResponse = await axios.get(`${this.config.url}/wp-json/wp/v2/tags`, {
+          headers: this.getAuthHeaders(),
+          params: { search: keyword.trim() }
+        });
+
+        let tagId: number;
+
+        if (searchResponse.data.length > 0) {
+          // Find exact match
+          const exactMatch = searchResponse.data.find((tag: any) =>
+            tag.name.toLowerCase() === keyword.trim().toLowerCase()
+          );
+          tagId = exactMatch ? exactMatch.id : searchResponse.data[0].id;
+        } else {
+          // Create new tag
+          const createResponse = await axios.post(
+            `${this.config.url}/wp-json/wp/v2/tags`,
+            { name: keyword.trim() },
+            { headers: this.getAuthHeaders() }
+          );
+          tagId = createResponse.data.id;
+          console.log(`新しいタグを作成: ${keyword.trim()} (ID: ${tagId})`);
+        }
+
+        tagIds.push(tagId);
+      }
+
+      return tagIds;
+    } catch (error) {
+      console.error('タグの取得/作成エラー:', error);
+      return [];
+    }
   }
 }
 

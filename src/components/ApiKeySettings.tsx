@@ -1,11 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { Key, Check, AlertCircle, ExternalLink } from 'lucide-react';
+import { Key, Check, AlertCircle, ExternalLink, MessageSquare } from 'lucide-react';
 import { apiKeyManager } from '../services/apiKeyManager';
+import { supabase } from '../services/supabaseClient';
+import toast from 'react-hot-toast';
 
 export const ApiKeySettings: React.FC = () => {
     const [serpApiKey, setSerpApiKey] = useState('');
     const [googleApiKey, setGoogleApiKey] = useState('');
     const [searchEngineId, setSearchEngineId] = useState('');
+    const [chatworkApiToken, setChatworkApiToken] = useState('');
     const [saved, setSaved] = useState(false);
     const [validationStatus, setValidationStatus] = useState<{
         isValid: boolean;
@@ -23,26 +26,67 @@ export const ApiKeySettings: React.FC = () => {
         if (existingGoogleKey) setGoogleApiKey(existingGoogleKey);
         if (existingEngineId) setSearchEngineId(existingEngineId);
 
+        // Chatwork API KeyをDBから読み込み
+        const loadChatworkKey = async () => {
+            if (!supabase) return;
+            const { data } = await supabase
+                .from('app_settings')
+                .select('value')
+                .eq('key', 'chatwork_api_token')
+                .maybeSingle();
+
+            if (data) {
+                setChatworkApiToken(data.value);
+            }
+        };
+        loadChatworkKey();
+
         // 検証状態を取得
         setValidationStatus(apiKeyManager.validateConfiguration());
     }, []);
 
-    const handleSave = () => {
-        // APIキーを保存
-        if (serpApiKey) {
-            apiKeyManager.setApiKey('serpapi', serpApiKey);
+    const handleSave = async () => {
+        if (!supabase) {
+            toast.error('データベース接続エラー');
+            return;
         }
-        if (googleApiKey) {
-            apiKeyManager.setApiKey('google_custom_search', googleApiKey);
-        }
-        if (searchEngineId) {
-            apiKeyManager.setApiKey('google_custom_search_engine_id', searchEngineId);
+
+        // ローカル設定のAPIキーを保存
+        if (serpApiKey) apiKeyManager.setApiKey('serpapi', serpApiKey);
+        if (googleApiKey) apiKeyManager.setApiKey('google_custom_search', googleApiKey);
+        if (searchEngineId) apiKeyManager.setApiKey('google_custom_search_engine_id', searchEngineId);
+
+        // すべてのAPIキーをDBにも保存（サーバー側でのアクセスを可能にする）
+        const apiKeysToSave = [
+            { key: 'serpapi_key', value: serpApiKey, description: 'SerpAPI Key for trend analysis' },
+            { key: 'google_custom_search_api_key', value: googleApiKey, description: 'Google Custom Search API Key' },
+            { key: 'google_custom_search_engine_id', value: searchEngineId, description: 'Google Custom Search Engine ID' },
+            { key: 'chatwork_api_token', value: chatworkApiToken, description: 'Chatwork API Token for notifications' }
+        ];
+
+        for (const apiKey of apiKeysToSave) {
+            if (apiKey.value) {
+                const { error } = await supabase
+                    .from('app_settings')
+                    .upsert({
+                        key: apiKey.key,
+                        value: apiKey.value,
+                        description: apiKey.description
+                    });
+
+                if (error) {
+                    console.error(`Failed to save ${apiKey.key}:`, error);
+                    toast.error(`${apiKey.description}の保存に失敗しました`);
+                    return;
+                }
+            }
         }
 
         // 検証状態を更新
         setValidationStatus(apiKeyManager.validateConfiguration());
 
         setSaved(true);
+        toast.success('設定を保存しました');
         setTimeout(() => setSaved(false), 3000);
     };
 
@@ -69,7 +113,7 @@ export const ApiKeySettings: React.FC = () => {
         <div className="space-y-6">
             <div className="mb-4">
                 <p className="text-sm text-gray-600">
-                    トレンド分析と競合調査に使用するAPIキーを設定します
+                    競合調査と高品質な記事生成に使用するAPIキーを設定します
                 </p>
             </div>
 
@@ -191,6 +235,46 @@ export const ApiKeySettings: React.FC = () => {
                             Programmable Search Engine
                         </a>
                         で作成できます
+                    </p>
+                </div>
+            </div>
+
+            {/* Chatwork API Settings */}
+            <div className="bg-white rounded-lg border border-gray-200 p-4 space-y-3">
+                <div className="flex items-start justify-between">
+                    <div>
+                        <h4 className="font-semibold text-gray-900">Chatwork API</h4>
+                        <p className="text-sm text-gray-600 mt-1">
+                            記事投稿完了時にChatworkに通知を送るために使用します
+                        </p>
+                    </div>
+                    <a
+                        href="https://www.chatwork.com/service/packages/chatwork/subpackages/api/token.php"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-blue-600 hover:text-blue-700 flex items-center space-x-1 text-sm"
+                    >
+                        <span>APIトークン発行</span>
+                        <ExternalLink className="w-3 h-3" />
+                    </a>
+                </div>
+
+                <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Chatwork API Token
+                    </label>
+                    <div className="relative">
+                        <MessageSquare className="absolute left-3 top-2.5 w-4 h-4 text-gray-400" />
+                        <input
+                            type="password"
+                            value={chatworkApiToken}
+                            onChange={(e) => setChatworkApiToken(e.target.value)}
+                            placeholder="Chatwork API Token を入力"
+                            className="input-field w-full font-mono text-sm pl-9"
+                        />
+                    </div>
+                    <p className="text-xs text-gray-500 mt-1">
+                        ※ このキーはサーバー側に安全に保存され、自動投稿時の通知に使用されます
                     </p>
                 </div>
             </div>

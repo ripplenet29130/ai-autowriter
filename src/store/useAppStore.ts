@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { Article, WordPressConfig, AIConfig, PromptSet, KeywordSet } from '../types';
+import { Article, WordPressConfig, AIConfig, PromptSet, KeywordSet, TitleSet } from '../types';
 import { supabaseSchedulerService } from '../services/supabaseSchedulerService';
 import { articlesService } from '../services/articlesService';
 
@@ -11,6 +11,7 @@ interface AppState {
   aiConfigs: AIConfig[]; // 追加
   promptSets: PromptSet[];
   keywordSets: KeywordSet[];
+  titleSets: TitleSet[];
   activeView: string;
   isGenerating: boolean;
   isLoading: boolean;
@@ -31,11 +32,16 @@ interface AppState {
   addKeywordSet: (set: KeywordSet) => void;
   updateKeywordSet: (id: string, updates: Partial<KeywordSet>) => void;
   deleteKeywordSet: (id: string) => void;
+  // Title Set Actions
+  addTitleSet: (set: TitleSet) => void;
+  updateTitleSet: (id: string, updates: Partial<TitleSet>) => void;
+  deleteTitleSet: (id: string) => void;
 
   setAIConfig: (config: AIConfig) => void;
   activateAIConfig: (id: string) => Promise<void>; // 追加
   deleteAIConfig: (id: string) => Promise<void>; // 追加
   loadKeywordSets: () => Promise<void>;
+  loadTitleSets: () => Promise<void>;
   setIsGenerating: (generating: boolean) => void;
   loadFromSupabase: () => Promise<void>;
   syncToSupabase: () => Promise<void>;
@@ -52,6 +58,7 @@ export const useAppStore = create<AppState>()(
       aiConfigs: [],
       promptSets: [],
       keywordSets: [],
+      titleSets: [],
       activeView: 'dashboard',
       isGenerating: false,
       isLoading: false,
@@ -218,6 +225,24 @@ export const useAppStore = create<AppState>()(
         }));
       },
 
+      addTitleSet: (titleSet) => {
+        set((state: AppState) => ({ titleSets: [titleSet, ...state.titleSets] }));
+      },
+
+      updateTitleSet: (id, updates) => {
+        set((state: AppState) => ({
+          titleSets: state.titleSets.map((ts) =>
+            ts.id === id ? { ...ts, ...updates } : ts
+          ),
+        }));
+      },
+
+      deleteTitleSet: (id) => {
+        set((state: AppState) => ({
+          titleSets: state.titleSets.filter((ts) => ts.id !== id),
+        }));
+      },
+
       setAIConfig: async (config) => {
         try {
           // DB保存 (IDが返る)
@@ -286,6 +311,16 @@ export const useAppStore = create<AppState>()(
         }
       },
 
+      loadTitleSets: async () => {
+        try {
+          const { titleSetService } = await import('../services/titleSetService');
+          const sets = await titleSetService.getTitleSets();
+          set({ titleSets: sets });
+        } catch (error) {
+          console.error('Error loading title sets:', error);
+        }
+      },
+
       setIsGenerating: (generating) => {
         try {
           set({ isGenerating: generating });
@@ -297,12 +332,13 @@ export const useAppStore = create<AppState>()(
       loadFromSupabase: async () => {
         try {
           set({ isLoading: true });
-          const [wpConfigs, aiConfigs, articles, kSets, pSets] = await Promise.all([
+          const [wpConfigs, aiConfigs, articles, kSets, pSets, tSets] = await Promise.all([
             supabaseSchedulerService.loadWordPressConfigs(),
             supabaseSchedulerService.loadAIConfigs(),
             articlesService.getAllArticles(),
             import('../services/keywordSetService').then(m => m.keywordSetService.getKeywordSets()),
-            import('../services/promptSetService').then(m => m.promptSetService.getPromptSets())
+            import('../services/promptSetService').then(m => m.promptSetService.getPromptSets()),
+            import('../services/titleSetService').then(m => m.titleSetService.getTitleSets())
           ]);
           set({
             wordPressConfigs: wpConfigs,
@@ -311,6 +347,7 @@ export const useAppStore = create<AppState>()(
             articles: articles,
             keywordSets: kSets,
             promptSets: pSets,
+            titleSets: tSets,
             isLoading: false
           });
         } catch (error) {

@@ -161,6 +161,7 @@ export function useMultiStepGeneration() {
             selectedTitle?: string;
             keywordPreferences?: Record<string, KeywordPreference>;
             customInstructions?: string;
+            targetWordCount?: number; // 追加
         }
     ): Promise<ArticleOutline | null> => {
         try {
@@ -174,7 +175,8 @@ export function useMultiStepGeneration() {
                 {
                     ...options,
                     keywordPreferences: options?.keywordPreferences || state.keywordPreferences,
-                    customInstructions: options?.customInstructions
+                    customInstructions: options?.customInstructions,
+                    targetWordCount: options?.targetWordCount // 追加
                 }
             );
 

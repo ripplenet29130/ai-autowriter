@@ -14,10 +14,9 @@ interface StepIndicatorProps {
 }
 
 const steps = [
-    { step: 1, label: '競合調査', icon: Search, description: '上位サイト分析' },
-    { step: 2, label: 'タイトル', icon: Type, description: '魅力的な案の選定' },
-    { step: 3, label: 'アウトライン', icon: Layout, description: '構成の設計' },
-    { step: 4, label: '本文生成', icon: FileText, description: 'AI執筆完了' }
+    { step: 1, label: 'タイトル', icon: Type, description: '魅力的な案の選定' },
+    { step: 2, label: 'アウトライン', icon: Layout, description: '構成の設計' },
+    { step: 3, label: '本文生成', icon: FileText, description: 'AI執筆完了' }
 ];
 
 /**

@@ -2,6 +2,7 @@ import React from 'react';
 import { Settings, Database, Key } from 'lucide-react';
 import { DataMigration } from './DataMigration';
 import { ApiKeySettings } from './ApiKeySettings';
+import { FactCheckSettings } from './FactCheckSettings';
 
 export const SettingsComponent: React.FC = () => {
   return (
@@ -13,6 +14,9 @@ export const SettingsComponent: React.FC = () => {
           <p className="text-gray-600">システム設定を管理します</p>
         </div>
       </div>
+
+      {/* ファクトチェック設定 */}
+      <FactCheckSettings />
 
       {/* API設定 */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">

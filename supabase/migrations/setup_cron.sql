@@ -4,17 +4,18 @@
 -- 1. pg_cron拡張を有効化（初回のみ）
 CREATE EXTENSION IF NOT EXISTS pg_cron;
 
--- 2. 毎日9:00（JST）に実行するCron Job
--- 注意: Supabaseのサーバーは UTC なので、JST 9:00 = UTC 0:00
+-- 2. 毎分実行するCron Job (全スケジュールをチェック)
+-- 重要: Supabaseのサーバー時間はUTCですが、アプリ側はJST(日本時間)で計算するように修正済みです。
+-- YOUR_PROJECT_REF と YOUR_ANON_KEY をご自身のものに置き換えてください。
 SELECT cron.schedule(
-    'daily-article-generation',  -- ジョブ名
-    '0 0 * * *',                 -- 毎日 UTC 0:00 (JST 9:00)
+    'article-scheduler-check',   -- ジョブ名
+    '* * * * *',                 -- 毎分実行
     $$
     SELECT
       net.http_post(
-          url:='https://YOUR_PROJECT_REF.supabase.co/functions/v1/scheduler',
+          url:='https://YOUR_PROJECT_REF.supabase.co/functions/v1/scheduler-executor',
           headers:='{"Content-Type": "application/json", "Authorization": "Bearer YOUR_ANON_KEY"}'::jsonb,
-          body:='{}'::jsonb
+          body:='{"forceExecute": false}'::jsonb
       ) as request_id;
     $$
 );

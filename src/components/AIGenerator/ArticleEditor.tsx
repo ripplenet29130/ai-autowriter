@@ -1,12 +1,16 @@
 import React, { useState } from 'react';
-import { Edit, Eye, Edit3 } from 'lucide-react';
+import { Edit, Eye, Edit3, RefreshCw, ShieldCheck } from 'lucide-react';
 import { Article } from '../../types';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { RegenerateModal, RegenerateOptions } from './RegenerateModal';
 
 interface ArticleEditorProps {
     article: Article;
     onUpdate: (updates: Partial<Article>) => void;
+    onRegenerate?: (options: RegenerateOptions) => Promise<void>;
+    onFactCheck?: () => void;
+    isFactChecking?: boolean;
     readOnly?: boolean;
 }
 
@@ -16,9 +20,14 @@ interface ArticleEditorProps {
 export const ArticleEditor: React.FC<ArticleEditorProps> = ({
     article,
     onUpdate,
+    onRegenerate,
+    onFactCheck,
+    isFactChecking = false,
     readOnly = false,
 }) => {
     const [viewMode, setViewMode] = useState<'edit' | 'preview'>('edit');
+    const [showRegenerateModal, setShowRegenerateModal] = useState(false);
+    const [isRegenerating, setIsRegenerating] = useState(false);
 
     return (
         <div className="space-y-6">
@@ -44,6 +53,29 @@ export const ArticleEditor: React.FC<ArticleEditorProps> = ({
                         <Eye className="w-4 h-4" />
                         <span className="font-medium">プレビュー</span>
                     </button>
+                </div>
+                <div className="flex items-center gap-2">
+                    {onFactCheck && (
+                        <button
+                            onClick={onFactCheck}
+                            disabled={isFactChecking}
+                            className="flex items-center space-x-2 px-4 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 transition-colors disabled:opacity-50"
+                            title="Perplexityで事実確認を行う"
+                        >
+                            <ShieldCheck className={`w-4 h-4 ${isFactChecking ? 'animate-pulse' : ''}`} />
+                            <span>{isFactChecking ? '確認中...' : 'ファクトチェック'}</span>
+                        </button>
+                    )}
+                    {onRegenerate && (
+                        <button
+                            onClick={() => setShowRegenerateModal(true)}
+                            disabled={isRegenerating}
+                            className="flex items-center space-x-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50"
+                        >
+                            <RefreshCw className={`w-4 h-4 ${isRegenerating ? 'animate-spin' : ''}`} />
+                            <span>{isRegenerating ? '再生成中...' : '記事を再生成'}</span>
+                        </button>
+                    )}
                 </div>
             </div>
 
@@ -158,6 +190,30 @@ export const ArticleEditor: React.FC<ArticleEditorProps> = ({
                         </div>
                     )}
                 </div>
+            )}
+
+            {/* Regenerate Modal */}
+            {showRegenerateModal && onRegenerate && (
+                <RegenerateModal
+                    currentArticle={{
+                        title: article.title,
+                        content: article.content,
+                        wordCount: article.wordCount
+                    }}
+                    onClose={() => setShowRegenerateModal(false)}
+                    onRegenerate={async (options) => {
+                        setIsRegenerating(true);
+                        try {
+                            await onRegenerate(options);
+                            setShowRegenerateModal(false);
+                        } catch (error) {
+                            console.error('Regeneration failed:', error);
+                        } finally {
+                            setIsRegenerating(false);
+                        }
+                    }}
+                    isRegenerating={isRegenerating}
+                />
             )}
         </div>
     );

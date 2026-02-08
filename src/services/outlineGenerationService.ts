@@ -34,10 +34,15 @@ export class OutlineGenerationService {
             // タイトルを生成
             const title = this.generateTitle(request);
 
+            // キーワードが空の場合はタイトルから推測するかデフォルト値を使用
+            const mainKeyword = request.keywords.length > 0
+                ? request.keywords[0]
+                : (request.selectedTitle || '記事');
+
             const outline: ArticleOutline = {
                 id: uuidv4(),
                 title,
-                keyword: request.keywords[0],
+                keyword: mainKeyword,
                 sections,
                 trendData: request.trendData,
                 estimatedWordCount: this.calculateTotalWordCount(sections),
@@ -58,12 +63,20 @@ export class OutlineGenerationService {
     private buildOutlinePrompt(request: OutlineGenerationRequest): string {
         const { keywords, trendData, targetLength, tone, focusTopics, selectedTitle, keywordPreferences } = request;
 
-        // 文字数の目安
-        const lengthGuide = {
-            short: '約1,000〜2,000字（見出し: 3-5個）',
-            medium: '約2,000〜4,000字（見出し: 5-7個）',
-            long: '約4,000〜6,000字（見出し: 7-10個）'
-        };
+        // メインキーワードの決定（キーワードがない場合はタイトルを使用）
+        const mainKeyword = keywords.length > 0 ? keywords[0] : (selectedTitle || '指定テーマ');
+        // 関連キーワード（キーワードがない場合は空）
+        const relatedKeywordsStr = keywords.length > 1 ? keywords.slice(1).join(', ') : 'なし';
+
+        // 文字数の目安（targetWordCountが指定されていればそれを優先）
+        const targetWordCount = request.targetWordCount;
+        const lengthGuide = targetWordCount
+            ? `合計 ${targetWordCount}文字（厳守）`
+            : {
+                short: '約1,000〜2,000字（見出し: 3-5個）',
+                medium: '約2,000〜4,000字（見出し: 5-7個）',
+                long: '約4,000〜6,000字（見出し: 7-10個）'
+            }[targetLength];
 
         // トーンの説明
         const toneDescription = {
@@ -79,8 +92,8 @@ export class OutlineGenerationService {
 以下の情報を基に、SEO最適化された記事のアウトライン（見出し構成）を作成してください。
 
 ## キーワード情報
-メインキーワード: ${keywords[0]}
-関連キーワード: ${keywords.slice(1).join(', ')}
+メインキーワード: ${mainKeyword}
+関連キーワード: ${relatedKeywordsStr}
 
 ${keywordPreferences ? `
 ## ユーザーによるキーワード指定 (重要)
@@ -103,7 +116,18 @@ ${Object.entries(keywordPreferences).filter(([_, pref]) => pref === 'ng').map(([
 - よく扱われるトピック: ${trendData.competitorAnalysis.commonTopics.join(', ')}
 
 ## 記事要件
-- 目標文字数: ${lengthGuide[targetLength]}
+- 目標文字数: ${lengthGuide}
+${targetWordCount ? (targetWordCount <= 1500 ? `
+**【重要：構成の厳格な指定】**
+文字数が少ないため、記事の品質を保つために以下のシンプルな構成を **厳守** してください：
+1. **リード文**: 1つ (約200文字)
+2. **見出し (H2)**: **ちょうど2つ** (3つ以上は禁止)
+3. **合計セクション数**: 3つ (リード + H2×2)
+
+これ以上の見出しを作ると1つあたりの内容が薄くなるため、見出しは「2つ」だけ作成し、残りの文字数を配分してください。
+` : `
+**【重要】合計文字数を${targetWordCount}文字に厳密に収めてください。各見出しの推定文字数の合計が${targetWordCount}文字になるように配分してください。**
+`) : ''}
 - トーン: ${toneDescription[tone]}
 ${focusTopics ? `- 重点トピック: ${focusTopics.join(', ')}` : ''}
 ${request.selectedTitle ? `
@@ -347,6 +371,15 @@ ${request.customInstructions}
             return this.createFallbackOutline(request);
         }
 
+        // targetWordCountが指定されている場合、各セクションの文字数を再計算
+        if (request.targetWordCount && sections.length > 0) {
+            const perSectionTarget = Math.floor(request.targetWordCount / sections.length);
+            sections.forEach(section => {
+                section.estimatedWordCount = perSectionTarget;
+            });
+            console.log(`📊 文字数を再配分: 合計${request.targetWordCount}文字 ÷ ${sections.length}セクション = 各${perSectionTarget}文字`);
+        }
+
         return sections;
     }
 
@@ -354,8 +387,8 @@ ${request.customInstructions}
      * パースに失敗した場合のフォールバック
      */
     private createFallbackOutline(request: OutlineGenerationRequest): OutlineSection[] {
-        const { keywords, targetLength } = request;
-        const keyword = keywords[0];
+        const { keywords, targetLength, selectedTitle } = request;
+        const mainKeyword = keywords.length > 0 ? keywords[0] : (selectedTitle || '記事');
 
         const sections: OutlineSection[] = [
             {
@@ -370,7 +403,7 @@ ${request.customInstructions}
             },
             {
                 id: uuidv4(),
-                title: `${keyword}とは`,
+                title: `${mainKeyword}とは`,
                 level: 2,
                 description: '基本的な定義と概要',
                 estimatedWordCount: 400,
@@ -379,7 +412,7 @@ ${request.customInstructions}
             },
             {
                 id: uuidv4(),
-                title: `${keyword}の特徴`,
+                title: `${mainKeyword}の特徴`,
                 level: 2,
                 description: '主な特徴やメリット',
                 estimatedWordCount: 500,
@@ -388,7 +421,7 @@ ${request.customInstructions}
             },
             {
                 id: uuidv4(),
-                title: `${keyword}の活用方法`,
+                title: `${mainKeyword}の活用方法`,
                 level: 2,
                 description: '実践的な使い方',
                 estimatedWordCount: 600,
@@ -413,9 +446,15 @@ ${request.customInstructions}
      * タイトルを生成（AIの出力から抽出 or フォールバック）
      */
     private generateTitle(request: OutlineGenerationRequest): string {
-        const { keywords } = request;
+        const { keywords, selectedTitle } = request;
+
+        if (selectedTitle) {
+            return selectedTitle;
+        }
+
+        const mainKeyword = keywords.length > 0 ? keywords[0] : '記事';
         // 簡易的なタイトル生成（後でAIの出力から抽出可能）
-        return `${keywords[0]}完全ガイド：最新情報と実践的な活用法`;
+        return `${mainKeyword}完全ガイド：最新情報と実践的な活用法`;
     }
 
     /**

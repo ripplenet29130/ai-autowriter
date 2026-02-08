@@ -1,3 +1,5 @@
+import { FactCheckResult } from './factCheck';
+
 export interface Article {
   id: string;
   title: string;
@@ -24,6 +26,7 @@ export interface Article {
   readingTime?: number;
   wordCount?: number;
   trendData?: TrendAnalysisResult;
+  factCheckResults?: FactCheckResult[];
 }
 
 export interface WordPressConfig {
@@ -107,6 +110,14 @@ export interface KeywordSet {
   updated_at?: string | Date;
 }
 
+export interface TitleSet {
+  id: string;
+  name: string;
+  titles: string[];
+  created_at?: string | Date;
+  updated_at?: string | Date;
+}
+
 export interface ScheduleSettings {
   frequency: 'daily' | 'weekly' | 'biweekly' | 'monthly';
   time: string;
@@ -132,9 +143,17 @@ export interface ScheduleSetting {
   start_date?: string;
   end_date?: string;
   chatwork_room_id?: string;
+  chatwork_message_template?: string;
+  target_word_count?: number;
+  writing_tone?: string;
   created_at?: string;
   updated_at?: string;
   prompt_set_id?: string; // DB column name
+  keyword_set_id?: string;
+  title_set_id?: string;
+  generation_mode?: 'keyword' | 'title' | 'both';
+  enable_fact_check?: boolean; // ファクトチェック有効化
+  fact_check_note?: string; // [[]]で囲むチェック優先箇所
 }
 
 export interface TitleSuggestion {
@@ -299,6 +318,7 @@ export interface OutlineGenerationRequest {
   keywordPreferences?: Record<string, KeywordPreference>;
   selectedTitle?: string; // ここに追加
   customInstructions?: string;
+  targetWordCount?: number; // 目標文字数（数値）
 }
 
 /**

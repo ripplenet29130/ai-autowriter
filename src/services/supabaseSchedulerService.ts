@@ -327,7 +327,7 @@ class SupabaseSchedulerService {
     return data || [];
   }
 
-  async triggerScheduler(forceExecute = true): Promise<any> {
+  async triggerScheduler(forceExecute = true, scheduleId?: string): Promise<any> {
     if (!supabase) {
       throw new Error('Supabase is not initialized');
     }
@@ -335,21 +335,32 @@ class SupabaseSchedulerService {
     const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
     const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-    const response = await fetch(`${supabaseUrl}/functions/v1/scheduler-executor`, {
+    if (!supabaseUrl || !supabaseKey) {
+      throw new Error('Supabase URL or Key is not configured');
+    }
+
+    const functionUrl = `${supabaseUrl}/functions/v1/scheduler-executor`;
+    console.log('Triggering scheduler:', { forceExecute, scheduleId, functionUrl });
+
+    const response = await fetch(functionUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${supabaseKey}`,
+        'apikey': supabaseKey,
       },
-      body: JSON.stringify({ forceExecute }),
+      body: JSON.stringify({ forceExecute, scheduleId }),
     });
 
     if (!response.ok) {
       const errorText = await response.text();
-      throw new Error(`Scheduler execution failed: ${errorText}`);
+      console.error('Scheduler execution failed:', response.status, errorText);
+      throw new Error(`Scheduler execution failed: ${response.status} - ${errorText}`);
     }
 
-    return await response.json();
+    const data = await response.json();
+    console.log('Scheduler execution result:', data);
+    return data;
   }
 }
 

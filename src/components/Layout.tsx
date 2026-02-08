@@ -8,7 +8,8 @@ import {
   Globe,
   Zap,
   Settings,
-  Tag
+  Tag,
+  Heading
 } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
 
@@ -35,12 +36,6 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
       description: '生成済み記事の管理'
     },
     {
-      id: 'trends',
-      label: 'トレンド分析',
-      icon: TrendingUp,
-      description: 'キーワードトレンド分析'
-    },
-    {
       id: 'scheduler',
       label: 'スケジューラー',
       icon: Calendar,
@@ -51,6 +46,12 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
       label: 'キーワード設定',
       icon: Tag,
       description: 'プリセットキーワード管理'
+    },
+    {
+      id: 'titles',
+      label: 'タイトルリスト設定',
+      icon: Heading,
+      description: 'プリセットタイトル管理'
     },
     {
       id: 'wordpress',
@@ -77,7 +78,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
       {/* Sidebar Navigation */}
       <div className="w-64 bg-white shadow-lg border-r border-gray-200">
         <div className="p-6 border-b border-gray-200">
-          <h1 className="text-xl font-bold text-gray-900">AI Auto Writer</h1>
+          <h1 className="text-xl font-bold text-gray-900">AI Auto Writer Ver.2.0</h1>
           <p className="text-sm text-gray-600 mt-1">自動記事生成・投稿ツール</p>
         </div>
 

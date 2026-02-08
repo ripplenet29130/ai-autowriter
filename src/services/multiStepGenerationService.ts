@@ -73,6 +73,7 @@ export class MultiStepGenerationService {
             selectedTitle?: string;
             keywordPreferences?: Record<string, import('../types').KeywordPreference>;
             customInstructions?: string;
+            targetWordCount?: number; // 追加
         }
     ): Promise<ArticleOutline> {
         try {
@@ -86,7 +87,8 @@ export class MultiStepGenerationService {
                 focusTopics: options?.focusTopics,
                 selectedTitle: options?.selectedTitle, // これを追加
                 keywordPreferences: options?.keywordPreferences,
-                customInstructions: options?.customInstructions
+                customInstructions: options?.customInstructions,
+                targetWordCount: options?.targetWordCount // 追加
             };
 
             const outline = await outlineGenerationService.generateOutline(request);

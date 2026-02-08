@@ -15,13 +15,17 @@ import {
     X,
     Globe,
     Send,
-    RefreshCw
+    RefreshCw,
+    ShieldCheck
 } from 'lucide-react';
 import { ArticleOutline, Article } from '../../types';
 import { ArticleEditor } from '../AIGenerator/ArticleEditor';
 import { useWordPressPublish } from '../../hooks/useWordPressPublish';
 import { useWordPressConfig } from '../../hooks/useWordPressConfig';
 import toast from 'react-hot-toast';
+import { FactCheckResult } from '../../types/factCheck';
+import { factCheckService } from '../../services/factCheckService';
+import { FactCheckResultsDisplay } from '../FactCheckResultsDisplay';
 
 interface ContentGenerationStepProps {
     outline: ArticleOutline | undefined;
@@ -51,12 +55,50 @@ export const ContentGenerationStep: React.FC<ContentGenerationStepProps> = ({
     const { configs } = useWordPressConfig();
     const activeConfigs = configs.filter(c => c.isActive);
 
+    // ファクトチェック用のstate
+    const [factCheckResults, setFactCheckResults] = useState<FactCheckResult[]>([]);
+    const [isFactChecking, setIsFactChecking] = useState(false);
+
     // 初期値として最初のアクティブな設定を選択
     React.useEffect(() => {
         if (activeConfigs.length > 0 && !selectedConfigId) {
             setSelectedConfigId(activeConfigs[0].id);
         }
     }, [activeConfigs, selectedConfigId]);
+
+    const handleFactCheck = async () => {
+        if (!article) return;
+
+        setIsFactChecking(true);
+        setFactCheckResults([]);
+
+        try {
+            const items = factCheckService.extractFacts(article.content);
+            if (items.length === 0) {
+                toast('検証する事実情報が見つかりませんでした', { icon: 'ℹ️' });
+                setIsFactChecking(false);
+                return;
+            }
+
+            const keyword = article.keywords && article.keywords.length > 0
+                ? article.keywords[0]
+                : article.title;
+
+            const results = await factCheckService.verifyFacts(items, keyword);
+            setFactCheckResults(results);
+
+            if (results.length > 0) {
+                toast.success(`ファクトチェック完了: ${results.length}件を検証しました`);
+            } else {
+                toast.error('ファクトチェックに失敗したか、検証可能な項目がありませんでした');
+            }
+        } catch (error) {
+            console.error('Fact check error:', error);
+            toast.error('ファクトチェック中にエラーが発生しました');
+        } finally {
+            setIsFactChecking(false);
+        }
+    };
 
     // 生成完了のプレミアムな成功画面
     if (article) {
@@ -97,7 +139,10 @@ export const ContentGenerationStep: React.FC<ContentGenerationStepProps> = ({
 
                         <div className="flex flex-col gap-4 justify-center items-center">
                             <button
-                                onClick={() => setShowPreview(true)}
+                                onClick={() => {
+                                    setShowPreview(true);
+                                    setFactCheckResults([]);
+                                }}
                                 className="bg-white border-2 border-gray-100 hover:border-gray-900 px-10 py-4 rounded-full font-bold flex items-center justify-center space-x-2 transition-all hover:scale-105 active:scale-95 w-full max-w-lg mx-auto"
                             >
                                 <ExternalLink className="w-5 h-5" />
@@ -245,16 +290,34 @@ export const ContentGenerationStep: React.FC<ContentGenerationStepProps> = ({
                                         <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">Draft Review</p>
                                     </div>
                                 </div>
-                                <button
-                                    onClick={() => setShowPreview(false)}
-                                    className="p-3 hover:bg-gray-100 rounded-2xl transition-all"
-                                >
-                                    <X className="w-6 h-6 text-gray-400" />
-                                </button>
+                                <div className="flex items-center gap-2">
+                                    <button
+                                        onClick={handleFactCheck}
+                                        disabled={isFactChecking}
+                                        className={`p-3 rounded-2xl transition-all ${isFactChecking
+                                            ? 'text-gray-400 bg-gray-100 cursor-not-allowed'
+                                            : 'text-gray-500 hover:text-green-600 hover:bg-green-50'
+                                            }`}
+                                        title="ファクトチェックを実行"
+                                    >
+                                        <ShieldCheck className={`w-6 h-6 ${isFactChecking ? 'animate-pulse' : ''}`} />
+                                    </button>
+                                    <button
+                                        onClick={() => setShowPreview(false)}
+                                        className="p-3 hover:bg-gray-100 rounded-2xl transition-all"
+                                    >
+                                        <X className="w-6 h-6 text-gray-400" />
+                                    </button>
+                                </div>
                             </div>
 
                             {/* モーダルコンテンツ */}
                             <div className="flex-1 overflow-y-auto p-8 custom-scrollbar">
+                                {factCheckResults.length > 0 && (
+                                    <div className="mb-6">
+                                        <FactCheckResultsDisplay results={factCheckResults} />
+                                    </div>
+                                )}
                                 <ArticleEditor
                                     article={article}
                                     onUpdate={(updates) => {
