@@ -463,17 +463,17 @@ export const ArticlesList: React.FC = () => {
                         <button
                           onClick={handleFactCheck}
                           disabled={isFactChecking}
-                          className={`p-2 rounded-lg transition-colors ${isFactChecking
-                            ? 'text-gray-400 bg-gray-100 cursor-not-allowed'
-                            : 'text-gray-500 hover:text-green-600 hover:bg-green-50'
+                          className={`p-2.5 rounded-lg transition-all border ${isFactChecking
+                            ? 'bg-gray-50 border-gray-200 text-gray-400 cursor-not-allowed'
+                            : 'bg-white border-green-200 text-green-600 hover:bg-green-50 hover:border-green-300 hover:shadow-sm'
                             }`}
-                          title="ファクトチェックを実行"
+                          title={isFactChecking ? '確認中...' : 'ファクトチェックを実行'}
                         >
                           <ShieldCheck className={`w-5 h-5 ${isFactChecking ? 'animate-pulse' : ''}`} />
                         </button>
                         <button
                           onClick={handleStartEdit}
-                          className="p-2 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                          className="p-2.5 bg-white border border-blue-200 text-blue-600 hover:bg-blue-50 hover:border-blue-300 rounded-lg hover:shadow-sm transition-all"
                           title="編集"
                         >
                           <Edit className="w-5 h-5" />

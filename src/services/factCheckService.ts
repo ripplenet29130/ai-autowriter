@@ -51,7 +51,38 @@ export const factCheckService = {
             });
         }
 
-        return items.sort((a, b) => a.priority === 'high' ? -1 : 1);
+        // 固有名詞らしきもの（簡易抽出）
+        // 1. 「」や『』で囲まれたテキスト（作品名、書名など）
+        const quoteRegex = /[「『](.+?)[」』]/g;
+        while ((match = quoteRegex.exec(content)) !== null) {
+            // 短すぎず長すぎないもの（2文字以上20文字以下）
+            if (match[1].length >= 2 && match[1].length <= 20) {
+                const start = Math.max(0, match.index - 30);
+                const end = Math.min(content.length, match.index + match[0].length + 30);
+                items.push({
+                    claim: match[1],
+                    context: content.substring(start, end),
+                    priority: 'normal'
+                });
+            }
+        }
+
+        // 2. カタカナ語（3文字以上）
+        const katakanaRegex = /[ァ-ンー]{3,}/g;
+        while ((match = katakanaRegex.exec(content)) !== null) {
+            const start = Math.max(0, match.index - 30);
+            const end = Math.min(content.length, match.index + match[0].length + 30);
+            items.push({
+                claim: match[0],
+                context: content.substring(start, end),
+                priority: 'normal'
+            });
+        }
+
+        // 重複除去
+        const uniqueItems = Array.from(new Map(items.map(item => [item.claim, item])).values());
+
+        return uniqueItems.sort((a, b) => a.priority === 'high' ? -1 : 1);
     },
 
     /**

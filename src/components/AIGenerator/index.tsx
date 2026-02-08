@@ -10,7 +10,7 @@ import { PublishControl } from './PublishControl';
 import { MultiStepGenerator } from '../MultiStepGenerator';
 import { FactCheckResultsDisplay } from '../FactCheckResultsDisplay';
 import { factCheckService } from '../../services/factCheckService';
-import { FactCheckResult } from '../../types';
+import type { FactCheckResult } from '../../types';
 import toast from 'react-hot-toast';
 
 /**
@@ -124,15 +124,12 @@ export const AIGenerator: React.FC = () => {
         }
     };
 
-    const [isFactChecking, setIsFactChecking] = useState(false);
-
     const handleManualFactCheck = async () => {
         if (!generatedArticle) return;
 
         setIsFactChecking(true);
         try {
             const { factCheckService } = await import('../../services/factCheckService');
-            // Use current content from generatedArticle
             const facts = factCheckService.extractFacts(generatedArticle.content, factCheckNote);
 
             if (facts.length === 0) {
@@ -142,14 +139,8 @@ export const AIGenerator: React.FC = () => {
             }
 
             toast.loading('ファクトチェックを実行中...', { duration: 2000 });
-            // Use primary keyword or first keyword
             const keyword = generatedArticle.keywords?.[0] || '';
             const results = await factCheckService.verifyFacts(facts, keyword, factCheckModel);
-
-            // Update article with results
-            // Note: We don't remove markers here as they might be part of the content if user didn't use auto-check
-            // But if we want to support markers in content, we should check content too.
-            // The current service extracts from content AND userMarkedText.
 
             const updatedArticle = {
                 ...generatedArticle,
@@ -186,7 +177,6 @@ export const AIGenerator: React.FC = () => {
         try {
             toast.loading('記事を再生成中...', { duration: 3000 });
 
-            // 調整指示のマッピング
             const adjustmentMap = {
                 'none': '',
                 'detailed': 'より詳しく、具体例や詳細な説明を追加してください。',
@@ -195,7 +185,6 @@ export const AIGenerator: React.FC = () => {
                 'simple': 'より分かりやすく、初心者向けに平易な表現で書き直してください。'
             };
 
-            // カスタムプロンプトの構築
             let customInstructions = `以下の記事を基に、${options.targetWordCount}文字程度で再生成してください。\n\n`;
 
             if (options.adjustmentType !== 'none') {
@@ -208,7 +197,6 @@ export const AIGenerator: React.FC = () => {
 
             customInstructions += `\n【元の記事】\nタイトル: ${generatedArticle.title}\n\n${generatedArticle.content}`;
 
-            // 記事を再生成
             const regenerated = await generateArticle({
                 keywords: generatedArticle.keywords || [],
                 tone: generatedArticle.tone,
@@ -229,7 +217,6 @@ export const AIGenerator: React.FC = () => {
         setShowMultiStep(false);
     };
 
-    // 対話モード表示中
     if (showMultiStep) {
         return (
             <MultiStepGenerator

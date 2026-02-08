@@ -59,21 +59,26 @@ export const ArticleEditor: React.FC<ArticleEditorProps> = ({
                         <button
                             onClick={onFactCheck}
                             disabled={isFactChecking}
-                            className="flex items-center space-x-2 px-4 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 transition-colors disabled:opacity-50"
-                            title="Perplexityで事実確認を行う"
+                            className={`p-2.5 rounded-lg transition-all border ${isFactChecking
+                                ? 'bg-gray-50 border-gray-200 text-gray-400 cursor-not-allowed'
+                                : 'bg-white border-teal-200 text-teal-600 hover:bg-teal-50 hover:border-teal-300 hover:shadow-sm active:scale-95'
+                                }`}
+                            title={isFactChecking ? '確認中...' : 'ファクトチェックを実行'}
                         >
-                            <ShieldCheck className={`w-4 h-4 ${isFactChecking ? 'animate-pulse' : ''}`} />
-                            <span>{isFactChecking ? '確認中...' : 'ファクトチェック'}</span>
+                            <ShieldCheck className={`w-5 h-5 ${isFactChecking ? 'animate-pulse' : ''}`} />
                         </button>
                     )}
                     {onRegenerate && (
                         <button
                             onClick={() => setShowRegenerateModal(true)}
                             disabled={isRegenerating}
-                            className="flex items-center space-x-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50"
+                            className={`p-2.5 rounded-lg transition-all border ${isRegenerating
+                                ? 'bg-gray-50 border-gray-200 text-gray-400 cursor-not-allowed'
+                                : 'bg-white border-purple-200 text-purple-600 hover:bg-purple-50 hover:border-purple-300 hover:shadow-sm active:scale-95'
+                                }`}
+                            title={isRegenerating ? '再生成中...' : '記事を再生成'}
                         >
-                            <RefreshCw className={`w-4 h-4 ${isRegenerating ? 'animate-spin' : ''}`} />
-                            <span>{isRegenerating ? '再生成中...' : '記事を再生成'}</span>
+                            <RefreshCw className={`w-5 h-5 ${isRegenerating ? 'animate-spin' : ''}`} />
                         </button>
                     )}
                 </div>

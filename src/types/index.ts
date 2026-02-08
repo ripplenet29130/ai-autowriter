@@ -1,4 +1,5 @@
 import { FactCheckResult } from './factCheck';
+export type { FactCheckResult };
 
 export interface Article {
   id: string;

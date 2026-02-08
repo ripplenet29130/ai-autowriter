@@ -163,11 +163,28 @@ JSON形式の配列（文字列の配列）で出力してください。
       // 文字数チェック（要約は無効化）
       const targetWordCount = prompt.targetWordCount || this.getTargetWordCount(prompt.length);
       const actualWordCount = this.countWords(content);
+      const minAllowed = Math.floor(targetWordCount * 0.9);
+      const maxAllowed = Math.ceil(targetWordCount * 1.1);
 
       console.log('📊 文字数チェック:', {
         target: targetWordCount,
         actual: actualWordCount
       });
+
+      if (actualWordCount < minAllowed) {
+        console.log('➕ 文字数不足のため追記補完を実行します...', {
+          actual: actualWordCount,
+          minAllowed
+        });
+
+        content = await this.extendToMinimumLength(content, prompt, minAllowed, maxAllowed);
+
+        const supplementedCount = this.countWords(content);
+        console.log('✅ 追記補完完了:', {
+          before: actualWordCount,
+          after: supplementedCount
+        });
+      }
 
       // 要約処理は無効化（AIに正確な文字数で生成させる）
       // if (actualWordCount > maxAllowed) {
@@ -293,6 +310,84 @@ ${originalContent}
     }
 
     return result.trim();
+  }
+
+  // === 不足文字数の追記補完 ===
+  private async extendToMinimumLength(
+    originalContent: string,
+    prompt: GenerationPrompt,
+    minAllowed: number,
+    maxAllowed: number
+  ): Promise<string> {
+    try {
+      let merged = originalContent.trim();
+      let currentCount = this.countWords(merged);
+
+      if (currentCount >= minAllowed) return merged;
+
+      const remaining = minAllowed - currentCount;
+      const isSection = prompt.generationType === 'section';
+      const supplementPrompt = `
+以下の既存本文はそのまま維持し、末尾に自然につながる追記だけを作成してください。
+
+【現在の文字数】
+${currentCount}文字
+
+【必須要件】
+1. 追記後の合計を最低${minAllowed}文字以上にする
+2. 追記後の合計は${maxAllowed}文字を超えない
+3. 既存本文は書き換えない
+4. 出力は「追記本文のみ」（タイトル、注釈、説明文は禁止）
+5. 文末は必ず句点（。）で完結させる
+${isSection ? '6. 見出し（#, ##, ###）は一切出力しない' : '6. 既存のMarkdown構成に自然になじむ内容にする'}
+${prompt.keywords?.length ? `7. 次のキーワードを不自然にならない範囲で含める: ${prompt.keywords.join('、')}` : ''}
+
+【不足の目安】
+あと約${remaining}文字（不足分を埋める量を目安）
+
+【記事タイトル】
+${prompt.articleTitle || prompt.selectedTitle || prompt.topic || ''}
+
+【今回のセクション】
+${prompt.sectionTitle || prompt.topic || ''}
+
+【既存本文】
+${merged}
+`;
+
+      let addition = '';
+      switch (this.config?.provider) {
+        case 'openai':
+          addition = await this.callRawOpenAI(supplementPrompt);
+          break;
+        case 'gemini':
+          addition = await this.callRawGemini(supplementPrompt);
+          break;
+        case 'claude':
+          addition = await this.callRawClaude(supplementPrompt);
+          break;
+        default:
+          return merged;
+      }
+
+      const cleanAddition = addition
+        .replace(/```[\s\S]*?```/g, '')
+        .replace(/^#+\s+/gm, '')
+        .trim();
+
+      if (!cleanAddition) return merged;
+
+      merged = `${merged}\n\n${cleanAddition}`.trim();
+
+      if (this.countWords(merged) > maxAllowed) {
+        return this.truncateByParagraph(merged, maxAllowed);
+      }
+
+      return merged;
+    } catch (error) {
+      console.error('追記補完エラー:', error);
+      return originalContent;
+    }
   }
 
   // === Proxy呼び出しヘルパー ===
