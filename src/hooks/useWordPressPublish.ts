@@ -9,6 +9,55 @@ import { handleError } from '../utils/errorHandler';
 const publishLogger = logger.createLogger('WordPressPublish');
 
 /**
+ * 記事内のBase64画像をWordPressにアップロードしてURLに置換
+ */
+async function processImagesBeforePublish(
+    article: Article,
+    wpService: WordPressService
+): Promise<Article> {
+    const base64ImageRegex = /!\[([^\]]*)\]\(data:image\/([^;]+);base64,([^)]+)\)/g;
+    let processedContent = article.content;
+    let match;
+    let imageIndex = 1;
+
+    const matches = [...article.content.matchAll(base64ImageRegex)];
+
+    for (const match of matches) {
+        const [fullMatch, altText, imageType, base64Data] = match;
+        const filename = `ai-generated-image-${Date.now()}-${imageIndex}.${imageType}`;
+
+        try {
+            // WordPressにアップロード
+            const uploadResult = await wpService.uploadImageToWordPress(
+                base64Data,
+                `image/${imageType}`,
+                filename
+            );
+
+            if (uploadResult.success && uploadResult.url) {
+                // Base64 URLをWordPress URLに置換
+                processedContent = processedContent.replace(
+                    fullMatch,
+                    `![${altText}](${uploadResult.url})`
+                );
+                console.log(`画像をアップロードして置換しました: ${filename} -> ${uploadResult.url}`);
+            } else {
+                console.warn(`画像アップロードに失敗しました: ${filename}`, uploadResult.error);
+            }
+        } catch (error) {
+            console.error(`画像処理エラー: ${filename}`, error);
+        }
+
+        imageIndex++;
+    }
+
+    return {
+        ...article,
+        content: processedContent
+    };
+}
+
+/**
  * WordPress投稿のカスタムフック
  */
 export function useWordPressPublish() {
@@ -40,7 +89,11 @@ export function useWordPressPublish() {
             toast.loading('WordPressに投稿中...', { duration: 3000 });
 
             const service = new WordPressService(config);
-            const result = await service.publishArticle(article, status, publishDate);
+
+            // 記事内のBase64画像をWordPressにアップロードしてURLに置換
+            const processedArticle = await processImagesBeforePublish(article, service);
+
+            const result = await service.publishArticle(processedArticle, status, publishDate);
 
             if (result.success && result.wordPressId) {
                 // 記事情報を更新

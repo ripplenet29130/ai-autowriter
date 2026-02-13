@@ -220,6 +220,27 @@ class ScheduleService {
     }
 
     /**
+     * 特定のスケジュールで使用済みのタイトルを取得
+     */
+    async getUsedTitles(scheduleId: string): Promise<string[]> {
+        if (!supabase) {
+            throw new Error('Supabase is not initialized');
+        }
+
+        const { data, error } = await supabase
+            .from('execution_history')
+            .select('article_title')
+            .eq('schedule_id', scheduleId);
+
+        if (error) {
+            console.error('Error fetching used titles:', error);
+            return [];
+        }
+
+        return data.map(item => item.article_title);
+    }
+
+    /**
      * 特定のスケジュールの最終実行日時を取得
      */
     async getLastExecution(scheduleId: string): Promise<string | null> {

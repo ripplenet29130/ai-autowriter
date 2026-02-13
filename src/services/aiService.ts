@@ -1,5 +1,6 @@
 import { AIConfig, GenerationPrompt } from "../types";
 import { supabase } from "./supabaseClient";
+import { imageGenerationService } from "./imageGenerationService";
 
 /**
  * AI関連サービス
@@ -38,7 +39,7 @@ export class AIService {
         id: data.id,
         provider: data.provider,
         apiKey: data.api_key,
-        model: data.model,
+        model: this.validateModelName(data.provider, data.model),
         temperature: data.temperature ?? 0.7,
         maxTokens: data.max_tokens ?? 16384,
         imageGenerationEnabled: data.image_enabled ?? false,
@@ -50,6 +51,21 @@ export class AIService {
       console.error("AI設定ロード時エラー:", err);
       throw err;
     }
+  }
+
+  // モデル名のバリデーション（旧モデル名のフォールバック）
+  private validateModelName(provider: string, model: string): string {
+    if (provider !== 'gemini') return model;
+
+    // 無効なGeminiモデル名を検知して置換
+    // gemini-1.5系などは非推奨（2.0以上を推奨）
+    const invalidModels = ['gemini-1.0-pro', 'gemini-1.5-pro-latest'];
+    if (invalidModels.includes(model)) {
+      console.warn(`⚠️ 非推奨のモデル名(${model})を検知しました。gemini-2.0-flashにフォールバックします。`);
+      return 'gemini-2.0-flash';
+    }
+
+    return model;
   }
 
   // 設定を取得するためのゲッター
@@ -204,6 +220,35 @@ JSON形式の配列（文字列の配列）で出力してください。
       const seoScore = this.calculateSEOScore(title, content, keywords);
       const readingTime = this.calculateReadingTime(content);
 
+      // 画像生成が有効な場合、記事に画像を挿入
+      // プロンプトで指定された枚数を優先、なければ設定値を使用
+      const imageCount = prompt.imagesPerArticle !== undefined
+        ? prompt.imagesPerArticle
+        : (this.config.imagesPerArticle || 0);
+
+      if (this.config.imageGenerationEnabled &&
+        this.config.imageProvider === 'nanobanana' &&
+        imageCount > 0) {
+        console.log('🖼️ 画像生成を開始します...', {
+          count: imageCount,
+          provider: this.config.imageProvider
+        });
+
+        try {
+          content = await this.insertGeneratedImages(
+            content,
+            title,
+            keywords,
+            imageCount
+          );
+          console.log('✅ 画像生成・挿入完了');
+        } catch (error: any) {
+          console.error('⚠️ 画像生成エラー:', error);
+          // エラー内容を記事の末尾に追記（デバッグ用）
+          content += `\n\n> [!WARNING]\n> **画像生成エラーが発生しました**\n> ${error.message || '不明なエラー'}\n> 設定やAPIキーを確認してください。`;
+        }
+      }
+
       return { title, content, excerpt, keywords, seoScore, readingTime };
     } catch (error) {
       console.error("記事生成エラー:", error);
@@ -327,6 +372,8 @@ ${originalContent}
 
       const remaining = minAllowed - currentCount;
       const isSection = prompt.generationType === 'section';
+      const summarySplit = !isSection ? this.splitFinalSummarySection(merged) : null;
+      const baseContent = summarySplit?.hasSummary ? summarySplit.body : merged;
       const supplementPrompt = `
 以下の既存本文はそのまま維持し、末尾に自然につながる追記だけを作成してください。
 
@@ -339,8 +386,12 @@ ${currentCount}文字
 3. 既存本文は書き換えない
 4. 出力は「追記本文のみ」（タイトル、注釈、説明文は禁止）
 5. 文末は必ず句点（。）で完結させる
-${isSection ? '6. 見出し（#, ##, ###）は一切出力しない' : '6. 既存のMarkdown構成に自然になじむ内容にする'}
-${prompt.keywords?.length ? `7. 次のキーワードを不自然にならない範囲で含める: ${prompt.keywords.join('、')}` : ''}
+6. 「まとめ」「結論」「おわりに」「最後に」「総括」など締めくくりの見出し・文言は絶対に書かない
+7. 要約調・結論調の締め文（例: 「以上のように」「〜といえるでしょう」）で終えない
+${isSection ? '8. 見出し（#, ##, ###）は一切出力しない' : '8. 既存のMarkdown構成に自然になじむ内容にする'}
+${summarySplit?.hasSummary ? '9. この追記は、既存記事にある最後の「まとめ」見出しより前に入る本文として作成する' : ''}
+${prompt.keywords?.length ? `10. 次のキーワードを不自然にならない範囲で含める: ${prompt.keywords.join('、')}` : ''}
+${!isSection ? '11. 追記は既存記事と同じくMarkdown見出しタグを使う（大項目は`##`、必要なら小項目は`###`）' : ''}
 
 【不足の目安】
 あと約${remaining}文字（不足分を埋める量を目安）
@@ -352,7 +403,7 @@ ${prompt.articleTitle || prompt.selectedTitle || prompt.topic || ''}
 ${prompt.sectionTitle || prompt.topic || ''}
 
 【既存本文】
-${merged}
+${baseContent}
 `;
 
       let addition = '';
@@ -370,14 +421,16 @@ ${merged}
           return merged;
       }
 
-      const cleanAddition = addition
-        .replace(/```[\s\S]*?```/g, '')
-        .replace(/^#+\s+/gm, '')
-        .trim();
+      const cleanAddition = this.normalizeSupplementRawText(addition, isSection);
 
-      if (!cleanAddition) return merged;
+      const sanitizedAddition = this.sanitizeSupplementText(cleanAddition);
+      if (!sanitizedAddition) return merged;
 
-      merged = `${merged}\n\n${cleanAddition}`.trim();
+      if (summarySplit?.hasSummary) {
+        merged = `${summarySplit.body}\n\n${sanitizedAddition}\n\n${summarySplit.summary}`.trim();
+      } else {
+        merged = `${merged}\n\n${sanitizedAddition}`.trim();
+      }
 
       if (this.countWords(merged) > maxAllowed) {
         return this.truncateByParagraph(merged, maxAllowed);
@@ -388,6 +441,148 @@ ${merged}
       console.error('追記補完エラー:', error);
       return originalContent;
     }
+  }
+
+  // === 記事末尾の「まとめ」セクションを分離 ===
+  private splitFinalSummarySection(content: string): { hasSummary: boolean; body: string; summary: string } {
+    const headingRegex = /^##+\s*(まとめ|結論|おわりに|最後に|総括)[^\n]*$/gim;
+    let lastMatch: RegExpExecArray | null = null;
+    let match: RegExpExecArray | null;
+
+    while ((match = headingRegex.exec(content)) !== null) {
+      lastMatch = match;
+    }
+
+    if (!lastMatch) {
+      return { hasSummary: false, body: content.trim(), summary: '' };
+    }
+
+    const splitIndex = lastMatch.index;
+    const body = content.slice(0, splitIndex).trimEnd();
+    const summary = content.slice(splitIndex).trimStart();
+
+    return { hasSummary: true, body, summary };
+  }
+
+  // === 追記文から「まとめ」系の文言を除去 ===
+  private sanitizeSupplementText(addition: string): string {
+    const paragraphs = addition
+      .split(/\n{2,}/)
+      .map(p => p.trim())
+      .filter(Boolean);
+
+    const filtered = paragraphs.filter(p => {
+      const normalized = p.replace(/\s+/g, '');
+      if (/^#{1,6}(まとめ|結論|おわりに|最後に|総括)/i.test(p)) return false;
+      if (/^(まとめ|結論|おわりに|最後に|総括)/.test(normalized)) return false;
+      if (/^(以上のように|以上より|以上から|要するに|まとめると)/.test(normalized)) return false;
+      return true;
+    });
+
+    return filtered.join('\n\n').trim();
+  }
+
+  // === 追記の生テキスト正規化 ===
+  private normalizeSupplementRawText(raw: string, isSection: boolean): string {
+    let cleaned = raw.replace(/```[\s\S]*?```/g, '').trim();
+
+    if (isSection) {
+      cleaned = cleaned.replace(/^#+\s+/gm, '');
+    }
+
+    cleaned = cleaned.replace(/^##+\s*(まとめ|結論|おわりに|最後に|総括)[^\n]*$/gim, '').trim();
+    return cleaned;
+  }
+
+  // === 画像生成・挿入 ===
+  /**
+   * 記事内の見出しに画像を生成して挿入
+   */
+  private async insertGeneratedImages(
+    content: string,
+    title: string,
+    keywords: string[],
+    imageCount: number
+  ): Promise<string> {
+    // 見出し（##）を抽出
+    const headingRegex = /^##\s+(.+)$/gm;
+    const headings: { text: string; index: number }[] = [];
+    let match;
+
+    while ((match = headingRegex.exec(content)) !== null) {
+      headings.push({
+        text: match[1],
+        index: match.index + match[0].length
+      });
+    }
+
+    if (headings.length === 0) {
+      console.log('見出しが見つからないため、画像挿入をスキップします');
+      return content;
+    }
+
+    // 画像を挿入する見出しを選択（均等に分散）
+    const selectedHeadings = this.selectHeadingsForImages(headings, imageCount);
+    console.log(`${selectedHeadings.length}個の見出しに画像を挿入します`);
+
+    // 各見出しに画像を生成・挿入
+    let processedContent = content;
+    let offset = 0;
+
+    for (const heading of selectedHeadings) {
+      try {
+        // 画像生成プロンプトを作成
+        const imagePrompt = imageGenerationService.createImagePrompt(
+          heading.text,
+          keywords
+        );
+
+        console.log(`画像生成中: "${heading.text}"`);
+        const generatedImage = await imageGenerationService.generateImage({
+          prompt: imagePrompt,
+          aspectRatio: '16:9'
+        });
+
+        // Base64画像をMarkdownに挿入
+        const imageMarkdown = `\n\n![${heading.text}](data:${generatedImage.mimeType};base64,${generatedImage.base64Data})\n\n`;
+        const insertPosition = heading.index + offset;
+
+        processedContent =
+          processedContent.slice(0, insertPosition) +
+          imageMarkdown +
+          processedContent.slice(insertPosition);
+
+        offset += imageMarkdown.length;
+        console.log(`✅ 画像挿入完了: "${heading.text}"`);
+      } catch (error) {
+        console.error(`画像生成失敗: "${heading.text}"`, error);
+        // エラーが発生しても次の画像生成を続行
+      }
+    }
+
+    return processedContent;
+  }
+
+  /**
+   * 画像を挿入する見出しを選択（均等に分散）
+   */
+  private selectHeadingsForImages(
+    headings: { text: string; index: number }[],
+    imageCount: number
+  ): { text: string; index: number }[] {
+    if (headings.length <= imageCount) {
+      return headings;
+    }
+
+    const selected: { text: string; index: number }[] = [];
+    const step = Math.floor(headings.length / imageCount);
+
+    for (let i = 0; i < imageCount; i++) {
+      const index = Math.min(i * step, headings.length - 1);
+      selected.push(headings[index]);
+    }
+
+    return selected;
   }
 
   // === Proxy呼び出しヘルパー ===

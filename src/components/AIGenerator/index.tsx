@@ -52,6 +52,9 @@ export const AIGenerator: React.FC = () => {
     // Target Word Count State
     const [targetWordCount, setTargetWordCount] = useState<number>(2000);
 
+    // Images Per Article State
+    const [imagesPerArticle, setImagesPerArticle] = useState<number>(3);
+
     const handleAddKeyword = (keyword: string) => {
         const trimmed = keyword.trim();
         if (trimmed && !keywords.includes(trimmed)) {
@@ -75,7 +78,8 @@ export const AIGenerator: React.FC = () => {
             tone,
             length,
             customInstructions: selectedPromptSet?.customInstructions,
-            targetWordCount
+            targetWordCount,
+            imagesPerArticle
         });
         if (article) {
             addArticle(article);
@@ -534,6 +538,32 @@ export const AIGenerator: React.FC = () => {
                         </p>
                     </div>
 
+                    {/* Images Per Article */}
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                            記事あたりの画像枚数 ({imagesPerArticle}枚)
+                        </label>
+                        <input
+                            type="range"
+                            min="0"
+                            max="10"
+                            step="1"
+                            value={imagesPerArticle}
+                            onChange={(e) => setImagesPerArticle(parseInt(e.target.value))}
+                            disabled={isGenerating}
+                            className="w-full"
+                        />
+                        <div className="flex justify-between text-xs text-gray-500 mt-1">
+                            <span>0 (無効)</span>
+                            <span>5枚</span>
+                            <span>10枚</span>
+                        </div>
+                        {imagesPerArticle > 0 && (
+                            <p className="text-xs text-purple-600 mt-2">
+                                💡 nanobanana使用時: 約{(imagesPerArticle * 5.5).toFixed(1)}円/記事
+                            </p>
+                        )}
+                    </div>
 
 
                     {/* Generate Button */}

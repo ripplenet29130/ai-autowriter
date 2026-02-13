@@ -15,6 +15,7 @@ interface GenerationOptions {
     length?: 'short' | 'medium' | 'long';
     customInstructions?: string;
     targetWordCount?: number;
+    imagesPerArticle?: number;
 }
 
 /**
@@ -43,7 +44,8 @@ export function useArticleGeneration() {
                 includeConclusion: true,
                 includeSources: false,
                 customInstructions: options.customInstructions,
-                targetWordCount: options.targetWordCount
+                targetWordCount: options.targetWordCount,
+                imagesPerArticle: options.imagesPerArticle
             });
 
             if (article) {

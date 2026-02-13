@@ -11,6 +11,7 @@ export interface WordPressConfig {
   applicationPassword: string;
   isActive: boolean;
   defaultCategory?: string;
+  postType?: string;
   scheduleSettings?: ScheduleSettings;
 }
 
@@ -68,6 +69,66 @@ export class WordPressService {
     } catch (error) {
       console.error('WordPress接続テストエラー:', error);
       return false;
+    }
+  }
+
+  /**
+   * Base64画像をWordPress Media Libraryにアップロード
+   */
+  async uploadImageToWordPress(
+    base64Data: string,
+    mimeType: string,
+    filename: string
+  ): Promise<{ success: boolean; mediaId?: number; url?: string; error?: string }> {
+    if (!this.config) {
+      await this.loadActiveConfig();
+    }
+    if (!this.config) {
+      return { success: false, error: 'WordPress設定が見つかりません' };
+    }
+
+    try {
+      // Base64をBlobに変換
+      const byteCharacters = atob(base64Data);
+      const byteNumbers = new Array(byteCharacters.length);
+      for (let i = 0; i < byteCharacters.length; i++) {
+        byteNumbers[i] = byteCharacters.charCodeAt(i);
+      }
+      const byteArray = new Uint8Array(byteNumbers);
+      const blob = new Blob([byteArray], { type: mimeType });
+
+      // FormDataを作成
+      const formData = new FormData();
+      formData.append('file', blob, filename);
+
+      // WordPressにアップロード
+      const response = await axios.post(
+        `${this.config.url}/wp-json/wp/v2/media`,
+        formData,
+        {
+          headers: {
+            ...this.getAuthHeaders(),
+            'Content-Disposition': `attachment; filename="${filename}"`
+          }
+        }
+      );
+
+      if (response.status === 201) {
+        console.log(`画像をWordPressにアップロードしました: ${filename} (ID: ${response.data.id})`);
+        return {
+          success: true,
+          mediaId: response.data.id,
+          url: response.data.source_url
+        };
+      }
+
+      return { success: false, error: 'アップロードに失敗しました' };
+    } catch (error: any) {
+      console.error('WordPress画像アップロードエラー:', error);
+      return {
+        success: false,
+        error: error.response?.data?.message || '画像アップロードでエラーが発生しました'
+      };
     }
   }
 

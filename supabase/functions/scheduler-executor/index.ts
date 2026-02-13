@@ -33,6 +33,9 @@ interface Schedule {
   prompt_set_id?: string;
   target_word_count?: number;
   writing_tone?: string;
+  title_set_id?: string;
+  generation_mode?: 'keyword' | 'title' | 'both';
+  keyword_set_id?: string;
 }
 
 interface AIConfig {
@@ -305,15 +308,65 @@ async function executeSchedule(
   googleApiKey: string | null,
   searchEngineId: string | null
 ) {
-  // 1. 使用していないキーワードを選択
-  const allKeywords = (schedule.keyword || '').split(',').map((k: string) => k.trim()).filter((k: string) => k);
-  const keyword = await selectUnusedKeyword(schedule.id, allKeywords, supabase);
+  // 1. 生成モードに基づいてターゲット（キーワードまたはタイトル）を決定
+  let keyword = '';
+  let fixedTitle: string | null = null;
+  const mode = schedule.generation_mode || 'keyword';
+  console.log(`Generation Mode: ${mode}`);
 
-  if (!keyword) {
-    throw new Error('使用可能なキーワードがありません');
+  if (mode === 'title' && schedule.title_set_id) {
+    // タイトルセットからタイトルを取得
+    const { data: titleSet } = await supabase
+      .from('title_sets')
+      .select('titles')
+      .eq('id', schedule.title_set_id)
+      .maybeSingle();
+
+    if (titleSet && titleSet.titles && titleSet.titles.length > 0) {
+      const selectedTitle = await selectUnusedTitle(schedule.id, titleSet.titles, supabase);
+      if (selectedTitle) {
+        fixedTitle = selectedTitle;
+        keyword = selectedTitle; // タイトルをメインキーワードとして扱う
+        console.log(`🎯 Title selected: ${fixedTitle}`);
+      } else {
+        throw new Error('使用可能なタイトルがありません（全て使用済み）');
+      }
+    } else {
+      throw new Error('有効なタイトルセットが見つかりません');
+    }
+  } else if (mode === 'both') {
+    // 両方使用の場合：今回は簡易的に50%の確率でタイトル、50%でキーワードとする
+    const useTitle = Math.random() < 0.5;
+
+    if (useTitle && schedule.title_set_id) {
+      const { data: titleSet } = await supabase
+        .from('title_sets')
+        .select('titles')
+        .eq('id', schedule.title_set_id)
+        .maybeSingle();
+
+      if (titleSet && titleSet.titles && titleSet.titles.length > 0) {
+        const selectedTitle = await selectUnusedTitle(schedule.id, titleSet.titles, supabase);
+        if (selectedTitle) {
+          fixedTitle = selectedTitle;
+          keyword = selectedTitle;
+          console.log(`🎯 Mode "Both" -> Title selected: ${fixedTitle}`);
+        }
+      }
+    }
   }
 
-  console.log(`🎯 Keyword selected: ${keyword}`);
+  // キーワードモード、またはタイトル選択に失敗/スキップした場合のフォールバック
+  if (!keyword) {
+    const allKeywords = (schedule.keyword || '').split(',').map((k: string) => k.trim()).filter((k: string) => k);
+    const selectedKeyword = await selectUnusedKeyword(schedule.id, allKeywords, supabase);
+
+    if (!selectedKeyword) {
+      throw new Error('使用可能なキーワードがありません');
+    }
+    keyword = selectedKeyword;
+    console.log(`🎯 Keyword selected: ${keyword}`);
+  }
 
   // 1.5 プロンプトセットの取得（あれば）
   let customInstructions = '';
@@ -349,7 +402,7 @@ async function executeSchedule(
   const targetWordCount = schedule.target_word_count || 3000;
   const writingTone = schedule.writing_tone || 'desu_masu';
 
-  const outline = await generateOutline(keyword, aiConfig, targetWordCount, customInstructions, competitorData);
+  const outline = await generateOutline(keyword, aiConfig, targetWordCount, customInstructions, competitorData, fixedTitle);
   console.log(`✅ Outline generated: ${outline.title}`);
 
   // 4. セクションごとに記事を生成
@@ -540,6 +593,30 @@ async function selectUnusedKeyword(
   return availableKeywords[Math.floor(Math.random() * availableKeywords.length)];
 }
 
+// 未使用タイトルを選択
+async function selectUnusedTitle(
+  scheduleId: string,
+  allTitles: string[],
+  supabase: any
+): Promise<string | null> {
+  const { data: history } = await supabase
+    .from('execution_history')
+    .select('article_title')
+    .eq('schedule_id', scheduleId);
+
+  // 完全に一致するタイトルを除外
+  const usedTitles = new Set((history || []).map((h: any) => h.article_title));
+  const availableTitles = allTitles.filter(t => !usedTitles.has(t));
+
+  if (availableTitles.length === 0) {
+    console.log('All titles used, resetting list');
+    if (allTitles.length === 0) return null;
+    return allTitles[Math.floor(Math.random() * allTitles.length)];
+  }
+
+  return availableTitles[Math.floor(Math.random() * availableTitles.length)];
+}
+
 // 文字数カウント（Markdown記号を除外）
 function countWords(content: string): number {
   const cleaned = content
@@ -676,7 +753,7 @@ async function callAI(prompt: string, aiConfig: AIConfig, maxTokens = 2000): Pro
   throw new Error(`Unsupported provider: ${aiConfig.provider}`);
 }
 
-async function generateOutline(keyword: string, aiConfig: AIConfig, targetWordCount: number, customInstructions = '', competitorData: any = null): Promise<ArticleOutline> {
+async function generateOutline(keyword: string, aiConfig: AIConfig, targetWordCount: number, customInstructions = '', competitorData: any = null, fixedTitle: string | null = null): Promise<ArticleOutline> {
   // 競合データから共通トピックを抽出
   let competitorInsights = '';
   if (competitorData && competitorData.articles && competitorData.articles.length > 0) {
@@ -769,6 +846,7 @@ async function generateOutline(keyword: string, aiConfig: AIConfig, targetWordCo
 以下のキーワードを基に、SEO最適化された日本語ブログ記事のアウトライン（見出し構成）を作成してください。
 
 メインキーワード: ${keyword}
+${fixedTitle ? `記事タイトル（必須・変更不可）: ${fixedTitle}` : ''}
 記事全体の目標文字数: ${targetWordCount}文字
 ${competitorInsights}
 ${customInstructions ? `## カスタム指示\n${customInstructions}\n` : ''}
@@ -794,16 +872,20 @@ ${structureRules}
 `;
 
   const text = await callAI(prompt, aiConfig, 1500);
-  return parseOutline(text, keyword);
+  return parseOutline(text, keyword, fixedTitle);
 }
 
-function parseOutline(text: string, keyword: string): ArticleOutline {
+function parseOutline(text: string, keyword: string, fixedTitle: string | null = null): ArticleOutline {
   const sections: OutlineSection[] = [];
   const lines = text.split('\n');
   let title = `${keyword} について`;
 
   const titleMatch = text.match(/タイトル:\s*(.+)/);
-  if (titleMatch) title = titleMatch[1].trim();
+  if (fixedTitle) {
+    title = fixedTitle;
+  } else if (titleMatch) {
+    title = titleMatch[1].trim();
+  }
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim();

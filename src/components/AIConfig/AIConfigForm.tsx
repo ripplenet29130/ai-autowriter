@@ -24,7 +24,8 @@ export const AIConfigForm: React.FC<AIConfigFormProps> = ({
         temperature: 0.7,
         maxTokens: 4000,
         imageGenerationEnabled: true,
-        imageProvider: 'dalle3'
+        imageProvider: 'nanobanana',
+        imagesPerArticle: 3
     });
 
     const [testingConnection, setTestingConnection] = useState(false);
@@ -115,7 +116,7 @@ export const AIConfigForm: React.FC<AIConfigFormProps> = ({
                     toast.error(`Claude API接続エラー: ${error.error?.message || 'Unknown error'}`);
                 }
             } else if (config.provider === 'gemini') {
-                const modelName = config.model || 'gemini-3.0-flash';
+                const modelName = config.model || 'gemini-2.0-flash';
                 const response = await fetch(
                     `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${config.apiKey}`,
                     {
@@ -166,10 +167,9 @@ export const AIConfigForm: React.FC<AIConfigFormProps> = ({
                 ];
             case 'gemini':
                 return [
-                    { value: 'gemini-3.0-flash', label: 'Gemini 3.0 Flash (最新・高速)' },
-                    { value: 'gemini-3.0-pro', label: 'Gemini 3.0 Pro (高性能)' },
-                    { value: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash' },
-                    { value: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro' }
+                    { value: 'gemini-3.0-pro', label: 'Google Gemini (gemini-3.0-pro) (最新・高性能)' },
+                    { value: 'gemini-3.0-flash', label: 'Google Gemini (gemini-3.0-flash) (最新・高速)' },
+                    { value: 'gemini-2.0-flash', label: 'Google Gemini (gemini-2.0-flash) (安定版)' }
                 ];
             default:
                 return [];
@@ -178,9 +178,8 @@ export const AIConfigForm: React.FC<AIConfigFormProps> = ({
 
     const getImageProviderOptions = () => {
         return [
-            { value: 'dalle3', label: 'DALL-E 3 (OpenAI)' },
-            { value: 'midjourney', label: 'Midjourney' },
-            { value: 'stable-diffusion', label: 'Stable Diffusion' }
+            { value: 'nanobanana', label: 'Gemini Image (nanobanana) - 推奨' },
+            { value: 'dalle3', label: 'DALL-E 3 (OpenAI)' }
         ];
     };
 
@@ -341,22 +340,47 @@ export const AIConfigForm: React.FC<AIConfigFormProps> = ({
                     </div>
 
                     {config.imageGenerationEnabled && (
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">
-                                画像生成プロバイダー
-                            </label>
-                            <select
-                                value={config.imageProvider || 'dalle3'}
-                                onChange={(e) => setConfig(prev => ({ ...prev, imageProvider: e.target.value as any }))}
-                                className="input-field"
-                            >
-                                {getImageProviderOptions().map(option => (
-                                    <option key={option.value} value={option.value}>
-                                        {option.label}
-                                    </option>
-                                ))}
-                            </select>
-                        </div>
+                        <>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-2">
+                                    画像生成プロバイダー
+                                </label>
+                                <select
+                                    value={config.imageProvider || 'nanobanana'}
+                                    onChange={(e) => setConfig(prev => ({ ...prev, imageProvider: e.target.value as any }))}
+                                    className="input-field"
+                                >
+                                    {getImageProviderOptions().map(option => (
+                                        <option key={option.value} value={option.value}>
+                                            {option.label}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-2">
+                                    記事あたりの画像枚数 ({config.imagesPerArticle || 0}枚)
+                                </label>
+                                <input
+                                    type="range"
+                                    min="0"
+                                    max="10"
+                                    step="1"
+                                    value={config.imagesPerArticle || 0}
+                                    onChange={(e) => setConfig(prev => ({ ...prev, imagesPerArticle: parseInt(e.target.value) }))}
+                                    className="w-full"
+                                />
+                                <div className="flex justify-between text-xs text-gray-500 mt-1">
+                                    <span>0 (無効)</span>
+                                    <span>5枚</span>
+                                    <span>10枚</span>
+                                </div>
+                                <p className="text-xs text-gray-500 mt-2">
+                                    ※ nanobanana: 約1枚あたり$0.039（約5.5円）
+                                </p>
+                            </div>
+                        </>
                     )}
                 </div>
             </div>

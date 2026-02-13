@@ -52,7 +52,8 @@ export interface AIConfig {
   temperature: number;
   maxTokens: number;
   imageGenerationEnabled?: boolean;
-  imageProvider?: 'dalle3' | 'midjourney' | 'stable-diffusion';
+  imageProvider?: 'nanobanana' | 'dalle3' | 'midjourney' | 'stable-diffusion' | 'unsplash';
+  imagesPerArticle?: number; // 記事あたりの画像生成枚数（0=無効、1-10=枚数）
   isActive?: boolean;
   createdAt?: string;
 }
@@ -92,6 +93,7 @@ export interface GenerationPrompt {
   previousContent?: string;
   isLead?: boolean;
   customInstructions?: string;
+  imagesPerArticle?: number; // 記事あたりの画像生成枚数
 }
 
 export interface PromptSet {

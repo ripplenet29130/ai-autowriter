@@ -33,6 +33,7 @@ export const Scheduler: React.FC = () => {
   const { aiConfigs, wordPressConfigs, keywordSets, titleSets, promptSets, loadKeywordSets, loadTitleSets, loadPromptSets } = useAppStore();
   const [schedules, setSchedules] = useState<ScheduleSetting[]>([]);
   const [usedKeywordsMap, setUsedKeywordsMap] = useState<Record<string, string[]>>({});
+  const [usedTitlesMap, setUsedTitlesMap] = useState<Record<string, string[]>>({});
   const [lastExecutionMap, setLastExecutionMap] = useState<Record<string, string | null>>({});
 
   const [loading, setLoading] = useState(false);
@@ -60,7 +61,6 @@ export const Scheduler: React.FC = () => {
     status: true,
     enable_fact_check: false,
     fact_check_note: '',
-    selected_title: '',
   });
 
   // Load schedules and keyword sets on mount
@@ -80,18 +80,22 @@ export const Scheduler: React.FC = () => {
 
       // Fetch used keywords and last execution for each schedule
       const keywordsMap: Record<string, string[]> = {};
+      const titlesMap: Record<string, string[]> = {};
       const executionsMap: Record<string, string | null> = {};
       await Promise.all(data.map(async (schedule) => {
         if (schedule.id) {
-          const [used, lastRun] = await Promise.all([
+          const [usedKw, usedTitles, lastRun] = await Promise.all([
             scheduleService.getUsedKeywords(schedule.id),
+            scheduleService.getUsedTitles(schedule.id),
             scheduleService.getLastExecution(schedule.id)
           ]);
-          keywordsMap[schedule.id] = used;
+          keywordsMap[schedule.id] = usedKw;
+          titlesMap[schedule.id] = usedTitles;
           executionsMap[schedule.id] = lastRun;
         }
       }));
       setUsedKeywordsMap(keywordsMap);
+      setUsedTitlesMap(titlesMap);
       setLastExecutionMap(executionsMap);
 
     } catch (error) {
@@ -485,7 +489,7 @@ export const Scheduler: React.FC = () => {
               <select
                 value={formData.title_set_id}
                 onChange={(e) => {
-                  setFormData({ ...formData, title_set_id: e.target.value, selected_title: '' });
+                  setFormData({ ...formData, title_set_id: e.target.value });
                 }}
                 className="w-full px-3 py-2 border border-purple-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
                 required={formData.generation_mode === 'title' || formData.generation_mode === 'both'}
@@ -501,7 +505,10 @@ export const Scheduler: React.FC = () => {
                 const selectedSet = titleSets.find(s => s.id === formData.title_set_id);
                 return selectedSet && (
                   <div className="mt-2 p-3 bg-purple-50 rounded-lg border border-purple-200">
-                    <p className="text-xs font-medium text-purple-900 mb-1">選択中のタイトル ({selectedSet.titles.length}個):</p>
+                    <p className="text-xs font-medium text-purple-900 mb-1">
+                      選択中のタイトルセット ({selectedSet.titles.length}個):
+                      <span className="ml-2 font-normal text-purple-700">※ここから自動的に選択されて投稿されます</span>
+                    </p>
                     <div className="space-y-1 max-h-32 overflow-y-auto">
                       {selectedSet.titles.slice(0, 5).map((title, i) => (
                         <div key={i} className="text-xs text-purple-800 bg-purple-100 px-2 py-1 rounded">
@@ -512,31 +519,6 @@ export const Scheduler: React.FC = () => {
                         <p className="text-xs text-purple-600 italic">...他 {selectedSet.titles.length - 5}個</p>
                       )}
                     </div>
-                  </div>
-                );
-              })()}
-
-              {/* 個別タイトル選択 */}
-              {formData.title_set_id && (() => {
-                const selectedSet = titleSets.find(s => s.id === formData.title_set_id);
-                return selectedSet && selectedSet.titles.length > 0 && (
-                  <div className="mt-3">
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      使用するタイトルを選択 <span className="text-red-500">*</span>
-                    </label>
-                    <select
-                      value={formData.selected_title}
-                      onChange={(e) => setFormData({ ...formData, selected_title: e.target.value })}
-                      className="w-full px-3 py-2 border border-purple-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                      required
-                    >
-                      <option value="">タイトルを選択してください...</option>
-                      {selectedSet.titles.map((title, index) => (
-                        <option key={index} value={title}>
-                          {title}
-                        </option>
-                      ))}
-                    </select>
                   </div>
                 );
               })()}
@@ -992,19 +974,60 @@ export const Scheduler: React.FC = () => {
                         )}
                       </div>
                     </div>
+                    {/* Target Titles (Only if Title Set is selected) */}
+                    {(schedule.title_set_id || (schedule as any).title_set_id) && (() => {
+                      const titleSetId = schedule.title_set_id || (schedule as any).title_set_id;
+                      const titleSet = titleSets.find(s => s.id === titleSetId);
+                      const usedTitles = schedule.id ? (usedTitlesMap[schedule.id] || []) : [];
+
+                      if (!titleSet) return null;
+
+                      return (
+                        <div className="mt-4 pt-4 border-t border-gray-100">
+                          <div className="flex items-center justify-between mb-2">
+                            <h4 className="text-sm font-bold text-gray-700 flex items-center">
+                              <MessageSquare className="w-4 h-4 mr-2 text-purple-500" />
+                              ターゲットタイトル ({titleSet.titles.length})
+                            </h4>
+                            <span className="text-xs text-gray-500">
+                              {usedTitles.length} / {titleSet.titles.length} 消化済み
+                            </span>
+                          </div>
+                          <div className="flex flex-col gap-1">
+                            {titleSet.titles.map((title, i) => {
+                              const isUsed = usedTitles.includes(title);
+                              return (
+                                <div
+                                  key={i}
+                                  className={`
+                                    text-xs px-2 py-1 rounded border transition-colors
+                                    ${isUsed
+                                      ? 'bg-gray-50 text-gray-400 border-gray-100 line-through decoration-gray-400'
+                                      : 'bg-purple-50 text-purple-800 border-purple-100 hover:bg-purple-100'
+                                    }
+                                  `}
+                                >
+                                  {title}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </div>
                 );
               })}
             </div>
           )
         }
-      </div >
+      </div>
 
       <PromptSetManager
         isOpen={isPromptManagerOpen}
         onClose={() => setIsPromptManagerOpen(false)}
         onSelect={(ps) => setFormData(prev => ({ ...prev, prompt_set_id: ps.id }))}
       />
-    </div >
+    </div>
   );
 };
