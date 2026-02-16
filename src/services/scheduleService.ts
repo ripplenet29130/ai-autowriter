@@ -2,6 +2,12 @@ import { supabase } from './supabaseClient';
 import { ScheduleSetting } from '../types';
 
 class ScheduleService {
+    private extractMissingColumn(error: any): string | null {
+        const message = String(error?.message || '');
+        const match = message.match(/Could not find the '([^']+)' column/i);
+        return match?.[1] || null;
+    }
+
     /**
      * スケジュールを新規作成
      */
@@ -108,19 +114,33 @@ class ScheduleService {
         if (cleanUpdates.title_set_id === '') cleanUpdates.title_set_id = null as any;
 
 
-        const { data, error } = await supabase
-            .from('schedule_settings')
-            .update(cleanUpdates)
-            .eq('id', id)
-            .select()
-            .single();
+        let updatePayload: Record<string, any> = { ...cleanUpdates };
 
-        if (error) {
-            console.error('Error updating schedule:', error);
-            throw new Error(`スケジュールの更新に失敗しました: ${error.message}`);
+        for (let i = 0; i < 3; i += 1) {
+            const { data, error } = await supabase
+                .from('schedule_settings')
+                .update(updatePayload)
+                .eq('id', id)
+                .select()
+                .single();
+
+            if (!error) {
+                return data;
+            }
+
+            const missingColumn = this.extractMissingColumn(error);
+            if (!missingColumn || !Object.prototype.hasOwnProperty.call(updatePayload, missingColumn)) {
+                console.error('Error updating schedule:', error);
+                throw new Error(`スケジュールの更新に失敗しました: ${error.message}`);
+            }
+
+            console.warn(`updateSchedule: retrying without unknown column "${missingColumn}"`);
+            const nextPayload = { ...updatePayload };
+            delete nextPayload[missingColumn];
+            updatePayload = nextPayload;
         }
 
-        return data;
+        throw new Error('スケジュールの更新に失敗しました: schema mismatch');
     }
 
     /**

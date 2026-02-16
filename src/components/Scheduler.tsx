@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect, useMemo } from 'react';
 import { Calendar, Globe, Clock, Tag, Trash2, Edit2, Power, MessageSquare, Zap, ShieldCheck } from 'lucide-react';
 import { scheduleService } from '../services/scheduleService';
 import { supabaseSchedulerService } from '../services/supabaseSchedulerService';
+import { supabase } from '../services/supabaseClient';
 import { ScheduleSetting } from '../types';
 import { useAppStore } from '../store/useAppStore';
 import { PromptSetManager } from './AIGenerator/PromptSetManager';
@@ -35,6 +36,7 @@ export const Scheduler: React.FC = () => {
   const [usedKeywordsMap, setUsedKeywordsMap] = useState<Record<string, string[]>>({});
   const [usedTitlesMap, setUsedTitlesMap] = useState<Record<string, string[]>>({});
   const [lastExecutionMap, setLastExecutionMap] = useState<Record<string, string | null>>({});
+  const [factCheckAutoFixEnabled, setFactCheckAutoFixEnabled] = useState(false);
 
   const [loading, setLoading] = useState(false);
   const [editingSchedule, setEditingSchedule] = useState<ScheduleSetting | null>(null);
@@ -61,7 +63,25 @@ export const Scheduler: React.FC = () => {
     status: true,
     enable_fact_check: false,
     fact_check_note: '',
+    ab_test_enabled: false,
   });
+
+  const timeOptions = useMemo(() => {
+    const options: string[] = [];
+    for (let hour = 0; hour < 24; hour += 1) {
+      for (let minute = 0; minute < 60; minute += 10) {
+        options.push(`${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`);
+      }
+    }
+
+    // Keep legacy values visible while editing old schedules.
+    if (formData.post_time && !options.includes(formData.post_time)) {
+      options.push(formData.post_time);
+      options.sort();
+    }
+
+    return options;
+  }, [formData.post_time]);
 
   // Load schedules and keyword sets on mount
   useEffect(() => {
@@ -69,7 +89,47 @@ export const Scheduler: React.FC = () => {
     loadKeywordSets();
     loadTitleSets();
     loadPromptSets();
+    loadFactCheckSettings();
   }, []);
+
+  const loadFactCheckSettings = async () => {
+    if (!supabase) {
+      setFactCheckAutoFixEnabled(false);
+      return;
+    }
+
+    try {
+      const {
+        data: { user },
+        error: authError,
+      } = await supabase.auth.getUser();
+
+      if (!authError && user) {
+        const { data } = await supabase
+          .from('fact_check_settings')
+          .select('auto_fix_enabled')
+          .eq('user_id', user.id)
+          .order('updated_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        setFactCheckAutoFixEnabled(Boolean(data?.auto_fix_enabled));
+        return;
+      }
+
+      const { data: globalRows } = await supabase
+        .from('app_settings')
+        .select('key, value')
+        .eq('key', 'fact_check_auto_fix_enabled')
+        .limit(1);
+
+      const raw = String(globalRows?.[0]?.value ?? '').toLowerCase();
+      setFactCheckAutoFixEnabled(['1', 'true', 'yes', 'on'].includes(raw));
+    } catch (error) {
+      console.error('Failed to load fact check settings:', error);
+      setFactCheckAutoFixEnabled(false);
+    }
+  };
 
 
   const loadSchedules = async () => {
@@ -118,6 +178,11 @@ export const Scheduler: React.FC = () => {
       toast.error('WordPress設定を選択してください');
       return;
     }
+    const minute = Number(formData.post_time.split(':')[1]);
+    if (!Number.isFinite(minute) || minute % 10 !== 0) {
+      toast.error('投稿時刻は10分単位で選択してください');
+      return;
+    }
 
     // Validate based on generation mode
     if (formData.generation_mode === 'keyword' || formData.generation_mode === 'both') {
@@ -145,7 +210,7 @@ export const Scheduler: React.FC = () => {
         toast.success('スケジュールを作成しました');
       }
 
-      await loadSchedules();
+      await Promise.all([loadSchedules(), loadFactCheckSettings()]);
       resetForm();
     } catch (error) {
       console.error('Failed to save schedule:', error);
@@ -177,11 +242,24 @@ export const Scheduler: React.FC = () => {
       status: schedule.status,
       enable_fact_check: schedule.enable_fact_check || false,
       fact_check_note: schedule.fact_check_note || '',
+      ab_test_enabled: schedule.ab_test_enabled || false,
     });
     // Scroll to top to show the form
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+
+  useEffect(() => {
+    const targetId = localStorage.getItem('scheduler_edit_schedule_id');
+    if (!targetId || schedules.length === 0) return;
+
+    const target = schedules.find((item) => item.id === targetId);
+    if (target) {
+      handleEdit(target);
+    }
+
+    localStorage.removeItem('scheduler_edit_schedule_id');
+  }, [schedules]);
   const handleDelete = async (id: string) => {
     if (!confirm('このスケジュールを削除しますか？')) return;
 
@@ -219,17 +297,10 @@ export const Scheduler: React.FC = () => {
     try {
       const result = await supabaseSchedulerService.triggerScheduler(true, scheduleId);
       console.log('Manual trigger result:', result);
-
-      // 結果の検証
-      if (result.results && result.results.length > 0) {
-        const executionResult = result.results[0];
-        if (!executionResult.success) {
-          throw new Error(executionResult.error || '不明なエラーが発生しました');
-        }
-      }
-
-      toast.success('スケジューラーの実行が完了しました', { id: loadingToast });
-      await loadSchedules();
+      toast.success('実行リクエストを受け付けました。結果は実行履歴に反映されます。', { id: loadingToast });
+      setTimeout(() => {
+        void loadSchedules();
+      }, 3000);
     } catch (error: any) {
       console.error('Failed to trigger scheduler:', error);
       toast.error(`実行に失敗しました: ${error.message}`, { id: loadingToast });
@@ -257,6 +328,7 @@ export const Scheduler: React.FC = () => {
       status: true,
       enable_fact_check: false,
       fact_check_note: '',
+      ab_test_enabled: false,
     });
     setEditingSchedule(null);
   };
@@ -281,8 +353,79 @@ export const Scheduler: React.FC = () => {
     return ps ? ps.name : null;
   };
 
+  const getNextExecutionDate = (schedule: ScheduleSetting): Date | null => {
+    if (!schedule.status || !schedule.post_time) return null;
+
+    const [hourStr, minuteStr] = schedule.post_time.split(':');
+    const hour = Number(hourStr);
+    const minute = Number(minuteStr);
+    if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null;
+
+    const now = new Date();
+    const startAt = schedule.start_date
+      ? new Date(`${schedule.start_date}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00`)
+      : null;
+    const endAt = schedule.end_date ? new Date(`${schedule.end_date}T23:59:59`) : null;
+
+    const normalizedFrequency = schedule.frequency === '毎日' ? 'daily'
+      : schedule.frequency === '毎週' ? 'weekly'
+        : schedule.frequency === '隔週' ? 'biweekly'
+          : schedule.frequency === '毎月' ? 'monthly'
+            : schedule.frequency;
+
+    const buildDateAtTime = (base: Date): Date => {
+      const d = new Date(base);
+      d.setHours(hour, minute, 0, 0);
+      return d;
+    };
+
+    const addDays = (base: Date, days: number): Date => {
+      const d = new Date(base);
+      d.setDate(d.getDate() + days);
+      return d;
+    };
+
+    const addMonths = (base: Date, months: number): Date => {
+      const d = new Date(base);
+      d.setMonth(d.getMonth() + months);
+      return d;
+    };
+
+    let next = buildDateAtTime(now);
+
+    if (normalizedFrequency === 'daily') {
+      if (next <= now) next = addDays(next, 1);
+      if (startAt && next < startAt) next = new Date(startAt);
+    } else if (normalizedFrequency === 'weekly' || normalizedFrequency === 'biweekly') {
+      const intervalDays = normalizedFrequency === 'weekly' ? 7 : 14;
+      next = startAt ? new Date(startAt) : buildDateAtTime(now);
+      if (next <= now) {
+        for (let i = 0; i < 1000 && next <= now; i += 1) {
+          next = addDays(next, intervalDays);
+        }
+      }
+    } else if (normalizedFrequency === 'monthly') {
+      next = startAt ? new Date(startAt) : buildDateAtTime(now);
+      if (next <= now) {
+        for (let i = 0; i < 240 && next <= now; i += 1) {
+          next = addMonths(next, 1);
+        }
+      }
+    } else {
+      if (next <= now) next = addDays(next, 1);
+      if (startAt && next < startAt) next = new Date(startAt);
+    }
+
+    if (endAt && next > endAt) return null;
+    return next;
+  };
+
   // フィルタリングされたWordPress設定（アクティブのみ）
   const activeWordPressConfigs = wordPressConfigs.filter(config => config.isActive);
+  const sortedSchedules = useMemo(
+    () => [...schedules].sort((a, b) => Number(b.status) - Number(a.status)),
+    [schedules]
+  );
 
   return (
     <div className="space-y-6">
@@ -566,13 +709,19 @@ export const Scheduler: React.FC = () => {
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 投稿時刻 <span className="text-red-500">*</span>
               </label>
-              <input
-                type="time"
+              <select
                 value={formData.post_time}
                 onChange={(e) => setFormData({ ...formData, post_time: e.target.value })}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 required
-              />
+              >
+                {timeOptions.map((time) => (
+                  <option key={time} value={time}>
+                    {time}
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs text-gray-500 mt-1">10分単位で選択できます（00, 10, 20, 30, 40, 50）</p>
             </div>
 
             {/* 頻度 */}
@@ -704,6 +853,20 @@ export const Scheduler: React.FC = () => {
             )}
           </div>
 
+          {/* ABテスト設定 */}
+          <div className="flex items-center space-x-2">
+            <input
+              type="checkbox"
+              id="ab_test_enabled"
+              checked={formData.ab_test_enabled || false}
+              onChange={(e) => setFormData({ ...formData, ab_test_enabled: e.target.checked })}
+              className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+            />
+            <label htmlFor="ab_test_enabled" className="text-sm font-medium text-gray-700">
+              ABテスト（見出し比較）を有効化
+            </label>
+          </div>
+
           {/* スケジュール有効化 */}
           <div className="flex items-center space-x-2">
             <input
@@ -756,15 +919,16 @@ export const Scheduler: React.FC = () => {
             </div>
           ) : (
             <div className="space-y-3">
-              {schedules.map((schedule) => {
+              {sortedSchedules.map((schedule) => {
                 const keywordsList = schedule.keyword ? schedule.keyword.split(',').map(k => k.trim()).filter(k => k) : [];
                 const usedList = schedule.id ? (usedKeywordsMap[schedule.id] || []) : [];
                 const promptSetName = getPromptSetName(schedule.prompt_set_id);
+                const nextRunAt = schedule.status ? getNextExecutionDate(schedule) : null;
 
                 return (
                   <div
                     key={schedule.id}
-                    className={`border rounded-xl p-6 shadow-md transition-all ${schedule.status ? 'bg-white border-blue-100 hover:shadow-lg' : 'bg-gray-50 border-gray-200'
+                    className={`border rounded-xl p-6 shadow-md transition-all ${schedule.status ? 'bg-white border-emerald-300 ring-1 ring-emerald-100 hover:shadow-lg' : 'bg-gray-50 border-gray-200'
                       }`}
                   >
                     <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-6">
@@ -843,6 +1007,22 @@ export const Scheduler: React.FC = () => {
                                 })}</span>
                               </div>
                             )}
+                            {schedule.status && (
+                              <div className="mt-1.5 flex items-center text-[10px] text-blue-600">
+                                <span className="font-bold mr-1">Next Run:</span>
+                                <span>
+                                  {nextRunAt
+                                    ? nextRunAt.toLocaleString('ja-JP', {
+                                      year: 'numeric',
+                                      month: 'numeric',
+                                      day: 'numeric',
+                                      hour: '2-digit',
+                                      minute: '2-digit'
+                                    })
+                                    : '予定なし'}
+                                </span>
+                              </div>
+                            )}
                           </div>
                         </div>
 
@@ -890,7 +1070,7 @@ export const Scheduler: React.FC = () => {
                     </div>
 
                     {/* Additional Info Block (Moved to bottom) */}
-                    {(schedule.start_date || schedule.chatwork_room_id || promptSetName) && (
+                    {(schedule.start_date || schedule.chatwork_room_id || promptSetName || schedule.enable_fact_check) && (
                       <div className="mb-4 pt-4 border-t border-gray-100 flex flex-wrap gap-6">
                         {schedule.start_date && (
                           <div className="flex items-center space-x-2 text-sm">
@@ -934,6 +1114,12 @@ export const Scheduler: React.FC = () => {
                             <span className="flex items-center space-x-1 text-xs text-green-700 bg-green-50 px-2 py-0.5 rounded border border-green-100">
                               <ShieldCheck className="w-3 h-3" />
                               <span className="font-medium">Enabled</span>
+                            </span>
+                            <span className={`text-xs px-2 py-0.5 rounded border ${factCheckAutoFixEnabled
+                              ? 'text-emerald-700 bg-emerald-50 border-emerald-100'
+                              : 'text-gray-600 bg-gray-50 border-gray-200'
+                              }`}>
+                              Auto Fix: {factCheckAutoFixEnabled ? 'ON' : 'OFF'}
                             </span>
                           </div>
                         )}
@@ -1031,3 +1217,5 @@ export const Scheduler: React.FC = () => {
     </div>
   );
 };
+
+
