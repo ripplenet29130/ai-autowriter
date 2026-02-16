@@ -1,9 +1,32 @@
-import { createClient } from 'npm:@supabase/supabase-js@2';
+﻿import { createClient } from 'npm:@supabase/supabase-js@2';
+import { DEFAULT_TARGET_WORD_COUNT } from '../../../src/shared/generationPolicy.ts';
+import {
+  countGeneratedChars,
+  generateArticleFromOutlineWithSharedCore,
+  generateOutlineWithSharedCore,
+} from '../../../src/shared/articleGenerationCore.ts';
+import { scoreGenerationRegression } from '../../../src/shared/generationRegressionScoring.ts';
+import {
+  applyFactCheckCorrections,
+  extractFactsFromContent,
+  verifyFactsBatch,
+} from './_fact-check-helpers.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Client-Info, Apikey',
+};
+
+const parseBoolean = (value: unknown, fallback = false): boolean => {
+  if (value == null || value === '') return fallback;
+  const normalized = String(value).trim().toLowerCase();
+  return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on';
+};
+
+const parseNumber = (value: unknown, fallback: number): number => {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
 };
 
 interface WordPressConfig {
@@ -19,6 +42,7 @@ interface WordPressConfig {
 
 interface Schedule {
   id: string;
+  user_id?: string;
   ai_config_id: string;
   wp_config_id: string;
   post_time: string;
@@ -36,6 +60,7 @@ interface Schedule {
   title_set_id?: string;
   generation_mode?: 'keyword' | 'title' | 'both';
   keyword_set_id?: string;
+  ab_test_enabled?: boolean;
 }
 
 interface AIConfig {
@@ -76,16 +101,24 @@ Deno.serve(async (req: Request) => {
     console.log('Parsed params:', params);
     const forceExecute = params.forceExecute === true;
     const targetScheduleId = params.scheduleId;
+    const allowDuplicateForce = params.allowDuplicateForce === true;
 
-    // 処理ロジックを非同期関数として定義（バックグラウンド実行用）
+    // 蜃ｦ逅・Ο繧ｸ繝・け繧帝撼蜷梧悄髢｢謨ｰ縺ｨ縺励※螳夂ｾｩ・医ヰ繝・け繧ｰ繝ｩ繧ｦ繝ｳ繝牙ｮ溯｡檎畑・・
     const processSchedules = async () => {
-      console.log('Scheduler execution started (Background):', new Date().toISOString());
+      console.log('Scheduler execution started:', new Date().toISOString());
+      const stats = {
+        totalActive: 0,
+        considered: 0,
+        executed: 0,
+        skipped: 0,
+        failed: 0,
+      };
 
       if (forceExecute) {
         console.log(`FORCE EXECUTE MODE: Ignoring time checks (Target: ${targetScheduleId || 'ALL'})`);
       }
 
-      // 1. アクティブなAI設定を取得
+      // 1. 繧｢繧ｯ繝・ぅ繝悶↑AI險ｭ螳壹ｒ蜿門ｾ・
       const { data: aiConfigs, error: aiError } = await supabase
         .from('ai_configs')
         .select('*')
@@ -95,13 +128,13 @@ Deno.serve(async (req: Request) => {
 
       if (aiError || !aiConfigs || aiConfigs.length === 0) {
         console.error('No AI config found:', aiError);
-        return;
+        return stats;
       }
 
       const aiConfig: AIConfig = aiConfigs[0];
       console.log('Using AI config:', aiConfig.provider, aiConfig.model);
 
-      // 1.5 各種APIトークン・キーの取得
+      // 1.5 蜷・ｨｮAPI繝医・繧ｯ繝ｳ繝ｻ繧ｭ繝ｼ縺ｮ蜿門ｾ・
       let chatworkApiToken: string | null = null;
       let serpApiKey: string | null = null;
       let googleApiKey: string | null = null;
@@ -129,14 +162,14 @@ Deno.serve(async (req: Request) => {
 
       console.log('Key values - SerpAPI:', serpApiKey ? 'Found(hidden)' : 'Not Found', 'Google:', googleApiKey ? 'Found(hidden)' : 'Not Found');
 
-      // 2. スケジュール取得
+      // 2. 繧ｹ繧ｱ繧ｸ繝･繝ｼ繝ｫ蜿門ｾ・
       let { data: schedules, error: schedError } = await supabase
         .from('schedule_settings')
         .select(`*, wordpress_configs!inner(*)`);
 
       if (schedError) {
         console.error('Database query failed:', schedError);
-        return;
+        return stats;
       }
 
       schedules = (schedules || []).filter((s: any) => {
@@ -150,9 +183,10 @@ Deno.serve(async (req: Request) => {
 
       if (!schedules || schedules.length === 0) {
         console.log('No active schedules found');
-        return;
+        return stats;
       }
 
+      stats.totalActive = schedules.length;
       console.log(`Found ${schedules.length} active schedules`);
 
       const now = new Date();
@@ -162,13 +196,23 @@ Deno.serve(async (req: Request) => {
       });
       const currentTimeJST = jstFormatter.format(now);
 
-      // 3. 各スケジュール処理
+      // 3. 蜷・せ繧ｱ繧ｸ繝･繝ｼ繝ｫ蜃ｦ逅・
       for (const schedule of schedules) {
+        stats.considered += 1;
         const scheduleSetting: Schedule = schedule as any;
         const wpConfig: WordPressConfig = (schedule as any).wordpress_configs;
         const timeToUse = scheduleSetting.post_time;
 
-        const shouldExecute = forceExecute || await shouldExecuteNow(timeToUse, currentTimeJST, scheduleSetting.frequency, scheduleSetting.id, supabase);
+        let shouldExecute = forceExecute || await shouldExecuteNow(timeToUse, currentTimeJST, scheduleSetting.frequency, scheduleSetting.id, supabase);
+
+        // Force execution guard: avoid duplicate posts from repeated manual triggers.
+        if (forceExecute && shouldExecute && !allowDuplicateForce) {
+          const recentlyExecuted = await wasExecutedWithinMinutes(scheduleSetting.id, supabase, 10);
+          if (recentlyExecuted) {
+            shouldExecute = false;
+            console.log(`Skipping force execution for ${wpConfig.name}: executed within last 10 minutes`);
+          }
+        }
 
         if (shouldExecute) {
           console.log(`Executing schedule for ${wpConfig.name}`);
@@ -186,35 +230,36 @@ Deno.serve(async (req: Request) => {
               console.log(`Using schedule-specific AI config: ${effectiveAiConfig.provider} (${effectiveAiConfig.model})`);
             } else {
               console.error(`Defined AI Config ID ${scheduleSetting.ai_config_id} not found.`);
+              stats.failed += 1;
               continue;
             }
           }
 
           try {
             await executeSchedule(scheduleSetting, wpConfig, effectiveAiConfig, supabase, chatworkApiToken, serpApiKey, googleApiKey, searchEngineId);
+            stats.executed += 1;
           } catch (error: any) {
             console.error(`Failed to execute schedule for ${wpConfig.name}:`, error);
+            stats.failed += 1;
           }
+        } else {
+          stats.skipped += 1;
         }
       }
+
+      return stats;
     };
 
-    // EdgeRuntime.waitUntil でバックグラウンド実行を試みる
-    // @ts-ignore
-    const waitUntil = (globalThis as any).EdgeRuntime?.waitUntil;
-    if (waitUntil) {
-      waitUntil(processSchedules());
-    } else {
-      console.warn('EdgeRuntime.waitUntil unavailable, running unawaited promise.');
-      processSchedules();
-    }
+    const stats = await processSchedules();
 
-    // 即座に成功レスポンスを返す
+    // 蜊ｳ蠎ｧ縺ｫ謌仙粥繝ｬ繧ｹ繝昴Φ繧ｹ繧定ｿ斐☆
     return new Response(
       JSON.stringify({
         success: true,
-        message: 'Request accepted. Processing in background.',
-        timestamp: new Date().toISOString()
+        mode: forceExecute ? 'force' : 'scheduled',
+        message: 'Scheduler processing completed.',
+        timestamp: new Date().toISOString(),
+        stats
       }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
@@ -228,7 +273,7 @@ Deno.serve(async (req: Request) => {
   }
 });
 
-// 実行すべきかチェック
+// 螳溯｡後☆縺ｹ縺阪°繝√ぉ繝・け
 async function shouldExecuteNow(
   scheduleTime: string,
   currentTime: string,
@@ -242,7 +287,7 @@ async function shouldExecuteNow(
   const scheduleMinutes = scheduleHour * 60 + scheduleMinute;
   const currentMinutes = currentHour * 60 + currentMinute;
 
-  // 実行直前（早すぎる実行）を防止し、かつ設定時刻から5分以内の範囲で実行を許可する
+  // 螳溯｡檎峩蜑搾ｼ域掠縺吶℃繧句ｮ溯｡鯉ｼ峨ｒ髦ｲ豁｢縺励√°縺､險ｭ螳壽凾蛻ｻ縺九ｉ5蛻・ｻ･蜀・・遽・峇縺ｧ螳溯｡後ｒ險ｱ蜿ｯ縺吶ｋ
   const diff = currentMinutes - scheduleMinutes;
 
   if (diff < 0 || diff > 5) {
@@ -265,16 +310,16 @@ async function shouldExecuteNow(
   const now = new Date();
   const hoursSinceLastExecution = (now.getTime() - lastExecutedAt.getTime()) / (1000 * 60 * 60);
 
-  // 日本語の頻度を英語に変換
+  // 譌･譛ｬ隱槭・鬆ｻ蠎ｦ繧定恭隱槭↓螟画鋤
   const freqMap: Record<string, string> = {
     '毎日': 'daily',
     '毎週': 'weekly',
     '隔週': 'biweekly',
-    '毎月': 'monthly'
+    '毎月': 'monthly',
   };
   const normalizedFreq = freqMap[frequency] || frequency;
 
-  // JSTでの日付比較用
+  // JST縺ｧ縺ｮ譌･莉俶ｯ碑ｼ・畑
   const jstDateFormatter = new Intl.DateTimeFormat('ja-JP', { timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit' });
   const lastExecutedDate = jstDateFormatter.format(lastExecutedAt);
   const currentDate = jstDateFormatter.format(now);
@@ -282,7 +327,7 @@ async function shouldExecuteNow(
   console.log(`[Freq Check] ${normalizedFreq}, Hours since: ${hoursSinceLastExecution.toFixed(1)}, Last day: ${lastExecutedDate}, Today: ${currentDate}`);
 
   if (normalizedFreq === 'daily') {
-    // 20時間以上経過、または12時間以上経過して日付が変わっていれば許可
+    // 20譎る俣莉･荳顔ｵ碁℃縲√∪縺溘・12譎る俣莉･荳顔ｵ碁℃縺励※譌･莉倥′螟峨ｏ縺｣縺ｦ縺・ｌ縺ｰ險ｱ蜿ｯ
     if (hoursSinceLastExecution >= 20 || (hoursSinceLastExecution >= 12 && lastExecutedDate !== currentDate)) {
       return true;
     }
@@ -297,7 +342,143 @@ async function shouldExecuteNow(
   return false;
 }
 
-// スケジュール実行（マルチステップ生成版）
+async function wasExecutedWithinMinutes(
+  scheduleId: string,
+  supabase: any,
+  minutes: number
+): Promise<boolean> {
+  const { data: lastExecution } = await supabase
+    .from('execution_history')
+    .select('executed_at')
+    .eq('schedule_id', scheduleId)
+    .order('executed_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (!lastExecution?.executed_at) return false;
+  const last = new Date(lastExecution.executed_at);
+  const now = new Date();
+  const diffMinutes = (now.getTime() - last.getTime()) / (1000 * 60);
+  return diffMinutes >= 0 && diffMinutes < minutes;
+}
+
+// AI provider call helper used by shared generation core.
+async function callAI(
+  prompt: string,
+  aiConfig: AIConfig,
+  maxTokens?: number
+): Promise<string> {
+  const provider = String(aiConfig.provider || '').toLowerCase();
+  const model = aiConfig.model;
+  const apiKey = aiConfig.api_key;
+  const temperature = aiConfig.temperature ?? 0.7;
+  const resolvedMaxTokens = maxTokens ?? aiConfig.max_tokens ?? 2000;
+
+  if (!apiKey) {
+    throw new Error(`Missing API key for provider: ${provider}`);
+  }
+
+  if (provider === 'openai') {
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model,
+        messages: [{ role: 'user', content: prompt }],
+        temperature,
+        max_tokens: resolvedMaxTokens,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`OpenAI API error: ${response.status} - ${errorText}`);
+    }
+
+    const data = await response.json();
+    const content = data?.choices?.[0]?.message?.content;
+    if (typeof content === 'string') return content;
+    if (Array.isArray(content)) {
+      return content
+        .map((part: any) => (typeof part?.text === 'string' ? part.text : ''))
+        .join('\n')
+        .trim();
+    }
+    throw new Error('OpenAI API returned empty content');
+  }
+
+  if (provider === 'claude') {
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model,
+        max_tokens: resolvedMaxTokens,
+        temperature,
+        messages: [{ role: 'user', content: prompt }],
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Claude API error: ${response.status} - ${errorText}`);
+    }
+
+    const data = await response.json();
+    const text = Array.isArray(data?.content)
+      ? data.content
+          .map((part: any) => (typeof part?.text === 'string' ? part.text : ''))
+          .join('\n')
+          .trim()
+      : '';
+    if (!text) throw new Error('Claude API returned empty content');
+    return text;
+  }
+
+  if (provider === 'gemini') {
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: {
+            temperature,
+            maxOutputTokens: resolvedMaxTokens,
+          },
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Gemini API error: ${response.status} - ${errorText}`);
+    }
+
+    const data = await response.json();
+    const parts = data?.candidates?.[0]?.content?.parts;
+    const text = Array.isArray(parts)
+      ? parts
+          .map((part: any) => (typeof part?.text === 'string' ? part.text : ''))
+          .join('\n')
+          .trim()
+      : '';
+    if (!text) throw new Error('Gemini API returned empty content');
+    return text;
+  }
+
+  throw new Error(`Unsupported AI provider: ${aiConfig.provider}`);
+}
+
+// 繧ｹ繧ｱ繧ｸ繝･繝ｼ繝ｫ螳溯｡鯉ｼ医・繝ｫ繝√せ繝・ャ繝礼函謌千沿・・
 async function executeSchedule(
   schedule: Schedule,
   wpConfig: WordPressConfig,
@@ -308,14 +489,14 @@ async function executeSchedule(
   googleApiKey: string | null,
   searchEngineId: string | null
 ) {
-  // 1. 生成モードに基づいてターゲット（キーワードまたはタイトル）を決定
+  // 1. 逕滓・繝｢繝ｼ繝峨↓蝓ｺ縺･縺・※繧ｿ繝ｼ繧ｲ繝・ヨ・医く繝ｼ繝ｯ繝ｼ繝峨∪縺溘・繧ｿ繧､繝医Ν・峨ｒ豎ｺ螳・
   let keyword = '';
   let fixedTitle: string | null = null;
   const mode = schedule.generation_mode || 'keyword';
   console.log(`Generation Mode: ${mode}`);
 
   if (mode === 'title' && schedule.title_set_id) {
-    // タイトルセットからタイトルを取得
+    // 繧ｿ繧､繝医Ν繧ｻ繝・ヨ縺九ｉ繧ｿ繧､繝医Ν繧貞叙蠕・
     const { data: titleSet } = await supabase
       .from('title_sets')
       .select('titles')
@@ -326,16 +507,16 @@ async function executeSchedule(
       const selectedTitle = await selectUnusedTitle(schedule.id, titleSet.titles, supabase);
       if (selectedTitle) {
         fixedTitle = selectedTitle;
-        keyword = selectedTitle; // タイトルをメインキーワードとして扱う
-        console.log(`🎯 Title selected: ${fixedTitle}`);
+        keyword = selectedTitle; // 繧ｿ繧､繝医Ν繧偵Γ繧､繝ｳ繧ｭ繝ｼ繝ｯ繝ｼ繝峨→縺励※謇ｱ縺・
+        console.log(`Title selected: ${fixedTitle}`);
       } else {
-        throw new Error('使用可能なタイトルがありません（全て使用済み）');
+        throw new Error('使用可能なタイトルがありません（すべて使用済み）');
       }
     } else {
       throw new Error('有効なタイトルセットが見つかりません');
     }
   } else if (mode === 'both') {
-    // 両方使用の場合：今回は簡易的に50%の確率でタイトル、50%でキーワードとする
+    // 荳｡譁ｹ菴ｿ逕ｨ縺ｮ蝣ｴ蜷茨ｼ壻ｻ雁屓縺ｯ邁｡譏鍋噪縺ｫ50%縺ｮ遒ｺ邇・〒繧ｿ繧､繝医Ν縲・0%縺ｧ繧ｭ繝ｼ繝ｯ繝ｼ繝峨→縺吶ｋ
     const useTitle = Math.random() < 0.5;
 
     if (useTitle && schedule.title_set_id) {
@@ -350,13 +531,13 @@ async function executeSchedule(
         if (selectedTitle) {
           fixedTitle = selectedTitle;
           keyword = selectedTitle;
-          console.log(`🎯 Mode "Both" -> Title selected: ${fixedTitle}`);
+          console.log(`Mode "Both" -> Title selected: ${fixedTitle}`);
         }
       }
     }
   }
 
-  // キーワードモード、またはタイトル選択に失敗/スキップした場合のフォールバック
+  // 繧ｭ繝ｼ繝ｯ繝ｼ繝峨Δ繝ｼ繝峨√∪縺溘・繧ｿ繧､繝医Ν驕ｸ謚槭↓螟ｱ謨・繧ｹ繧ｭ繝・・縺励◆蝣ｴ蜷医・繝輔か繝ｼ繝ｫ繝舌ャ繧ｯ
   if (!keyword) {
     const allKeywords = (schedule.keyword || '').split(',').map((k: string) => k.trim()).filter((k: string) => k);
     const selectedKeyword = await selectUnusedKeyword(schedule.id, allKeywords, supabase);
@@ -365,10 +546,10 @@ async function executeSchedule(
       throw new Error('使用可能なキーワードがありません');
     }
     keyword = selectedKeyword;
-    console.log(`🎯 Keyword selected: ${keyword}`);
+    console.log(`Keyword selected: ${keyword}`);
   }
 
-  // 1.5 プロンプトセットの取得（あれば）
+  // 1.5 繝励Ο繝ｳ繝励ヨ繧ｻ繝・ヨ縺ｮ蜿門ｾ暦ｼ医≠繧後・・・
   let customInstructions = '';
   if (schedule.prompt_set_id) {
     const { data: promptSet } = await supabase
@@ -383,95 +564,129 @@ async function executeSchedule(
     }
   }
 
-  // 2. 競合調査の実行（Auto Modeと同じロジック）
-  console.log(`🔍 Conducting competitor research for: ${keyword}`);
+  // 2. 遶ｶ蜷郁ｪｿ譟ｻ縺ｮ螳溯｡鯉ｼ・uto Mode縺ｨ蜷後§繝ｭ繧ｸ繝・け・・
+  console.log(`Conducting competitor research for: ${keyword}`);
   let competitorData: any = null;
   if (serpApiKey) {
     try {
       competitorData = await conductCompetitorResearch(keyword, serpApiKey, 5);
-      console.log(`✅ Competitor research completed. Found ${competitorData.articles.length} articles`);
+      console.log(`Competitor research completed. Found ${competitorData.articles.length} articles`);
     } catch (researchError) {
       console.warn('Competitor research failed, proceeding without it:', researchError);
     }
   } else {
-    console.log('⚠️ SerpAPI key not found. Skipping competitor research.');
+    console.log('SerpAPI key not found. Skipping competitor research.');
   }
 
-  // 3. アウトライン（構成案）の生成
-  console.log(`📝 Generating outline for: ${keyword}`);
-  const targetWordCount = schedule.target_word_count || 3000;
+  console.log(`Generating outline for: ${keyword}`);
+  const targetWordCount = schedule.target_word_count || DEFAULT_TARGET_WORD_COUNT;
   const writingTone = schedule.writing_tone || 'desu_masu';
+  const keywordArray = (schedule.keyword || '').split(',').map((k: string) => k.trim()).filter((k: string) => k);
+  const sectionKeywords = Array.from(new Set([keyword, ...keywordArray])).filter(Boolean);
+  const competitorHeadings = competitorData?.articles?.flatMap((a: any) => a.headings || []).slice(0, 15) || [];
 
-  const outline = await generateOutline(keyword, aiConfig, targetWordCount, customInstructions, competitorData, fixedTitle);
-  console.log(`✅ Outline generated: ${outline.title}`);
+  const runGeneration = async () => {
+    const outline = await generateOutlineWithSharedCore({
+      keyword,
+      targetWordCount,
+      fixedTitle,
+      customInstructions,
+      competitorHeadings,
+      callAI: (prompt, maxTokens) => callAI(prompt, aiConfig, maxTokens)
+    });
+    const generationResult = await generateArticleFromOutlineWithSharedCore({
+      outline,
+      keywords: sectionKeywords,
+      tone: writingTone,
+      targetWordCount,
+      customInstructions,
+      defaultMaxTokens: aiConfig.max_tokens || 2000,
+      qualityRetryCount: 1,
+      callAI: (prompt, maxTokens) => callAI(prompt, aiConfig, maxTokens)
+    });
+    return { outline, generationResult };
+  };
 
-  // 4. セクションごとに記事を生成
-  const sectionsWithContent = [];
-  let accumulatedContent = "";
+  const runAbTest = schedule.ab_test_enabled === true;
+  const [schedulerRun, manualRun] = await Promise.all([
+    runGeneration(),
+    runAbTest ? runGeneration() : Promise.resolve(null)
+  ]);
 
-  for (let i = 0; i < outline.sections.length; i++) {
-    const section = outline.sections[i];
-    console.log(`生成中 (${i + 1}/${outline.sections.length}): ${section.title}`);
-
-    const content = await generateSection(section, outline, accumulatedContent, aiConfig, writingTone, customInstructions);
-    sectionsWithContent.push({ ...section, content });
-
-    // 文脈維持用に蓄積
-    accumulatedContent += `\n\n${content}`;
+  const outline = schedulerRun.outline;
+  const generationResult = schedulerRun.generationResult;
+  let regressionScores: ReturnType<typeof scoreGenerationRegression> | null = null;
+  if (manualRun) {
+    regressionScores = scoreGenerationRegression(manualRun.generationResult.fullContent, generationResult.fullContent);
+    console.log(`AB regression completed: overall=${regressionScores.overallScore}, structure=${regressionScores.structureSimilarity}, overlap=${regressionScores.overlapRate}`);
   }
 
-  // 4. 記事の組み立て
-  let fullContent = assembleArticle(sectionsWithContent);
+  let fullContent = generationResult.fullContent;
   const articleTitle = outline.title;
 
-  // 4.5 文字数チェックと要約
-  const actualWordCount = countWords(fullContent);
-  const tolerance = 0.3; // 30%の許容範囲
-  const maxAllowed = targetWordCount * (1 + tolerance);
-
-  console.log(`📊 文字数チェック: 目標=${targetWordCount}, 実際=${actualWordCount}, 上限=${Math.floor(maxAllowed)}`);
-
-  if (actualWordCount > maxAllowed) {
-    console.log(`✂️ 文字数超過（${actualWordCount}文字）のため要約を実行します...`);
-    const keywordArray = (schedule.keyword || '').split(',').map((k: string) => k.trim()).filter((k: string) => k);
-
-    fullContent = await summarizeToWordCount(
-      fullContent,
-      articleTitle,
-      targetWordCount,
-      aiConfig,
-      keywordArray
-    );
-
-    const newWordCount = countWords(fullContent);
-    console.log(`✅ 要約完了: ${actualWordCount}文字 → ${newWordCount}文字`);
-  }
-
-  // 4.6 ファクトチェック実行と条件分岐
+  console.log(`Word count check: target=${targetWordCount}, current=${countGeneratedChars(fullContent)}, initial=${generationResult.wordCount}`);
+  // 4.6 繝輔ぃ繧ｯ繝医メ繧ｧ繝・け螳溯｡後→譚｡莉ｶ蛻・ｲ・
   let finalPostStatus = schedule.post_status || 'draft';
   let factCheckReport = null;
 
   if ((schedule as any).enable_fact_check) {
-    console.log(`🔍 Starting fact-check for article: ${articleTitle}`);
+    console.log(`Starting fact-check for article: ${articleTitle}`);
 
     try {
-      // ファクトチェック設定を取得
-      const { data: factCheckSettings } = await supabase
-        .from('fact_check_settings')
-        .select('*')
-        .limit(1)
-        .maybeSingle();
+      // 繝輔ぃ繧ｯ繝医メ繧ｧ繝・け險ｭ螳壹ｒ蜿門ｾ・
+      const scheduleUserId = (schedule as any).user_id;
+      if (!scheduleUserId) {
+        console.warn(`Skipping fact-check for schedule ${schedule.id}: missing user_id`);
+      } else {
+        let { data: factCheckSettings } = await supabase
+          .from('fact_check_settings')
+          .select('*')
+          .eq('user_id', scheduleUserId)
+          .order('updated_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
 
-      if (factCheckSettings?.enabled && factCheckSettings?.perplexity_api_key) {
-        // 記事からファクト情報を抽出
+        if (!factCheckSettings) {
+          const { data: globalRows } = await supabase
+            .from('app_settings')
+            .select('key, value')
+            .in('key', [
+              'perplexity_api_key',
+              'fact_check_enabled',
+              'fact_check_model_name',
+              'fact_check_max_items',
+              'fact_check_auto_fix_enabled',
+            ]);
+
+          if (globalRows && globalRows.length > 0) {
+            const map = new Map<string, string>();
+            globalRows.forEach((row: any) => {
+              map.set(String(row.key), String(row.value ?? ''));
+            });
+
+            const apiKey = map.get('perplexity_api_key');
+            if (apiKey) {
+              factCheckSettings = {
+                enabled: parseBoolean(map.get('fact_check_enabled'), true),
+                perplexity_api_key: apiKey,
+                model_name: map.get('fact_check_model_name') || 'sonar',
+                max_items_to_check: parseNumber(map.get('fact_check_max_items'), 10),
+                auto_fix_enabled: parseBoolean(map.get('fact_check_auto_fix_enabled'), false),
+              } as any;
+            }
+          }
+        }
+
+        if (factCheckSettings?.enabled && factCheckSettings?.perplexity_api_key) {
+        // 險倅ｺ九°繧峨ヵ繧｡繧ｯ繝域ュ蝣ｱ繧呈歓蜃ｺ
         const factsToCheck = await extractFactsFromContent(fullContent, (schedule as any).fact_check_note);
         const maxItems = factCheckSettings.max_items_to_check || 10;
         const itemsToCheck = factsToCheck.slice(0, maxItems);
 
-        console.log(`📋 Found ${factsToCheck.length} facts, checking top ${itemsToCheck.length} in batches`);
+        console.log(`Found ${factsToCheck.length} facts, checking top ${itemsToCheck.length} in batches`);
 
         // バッチ検証実行（5件ずつ）
-        const factCheckResults = await verifyFactsBatch(
+        let factCheckResults = await verifyFactsBatch(
           itemsToCheck,
           factCheckSettings.perplexity_api_key,
           keyword,
@@ -479,60 +694,104 @@ async function executeSchedule(
           5
         );
 
-        // 重大な誤りをカウント
-        const criticalIssues = factCheckResults.filter(r =>
+          // 重大な誤りをカウント
+          const criticalIssues = factCheckResults.filter(r =>
+            r.verdict === 'incorrect' && r.confidence >= 70
+          ).length;
+          const minorIssues = factCheckResults.filter(r =>
+            r.verdict === 'partially_correct' ||
+            (r.verdict === 'incorrect' && r.confidence < 70)
+          ).length;
+
+        console.log(`Fact-check completed: ${criticalIssues} critical, ${minorIssues} minor issues`);
+
+        if (factCheckSettings.auto_fix_enabled && (criticalIssues > 0 || minorIssues > 0)) {
+          console.log('Auto-fix mode enabled. Applying AI corrections...');
+          const fixedContent = await applyFactCheckCorrections(
+            fullContent,
+            factCheckResults,
+            factCheckSettings.perplexity_api_key,
+            keyword,
+            factCheckSettings.model_name || 'sonar'
+          );
+
+          if (fixedContent && fixedContent.trim().length > 0) {
+            fullContent = fixedContent;
+            const recheckFacts = await extractFactsFromContent(fullContent, (schedule as any).fact_check_note);
+            const recheckItems = recheckFacts.slice(0, maxItems);
+            factCheckResults = await verifyFactsBatch(
+              recheckItems,
+              factCheckSettings.perplexity_api_key,
+              keyword,
+              factCheckSettings.model_name || 'sonar',
+              5
+            );
+
+            const reCritical = factCheckResults.filter(r =>
+              r.verdict === 'incorrect' && r.confidence >= 70
+            ).length;
+            const reMinor = factCheckResults.filter(r =>
+              r.verdict === 'partially_correct' ||
+              (r.verdict === 'incorrect' && r.confidence < 70)
+            ).length;
+            console.log(`Re-check after auto-fix: ${reCritical} critical, ${reMinor} minor issues`);
+          } else {
+            console.warn('Auto-fix returned empty content. Keeping original content.');
+          }
+        }
+
+        // 条件分岐: 重大な誤りがあれば強制的に下書き
+        const criticalIssuesAfterFix = factCheckResults.filter(r =>
           r.verdict === 'incorrect' && r.confidence >= 70
         ).length;
-        const minorIssues = factCheckResults.filter(r =>
+        const minorIssuesAfterFix = factCheckResults.filter(r =>
           r.verdict === 'partially_correct' ||
           (r.verdict === 'incorrect' && r.confidence < 70)
         ).length;
 
-        console.log(`✅ Fact-check completed: ${criticalIssues} critical, ${minorIssues} minor issues`);
-
-        // 条件分岐: 重大な誤りがあれば強制的に下書き
-        if (criticalIssues > 0) {
-          console.log(`⚠️ Critical errors found (${criticalIssues}). Forcing draft status.`);
+        if (criticalIssuesAfterFix > 0) {
+          console.log(`Critical errors found (${criticalIssuesAfterFix}). Forcing draft status.`);
           finalPostStatus = 'draft';
         }
 
-        // 結果を保存
-        const { data: savedReport } = await supabase.from('fact_check_results').insert({
+          // 結果を保存
+          const { data: savedReport } = await supabase.from('fact_check_results').insert({
           schedule_id: schedule.id,
           checked_items: factCheckResults,
           total_checked: itemsToCheck.length,
-          issues_found: criticalIssues + minorIssues,
-          critical_issues: criticalIssues
+          issues_found: criticalIssuesAfterFix + minorIssuesAfterFix,
+          critical_issues: criticalIssuesAfterFix
         }).select().single();
 
-        factCheckReport = savedReport;
-      } else {
-        console.log('⚠️ Fact-check settings not configured or API key missing');
+          factCheckReport = savedReport;
+        } else {
+          console.log('Fact-check settings not configured or API key missing');
+        }
       }
     } catch (factCheckError) {
       console.error('Fact-check failed:', factCheckError);
-      // ファクトチェックエラーは全体の処理を止めない
+      // 繝輔ぃ繧ｯ繝医メ繧ｧ繝・け繧ｨ繝ｩ繝ｼ縺ｯ蜈ｨ菴薙・蜃ｦ逅・ｒ豁｢繧√↑縺・
     }
   }
 
-  // 4.7 [[]]記法のクリーンアップ
+  // 4.7 [[]]險俶ｳ輔・繧ｯ繝ｪ繝ｼ繝ｳ繧｢繝・・
   fullContent = fullContent.replace(/\[\[(.+?)\]\]/g, '$1');
 
-  // 5. WordPressに投稿（条件分岐後のステータスを使用）
-  console.log(`🌐 Publishing to WordPress: ${articleTitle} (Status: ${finalPostStatus})`);
+  // 5. WordPress縺ｫ謚慕ｨｿ・域擅莉ｶ蛻・ｲ仙ｾ後・繧ｹ繝・・繧ｿ繧ｹ繧剃ｽｿ逕ｨ・・
+  console.log(`Publishing to WordPress: ${articleTitle} (Status: ${finalPostStatus})`);
   const postId = await publishToWordPress(
     wpConfig,
     articleTitle,
     fullContent,
     finalPostStatus
   );
-  console.log(`✅ Published: Post ID ${postId}`);
+  console.log(`Published: Post ID ${postId}`);
 
-  // 5.5 Chatwork通知 (非同期で実行し、エラーでもメイン処理は止めない)
+  // 5.5 Chatwork騾夂衍 (髱槫酔譛溘〒螳溯｡後＠縲√お繝ｩ繝ｼ縺ｧ繧ゅΓ繧､繝ｳ蜃ｦ逅・・豁｢繧√↑縺・
   if (schedule.chatwork_room_id && chatworkApiToken) {
-    console.log(`📢 Sending Chatwork notification to rooms: ${schedule.chatwork_room_id}`);
+    console.log(`Sending Chatwork notification to rooms: ${schedule.chatwork_room_id}`);
     try {
-      const postUrl = `${wpConfig.url}/?p=${postId}`; // 簡易的なURL生成
+      const postUrl = `${wpConfig.url}/?p=${postId}`; // 邁｡譏鍋噪縺ｪURL逕滓・
       await sendChatworkNotifications(
         chatworkApiToken,
         schedule.chatwork_room_id,
@@ -544,12 +803,14 @@ async function executeSchedule(
       );
     } catch (cwError) {
       console.error('Chatwork notification failed:', cwError);
-      // 通知失敗は全体のエラーにはしない
+      // 騾夂衍螟ｱ謨励・蜈ｨ菴薙・繧ｨ繝ｩ繝ｼ縺ｫ縺ｯ縺励↑縺・
     }
   }
 
   // 6. 実行履歴を保存
-  await supabase.from('execution_history').insert({
+  const { data: executionHistory, error: executionHistoryError } = await supabase
+    .from('execution_history')
+    .insert({
     schedule_id: schedule.id,
     wordpress_config_id: wpConfig.id,
     executed_at: new Date().toISOString(),
@@ -557,7 +818,35 @@ async function executeSchedule(
     article_title: articleTitle,
     wordpress_post_id: postId,
     status: 'success'
-  });
+    })
+    .select('id')
+    .single();
+
+  if (executionHistoryError) {
+    console.error('Failed to save execution history:', executionHistoryError);
+  }
+
+  if (runAbTest && regressionScores) {
+    const { error: regressionError } = await supabase
+      .from('generation_regression_results')
+      .insert({
+        schedule_id: schedule.id,
+        execution_history_id: executionHistory?.id ?? null,
+        user_id: schedule.user_id ?? null,
+        keyword,
+        article_title: articleTitle,
+        target_word_count: targetWordCount,
+        writing_tone: writingTone,
+        baseline_mode: 'manual',
+        candidate_mode: 'scheduler',
+        metrics: regressionScores,
+        overall_score: regressionScores.overallScore
+      });
+
+    if (regressionError) {
+      console.error('Failed to save AB regression result:', regressionError);
+    }
+  }
 
   return {
     wordpress_config_id: wpConfig.id,
@@ -569,7 +858,7 @@ async function executeSchedule(
   };
 }
 
-// 未使用キーワードを選択
+// 譛ｪ菴ｿ逕ｨ繧ｭ繝ｼ繝ｯ繝ｼ繝峨ｒ驕ｸ謚・
 async function selectUnusedKeyword(
   scheduleId: string,
   allKeywords: string[],
@@ -585,7 +874,7 @@ async function selectUnusedKeyword(
 
   if (availableKeywords.length === 0) {
     console.log('All keywords used, resetting list');
-    // ランダムに選択
+    // 繝ｩ繝ｳ繝繝縺ｫ驕ｸ謚・
     if (allKeywords.length === 0) return null;
     return allKeywords[Math.floor(Math.random() * allKeywords.length)];
   }
@@ -593,7 +882,7 @@ async function selectUnusedKeyword(
   return availableKeywords[Math.floor(Math.random() * availableKeywords.length)];
 }
 
-// 未使用タイトルを選択
+// 譛ｪ菴ｿ逕ｨ繧ｿ繧､繝医Ν繧帝∈謚・
 async function selectUnusedTitle(
   scheduleId: string,
   allTitles: string[],
@@ -604,7 +893,7 @@ async function selectUnusedTitle(
     .select('article_title')
     .eq('schedule_id', scheduleId);
 
-  // 完全に一致するタイトルを除外
+  // 螳悟・縺ｫ荳閾ｴ縺吶ｋ繧ｿ繧､繝医Ν繧帝勁螟・
   const usedTitles = new Set((history || []).map((h: any) => h.article_title));
   const availableTitles = allTitles.filter(t => !usedTitles.has(t));
 
@@ -617,388 +906,7 @@ async function selectUnusedTitle(
   return availableTitles[Math.floor(Math.random() * availableTitles.length)];
 }
 
-// 文字数カウント（Markdown記号を除外）
-function countWords(content: string): number {
-  const cleaned = content
-    .replace(/^#+\s+/gm, '')     // 見出し記号
-    .replace(/\*\*/g, '')        // 太字
-    .replace(/\*/g, '')          // イタリック
-    .replace(/^[-*]\s+/gm, '')   // リスト記号
-    .replace(/\n+/g, '\n')       // 連続改行を1つに
-    .trim();
-  return cleaned.length;
-}
-
-// 要約機能（目標文字数に調整）
-async function summarizeToWordCount(
-  originalContent: string,
-  title: string,
-  targetWordCount: number,
-  aiConfig: AIConfig,
-  keywords: string[]
-): Promise<string> {
-  const summaryPrompt = `
-以下の記事を、正確に${targetWordCount}文字にまとめ直してください。
-
-【元の記事タイトル】
-${title}
-
-【元の記事内容】
-${originalContent}
-
-【要約の条件】
-1. **文字数**: 正確に${targetWordCount}文字（±10%以内厳守）
-2. **キーワード維持**: 以下のキーワードを必ず自然な形で含める
-   ${keywords.length > 0 ? keywords.join('、') : '（指定なし）'}
-3. **構成維持**: 元の見出し構造（##）を可能な限り保持
-4. **情報密度**: 冗長な表現を削り、重要な情報のみを残す
-5. **自然な文章**: 途中で切れることなく、完結した文章にする
-
-【出力形式】
-- Markdown形式で出力
-- 見出しには ## を使用
-- タイトル行は出力しない（本文のみ）
-- 「本文:」などの接頭辞は禁止
-`;
-
-  try {
-    const summarizedText = await callAI(summaryPrompt, aiConfig, aiConfig.max_tokens || 3000);
-    return summarizedText.trim();
-  } catch (error) {
-    console.error('要約エラー:', error);
-    // 要約に失敗した場合は、段落単位で切り詰める
-    return truncateByParagraph(originalContent, targetWordCount);
-  }
-}
-
-// 段落単位での切り詰め（フォールバック）
-function truncateByParagraph(content: string, targetWordCount: number): string {
-  const paragraphs = content.split('\n\n');
-  let result = '';
-  let currentCount = 0;
-
-  for (const paragraph of paragraphs) {
-    const paragraphLength = countWords(paragraph);
-    if (currentCount + paragraphLength <= targetWordCount * 1.05) {
-      result += paragraph + '\n\n';
-      currentCount += paragraphLength;
-    } else {
-      break;
-    }
-  }
-
-  return result.trim();
-}
-
-// --- AI生成のコアロジック ---
-
-async function callAI(prompt: string, aiConfig: AIConfig, maxTokens = 2000): Promise<string> {
-  if (aiConfig.provider === 'gemini') {
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${aiConfig.model}:generateContent?key=${aiConfig.api_key}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: {
-            temperature: aiConfig.temperature || 0.7,
-            maxOutputTokens: maxTokens
-          }
-        })
-      }
-    );
-    const data = await response.json();
-    if (!response.ok) throw new Error(`Gemini API Error: ${JSON.stringify(data)}`);
-    // Gemini may return empty content if blocked or error
-    return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-
-  } else if (aiConfig.provider === 'openai') {
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${aiConfig.api_key}`
-      },
-      body: JSON.stringify({
-        model: aiConfig.model,
-        messages: [{ role: 'user', content: prompt }],
-        temperature: aiConfig.temperature || 0.7,
-        max_tokens: maxTokens
-      })
-    });
-    const data = await response.json();
-    if (!response.ok) throw new Error(`OpenAI API Error: ${JSON.stringify(data)}`);
-    return data.choices?.[0]?.message?.content || "";
-
-  } else if (aiConfig.provider === 'claude') {
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': aiConfig.api_key,
-        'anthropic-version': '2023-06-01'
-      },
-      body: JSON.stringify({
-        model: aiConfig.model,
-        max_tokens: maxTokens,
-        messages: [{ role: 'user', content: prompt }]
-      })
-    });
-    const data = await response.json();
-    if (!response.ok) throw new Error(`Claude API Error: ${JSON.stringify(data)}`);
-    return data.content?.[0]?.text || "";
-  }
-
-  throw new Error(`Unsupported provider: ${aiConfig.provider}`);
-}
-
-async function generateOutline(keyword: string, aiConfig: AIConfig, targetWordCount: number, customInstructions = '', competitorData: any = null, fixedTitle: string | null = null): Promise<ArticleOutline> {
-  // 競合データから共通トピックを抽出
-  let competitorInsights = '';
-  if (competitorData && competitorData.articles && competitorData.articles.length > 0) {
-    const allHeadings = competitorData.articles.flatMap((a: any) => a.headings || []);
-    const topHeadings = allHeadings.slice(0, 15).join('\n- ');
-    competitorInsights = `
-## 競合記事の分析結果
-競合サイトで頻繁に取り上げられている見出し・トピック:
-- ${topHeadings}
-
-※ これらのトピックを参考に、読者のニーズに応える構成を作成してください。
-`;
-  }
-
-  let structureRules = "";
-  // 1000文字程度（800〜1200字）
-  if (targetWordCount <= 1200) {
-    structureRules = `
-1. **構成ルール（合計4セクション、目標: ${targetWordCount}文字）**
-   - リード文（Lead）: 1つ
-   - H2見出し: 3つ（導入→本論→まとめの流れ）
-   - H3見出しは使用しない（シンプルな構成）
-
-2. **各セクションの推定文字数**
-   - リード文: 150文字
-   - H2見出し1: 250文字（メインポイント1）
-   - H2見出し2: 250文字（メインポイント2）
-   - H2見出し3（まとめ）: 200文字
-   合計: 約850文字
-
-3. **指示**
-   - 短文でも読み応えのある構成を心がけてください
-   - 各H2見出しは独立したトピックとして明確に
-`;
-  }
-  // 2000文字程度（1500〜2500字）
-  else if (targetWordCount <= 2500) {
-    structureRules = `
-1. **構成ルール（合計7セクション、目標: ${targetWordCount}文字）**
-   - リード文（Lead）: 1つ
-   - H2見出し: 4つ（うち最後の1つはまとめ）
-   - H3見出し: 2〜3つ（主要なH2の下に配置）
-
-2. **各セクションの推定文字数**
-   - リード文: 250文字
-   - H2見出し1: 400文字
-     └ H3見出し1-1: 200文字
-   - H2見出し2: 400文字
-     └ H3見出し2-1: 200文字
-   - H2見出し3: 350文字
-   - まとめ（H2）: 200文字
-   合計: 約2000文字
-
-3. **指示**
-   - H2とH3を組み合わせて情報に深みを持たせる
-   - 主要トピックは2〜3個に絞り、それぞれを掘り下げる
-`;
-  }
-  // 3000文字程度（2500〜3500字）
-  else {
-    structureRules = `
-1. **構成ルール（合計10セクション、目標: ${targetWordCount}文字）**
-   - リード文（Lead）: 1つ
-   - H2見出し: 4〜5つ（うち最後の1つはまとめ）
-   - H3見出し: 5〜7つ（各H2の下に複数配置）
-
-2. **各セクションの推定文字数**
-   - リード文: 300文字
-   - H2見出し1: 450文字
-     └ H3見出し1-1: 250文字
-     └ H3見出し1-2: 250文字
-   - H2見出し2: 450文字
-     └ H3見出し2-1: 250文字
-     └ H3見出し2-2: 250文字
-   - H2見出し3: 400文字
-     └ H3見出し3-1: 200文字
-   - まとめ（H2）: 200文字
-   合計: 約3000文字
-
-3. **指示**
-   - 各主要トピックに複数のH3見出しで詳細に解説
-   - 網羅的でSEOに強い長文記事を目指す
-   - ユーザーのあらゆる疑問に答える構成
-`;
-  }
-
-  const prompt = `
-# 記事アウトライン生成タスク
-
-以下のキーワードを基に、SEO最適化された日本語ブログ記事のアウトライン（見出し構成）を作成してください。
-
-メインキーワード: ${keyword}
-${fixedTitle ? `記事タイトル（必須・変更不可）: ${fixedTitle}` : ''}
-記事全体の目標文字数: ${targetWordCount}文字
-${competitorInsights}
-${customInstructions ? `## カスタム指示\n${customInstructions}\n` : ''}
-
-【構成ルール - ターゲット文字数 ${targetWordCount}文字 に合わせてください】
-${structureRules}
-3. 各セクションの「推定文字数」の合計が、目標文字数（${targetWordCount}）とほぼ一致するように調整してください。
-
-## 出力フォーマット
-以下の形式で必ず出力してください：
-
-タイトル: [記事全体のタイトル]
-
-見出し0 (Lead): リード文
-説明: 読者の興味を惹きつける導入部分。
-推定文字数: 200
-
-見出し1 (H2): [見出しテキスト]
-説明: [セクション内容の簡潔な説明]
-推定文字数: 400
-
-...（ターゲット文字数に応じて、適宜セクションを追加してください）
-`;
-
-  const text = await callAI(prompt, aiConfig, 1500);
-  return parseOutline(text, keyword, fixedTitle);
-}
-
-function parseOutline(text: string, keyword: string, fixedTitle: string | null = null): ArticleOutline {
-  const sections: OutlineSection[] = [];
-  const lines = text.split('\n');
-  let title = `${keyword} について`;
-
-  const titleMatch = text.match(/タイトル:\s*(.+)/);
-  if (fixedTitle) {
-    title = fixedTitle;
-  } else if (titleMatch) {
-    title = titleMatch[1].trim();
-  }
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].trim();
-    const leadMatch = line.match(/^見出し0\s*\(Lead\):\s*(.+)$/);
-    const h2Match = line.match(/^見出し\d+\s*\(H2\):\s*(.+)$/);
-    const h3Match = line.match(/^\s*見出し[\d-]+\s*\(H3\):\s*(.+)$/);
-
-    if (leadMatch || h2Match || h3Match) {
-      const sTitle = leadMatch ? leadMatch[1] : (h2Match ? h2Match[1] : h3Match![1]);
-      const level = leadMatch ? 2 : (h2Match ? 2 : 3);
-      const isLead = !!leadMatch;
-
-      let description = '';
-      let estimatedWordCount = 400;
-
-      for (let j = i + 1; j < Math.min(i + 5, lines.length); j++) {
-        const nextLine = lines[j].trim();
-        if (nextLine.startsWith('説明:')) {
-          description = nextLine.replace('説明:', '').trim();
-        } else if (nextLine.startsWith('推定文字数:')) {
-          const match = nextLine.match(/\d+/);
-          if (match) estimatedWordCount = parseInt(match[0], 10);
-        } else if (nextLine.startsWith('見出し')) {
-          break;
-        }
-      }
-
-      sections.push({ title: sTitle, level, description, isLead, estimatedWordCount });
-    }
-  }
-
-  if (sections.length === 0) {
-    // フォールバック
-    return {
-      title,
-      sections: [
-        { title: 'はじめに', level: 2, description: '導入', isLead: true, estimatedWordCount: 300 },
-        { title: `${keyword} の基本`, level: 2, description: '概要', isLead: false, estimatedWordCount: 500 },
-        { title: 'まとめ', level: 2, description: '結論', isLead: false, estimatedWordCount: 300 }
-      ]
-    };
-  }
-
-  return { title, sections };
-}
-
-async function generateSection(
-  section: OutlineSection,
-  outline: ArticleOutline,
-  previousContent: string,
-  aiConfig: AIConfig,
-  writingTone: string,
-  customInstructions = ''
-): Promise<string> {
-  let toneInstruction = "専門性が高く、信頼感のある硬めの文体で書いてください。論理的かつ客観的な表現を用いてください。"; // Default to professional
-
-  if (writingTone === 'casual') {
-    toneInstruction = "カジュアルで親しみやすい「です・ます」調で書いてください。固苦しい表現を避け、ブログ読者に語りかけるようなトーンにしてください。";
-  } else if (writingTone === 'technical') {
-    toneInstruction = "技術的な内容を正確に伝えるための専門的な文体で書いてください。用語の正確さを重視し、論理的な構成を保ってください。";
-  } else if (writingTone === 'friendly') {
-    toneInstruction = "親しみやすい、読者に語りかけるような「です・ます」調で書いてください。共感を誘う表現を多用してください。";
-  } else if (writingTone === 'professional') {
-    toneInstruction = "専門性が高く、信頼感のある硬めの文体で書いてください。論理的かつ客観的な表現を用いてください。";
-  }
-
-  const isConcise = (outline.sections.reduce((acc, s) => acc + s.estimatedWordCount, 0) < 1500);
-  const styleInstruction = isConcise
-    ? "**スタイル: 冗長な表現を一切省き、結論から簡潔に述べる「要約・まとめ」のようなスタイルで書いてください。** 余計な肉付けは避けてください。"
-    : "**スタイル: プロのWebライターとして、読者の疑問を解決する丁寧で詳細な解説を心がけてください。** 論理的な展開と、具体例を交えた充実した内容にしてください。";
-
-  const prompt = `
-  あなたはSEOに精通したプロのWebライターです。
-  ブログ記事の以下のセクションのみを執筆してください。
-
-【記事タイトル】
-${outline.title}
-
-【今回執筆するセクション】
-${section.title} (${section.level === 2 ? 'H2見出し' : 'H3見出し'})
-  内容説明: ${section.description}
-
-【文体指示】
-${toneInstruction}
-${styleInstruction}
-
-${customInstructions ? `【カスタム指示】\n${customInstructions}\n` : ''}
-
-【文脈（直前の内容）】
-${previousContent.slice(-1000)}
-
-【指示】
-- ** 重要: 指定された見出しの本文テキストのみを出力してください。**
-    - 見出し自体（## や ###）は含めないでください。
-  - 目標文字数: ${section.estimatedWordCount} 文字程度
-    - ${section.isLead ? 'これはリード文です。読者の期待を高める書き出しにしてください。' : '前の章からの流れを意識して、自然な日本語で書いてください。'}
-  - 箇条書きや改行を適宜使い、読みやすくしてください。
-  - 指定された文字数に見合うよう、内容の密度を調整してください。
-  `;
-
-  const content = await callAI(prompt, aiConfig, aiConfig.max_tokens || 2000);
-  return content.trim();
-}
-
-function assembleArticle(sections: (OutlineSection & { content: string })[]): string {
-  return sections.map(s => {
-    if (s.isLead) return s.content;
-    const tag = s.level === 2 ? 'h2' : 'h3';
-    return `< ${tag}> ${s.title} </${tag}>\n\n${s.content}`;
-  }).join('\n\n');
-}
-
-// カテゴリーIDをスラッグまたは名前から取得
+// 繧ｫ繝・ざ繝ｪ繝ｼID繧偵せ繝ｩ繝・げ縺ｾ縺溘・蜷榊燕縺九ｉ蜿門ｾ・
 async function getCategoryIdBySlugOrName(
   config: WordPressConfig,
   categoryIdentifier: string
@@ -1006,7 +914,7 @@ async function getCategoryIdBySlugOrName(
   const auth = btoa(`${config.username}:${config.password}`);
 
   try {
-    // まずスラッグで検索
+    // 縺ｾ縺壹せ繝ｩ繝・げ縺ｧ讀懃ｴ｢
     let response = await fetch(
       `${config.url}/wp-json/wp/v2/categories?slug=${encodeURIComponent(categoryIdentifier)}`,
       { headers: { 'Authorization': `Basic ${auth}` } }
@@ -1020,7 +928,7 @@ async function getCategoryIdBySlugOrName(
       }
     }
 
-    // スラッグで見つからなければ名前で検索
+    // 繧ｹ繝ｩ繝・げ縺ｧ隕九▽縺九ｉ縺ｪ縺代ｌ縺ｰ蜷榊燕縺ｧ讀懃ｴ｢
     response = await fetch(
       `${config.url}/wp-json/wp/v2/categories?search=${encodeURIComponent(categoryIdentifier)}`,
       { headers: { 'Authorization': `Basic ${auth}` } }
@@ -1028,7 +936,7 @@ async function getCategoryIdBySlugOrName(
 
     if (response.ok) {
       const data = await response.json();
-      // 完全一致を探す
+      // 螳悟・荳閾ｴ繧呈爾縺・
       const exactMatch = data.find((cat: any) =>
         cat.name.toLowerCase() === categoryIdentifier.toLowerCase()
       );
@@ -1036,7 +944,7 @@ async function getCategoryIdBySlugOrName(
         console.log(`Found category by name "${categoryIdentifier}": ID ${exactMatch.id}`);
         return exactMatch.id;
       }
-      // 完全一致がなければ最初の結果を返す
+      // 螳悟・荳閾ｴ縺後↑縺代ｌ縺ｰ譛蛻昴・邨先棡繧定ｿ斐☆
       if (data.length > 0) {
         console.log(`Found category by partial match "${categoryIdentifier}": ID ${data[0].id}`);
         return data[0].id;
@@ -1051,7 +959,24 @@ async function getCategoryIdBySlugOrName(
   }
 }
 
-// WordPress投稿
+// WordPress謚慕ｨｿ
+function formatContentForWordPress(rawContent: string): string {
+  const text = String(rawContent ?? '');
+  // If content already includes HTML tags, keep as-is.
+  if (/<\/?[a-z][\s\S]*>/i.test(text)) {
+    return text;
+  }
+
+  return text
+    // Markdown headings -> HTML headings
+    .replace(/^######\s+(.+)$/gm, '<h6>$1</h6>')
+    .replace(/^#####\s+(.+)$/gm, '<h5>$1</h5>')
+    .replace(/^####\s+(.+)$/gm, '<h4>$1</h4>')
+    .replace(/^###\s+(.+)$/gm, '<h3>$1</h3>')
+    .replace(/^##\s+(.+)$/gm, '<h2>$1</h2>')
+    .replace(/^#\s+(.+)$/gm, '<h1>$1</h1>');
+}
+
 async function publishToWordPress(
   config: WordPressConfig,
   title: string,
@@ -1060,23 +985,23 @@ async function publishToWordPress(
 ): Promise<string> {
   const auth = btoa(`${config.username}:${config.password}`);
 
-  // カスタム投稿タイプに対応したエンドポイントを構築
+  // 繧ｫ繧ｹ繧ｿ繝謚慕ｨｿ繧ｿ繧､繝励↓蟇ｾ蠢懊＠縺溘お繝ｳ繝峨・繧､繝ｳ繝医ｒ讒狗ｯ・
   const postType = config.post_type || 'posts';
   const wpApiUrl = `${config.url}/wp-json/wp/v2/${postType}`;
   console.log(`Publishing to WordPress: ${wpApiUrl}`);
 
-  // カテゴリIDの取得（数値ID、スラッグ、名前に対応）
+  // 繧ｫ繝・ざ繝ｪID縺ｮ蜿門ｾ暦ｼ域焚蛟､ID縲√せ繝ｩ繝・げ縲∝錐蜑阪↓蟇ｾ蠢懶ｼ・
   let categoryIds: number[] = [];
   if (config.category) {
     const trimmed = config.category.trim();
 
-    // まず数値IDとしてパースを試みる
+    // 縺ｾ縺壽焚蛟､ID縺ｨ縺励※繝代・繧ｹ繧定ｩｦ縺ｿ繧・
     const parsed = parseInt(trimmed, 10);
     if (!isNaN(parsed)) {
       categoryIds = [parsed];
       console.log(`Using category ID: ${parsed}`);
     } else {
-      // スラッグまたは名前として検索
+      // 繧ｹ繝ｩ繝・げ縺ｾ縺溘・蜷榊燕縺ｨ縺励※讀懃ｴ｢
       console.log(`Looking up category by slug/name: ${trimmed}`);
       const categoryId = await getCategoryIdBySlugOrName(config, trimmed);
       if (categoryId) {
@@ -1096,7 +1021,7 @@ async function publishToWordPress(
     },
     body: JSON.stringify({
       title,
-      content,
+      content: formatContentForWordPress(content),
       status,
       categories: categoryIds
     })
@@ -1111,7 +1036,7 @@ async function publishToWordPress(
   return data.id.toString();
 }
 
-// Chatwork通知送信
+// Chatwork騾夂衍騾∽ｿ｡
 async function sendChatworkNotifications(
   apiToken: string,
   roomIdsStr: string,
@@ -1125,10 +1050,10 @@ async function sendChatworkNotifications(
 
   if (roomIds.length === 0) return;
 
-  // メッセージの構築
+  // 繝｡繝・そ繝ｼ繧ｸ縺ｮ讒狗ｯ・
   let body = template;
   if (!body) {
-    // デフォルトテンプレート
+    // 繝・ヵ繧ｩ繝ｫ繝医ユ繝ｳ繝励Ξ繝ｼ繝・
     body = `いつもお世話になっております。
 記事の投稿が完了しましたので、ご報告いたします。
 
@@ -1149,7 +1074,7 @@ async function sendChatworkNotifications(
 今後ともよろしくお願いいたします。`;
   }
 
-  // 変数置換
+  // 螟画焚鄂ｮ謠・
   body = body
     .replace(/{title}/g, title)
     .replace(/{url}/g, url)
@@ -1181,7 +1106,7 @@ async function sendChatworkNotifications(
   }
 }
 
-// 競合調査ヘルパー関数（SerpAPI経由）
+// 遶ｶ蜷郁ｪｿ譟ｻ繝倥Ν繝代・髢｢謨ｰ・・erpAPI邨檎罰・・
 async function conductCompetitorResearch(keyword: string, serpApiKey: string, limit: number = 5) {
   const searchUrl = `https://serpapi.com/search.json?engine=google&q=${encodeURIComponent(keyword)}&api_key=${serpApiKey}&gl=jp&hl=ja&num=${limit}`;
 
@@ -1215,7 +1140,7 @@ async function conductCompetitorResearch(keyword: string, serpApiKey: string, li
 
       const html = await res.text();
 
-      // 簡易的な見出し抽出（正規表現ベース）
+      // 邁｡譏鍋噪縺ｪ隕句・縺玲歓蜃ｺ・域ｭ｣隕剰｡ｨ迴ｾ繝吶・繧ｹ・・
       const h2Matches = html.match(/<h2[^>]*>([^<]+)<\/h2>/gi) || [];
       const h3Matches = html.match(/<h3[^>]*>([^<]+)<\/h3>/gi) || [];
 
@@ -1250,179 +1175,3 @@ async function conductCompetitorResearch(keyword: string, serpApiKey: string, li
   };
 }
 
-// === ファクトチェック用ヘルパー関数 ===
-
-/**
- * 記事からファクト情報を抽出（正規表現ベース）
- */
-async function extractFactsFromContent(
-  content: string,
-  userMarkedText?: string
-): Promise<any[]> {
-  const items: any[] = [];
-
-  // ユーザーマーク箇所を最優先で追加 [[]]
-  if (userMarkedText) {
-    const regex = /\[\[(.+?)\]\]/g;
-    let match;
-    while ((match = regex.exec(userMarkedText)) !== null) {
-      const start = Math.max(0, match.index - 50);
-      const end = Math.min(userMarkedText.length, match.index + match[0].length + 50);
-
-      items.push({
-        claim: match[1],
-        context: userMarkedText.substring(start, end),
-        priority: 'high'
-      });
-    }
-  }
-
-  // 数値の抽出（例: 「85%」「100万円」「2023年」）
-  const numberRegex = /(\d+(?:,\d{3})*(?:\.\d+)?[%円万億兆ドル年月日人件個])/g;
-  let match;
-
-  while ((match = numberRegex.exec(content)) !== null) {
-    const start = Math.max(0, match.index - 30);
-    const end = Math.min(content.length, match.index + match[0].length + 30);
-
-    items.push({
-      claim: match[0],
-      context: content.substring(start, end),
-      priority: 'normal'
-    });
-  }
-
-  // 日付の抽出
-  const dateRegex = /(\d{4}年\d{1,2}月\d{1,2}日|\d{4}年\d{1,2}月|\d{4}年)/g;
-  while ((match = dateRegex.exec(content)) !== null) {
-    const start = Math.max(0, match.index - 30);
-    const end = Math.min(content.length, match.index + match[0].length + 30);
-
-    items.push({
-      claim: match[0],
-      context: content.substring(start, end),
-      priority: 'normal'
-    });
-  }
-
-  // 優先度でソート（high → normal）
-  return items.sort((a, b) => a.priority === 'high' ? -1 : 1);
-}
-
-/**
- * Perplexity APIで複数の事実を一括検証（バッチ処理）
- */
-async function verifyFactsBatch(
-  items: any[],
-  apiKey: string,
-  keyword: string,
-  modelName: string = 'sonar',
-  batchSize: number = 5
-): Promise<any[]> {
-  const results: any[] = [];
-
-  // バッチに分割
-  for (let i = 0; i < items.length; i += batchSize) {
-    const batch = items.slice(i, i + batchSize);
-
-    // バッチ用プロンプト作成
-    const claimsList = batch.map((item, idx) =>
-      `${idx + 1}. 【主張】${item.claim}\n   【文脈】${item.context}`
-    ).join('\n\n');
-
-    const prompt = `以下のリストにある各主張について、最新のWeb情報を元に一括でファクトチェックしてください。
-
-【検証リスト】
-${claimsList}
-
-【関連キーワード】${keyword}
-
-【回答形式】
-JSON配列で以下の形式で返してくださ い:
-[
-  {
-    "claim_number": 1,
-    "verdict": "correct | incorrect | partially_correct | unverified",
-    "confidence": 0-100,
-    "correct_info": "正しい情報（誤りの場合のみ）",
-    "explanation": "説明",
-    "source_url": "出典URL"
-  }
-]`;
-
-    try {
-      const response = await fetch('https://api.perplexity.ai/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`
-        },
-        body: JSON.stringify({
-          model: modelName,
-          messages: [
-            { role: 'system', content: 'You are a fact-checking expert. Verify the truth of the provided information and provide reliable sources in Japanese.' },
-            { role: 'user', content: prompt }
-          ],
-          temperature: 0.1
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error(`Perplexity API error: ${response.status}`);
-      }
-
-      const data = await response.json();
-      const content = data.choices[0].message.content;
-
-      // JSONパース
-      let batchResults;
-      try {
-        // JSON配列を抽出（マークダウンコードブロックを除去）
-        const jsonMatch = content.match(/\[[\s\S]*\]/);
-        batchResults = JSON.parse(jsonMatch ? jsonMatch[0] : content);
-      } catch {
-        console.error('Failed to parse batch results, treating as unverified');
-        batchResults = batch.map((_, idx) => ({
-          claim_number: idx + 1,
-          verdict: 'unverified',
-          confidence: 0,
-          explanation: 'パース失敗',
-          source_url: ''
-        }));
-      }
-
-      // 結果をマージ
-      batch.forEach((item, idx) => {
-        const result = batchResults.find((r: any) => r.claim_number === idx + 1) || batchResults[idx];
-        results.push({
-          claim: item.claim,
-          verdict: result.verdict,
-          confidence: result.confidence,
-          correctInfo: result.correct_info,
-          sourceUrl: result.source_url,
-          explanation: result.explanation
-        });
-      });
-
-      // Rate limiting対策: バッチ間で2秒待機
-      if (i + batchSize < items.length) {
-        await new Promise(resolve => setTimeout(resolve, 2000));
-      }
-
-    } catch (error: any) {
-      console.error(`Batch verification failed for items ${i}-${i + batchSize}:`, error);
-      // エラー時は未検証として記録
-      batch.forEach(item => {
-        results.push({
-          claim: item.claim,
-          verdict: 'unverified',
-          confidence: 0,
-          explanation: `エラー: ${error.message}`,
-          sourceUrl: ''
-        });
-      });
-    }
-  }
-
-  return results;
-}
