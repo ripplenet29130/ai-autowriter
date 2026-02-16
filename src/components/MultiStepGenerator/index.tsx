@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import { ArrowLeft, Sparkles } from 'lucide-react';
 import { useMultiStepGeneration } from '../../hooks/useMultiStepGeneration';
 import { useAppStore } from '../../store/useAppStore';
@@ -67,22 +67,22 @@ export const MultiStepGenerator: React.FC<MultiStepGeneratorProps> = ({
     const [hasStarted, setHasStarted] = useState(false);
     const [localSelectedTitle, setLocalSelectedTitle] = useState<string | null>(selectedTitle || null);
 
-    // 完了したステップを取得
+    // 螳御ｺ・＠縺溘せ繝・ャ繝励ｒ蜿門ｾ・
     const completedSteps: GenerationStep[] = stepResults
         .filter(r => r.status === 'completed')
         .map(r => r.step);
 
-    // Step 1を自動実行
+    // Step 1繧定・蜍募ｮ溯｡・
     useEffect(() => {
         if (!hasStarted) {
             setHasStarted(true);
 
-            // タイトルセット選択時はStep 2（タイトル選択）へ即座に移動
+            // 繧ｿ繧､繝医Ν繧ｻ繝・ヨ驕ｸ謚樊凾縺ｯStep 2・医ち繧､繝医Ν驕ｸ謚橸ｼ峨∈蜊ｳ蠎ｧ縺ｫ遘ｻ蜍・
             if (selectedTitleSet) {
-                // Step 2へ進むには、currentStepを2にする必要があるが、
-                // useMultiStepGenerationの初期値は1。
-                // trendDataがない状態でStep 2のTitleSelectionStepを表示することになる。
-                // nextStep()を呼ぶと +1 される
+                // Step 2縺ｸ騾ｲ繧縺ｫ縺ｯ縲…urrentStep繧・縺ｫ縺吶ｋ蠢・ｦ√′縺ゅｋ縺後・
+                // useMultiStepGeneration縺ｮ蛻晄悄蛟､縺ｯ1縲・
+                // trendData縺後↑縺・憾諷九〒Step 2縺ｮTitleSelectionStep繧定｡ｨ遉ｺ縺吶ｋ縺薙→縺ｫ縺ｪ繧九・
+                // nextStep()繧貞他縺ｶ縺ｨ +1 縺輔ｌ繧・
                 nextStep();
                 return;
             }
@@ -91,35 +91,34 @@ export const MultiStepGenerator: React.FC<MultiStepGeneratorProps> = ({
                 handleStep1();
             }
         }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []); // 依存配列を空にして初回のみ実行
+    }, []); // 萓晏ｭ倬・蛻励ｒ遨ｺ縺ｫ縺励※蛻晏屓縺ｮ縺ｿ螳溯｡・
 
-    // Step 1: 競合調査 (競合分析を実行するが、自動でStep 2には進まない)
+    // Step 1: 遶ｶ蜷郁ｪｿ譟ｻ (遶ｶ蜷亥・譫舌ｒ螳溯｡後☆繧九′縲∬・蜍輔〒Step 2縺ｫ縺ｯ騾ｲ縺ｾ縺ｪ縺・
     const handleStep1 = async () => {
         if (trendData) {
-            // 既にtrendDataがある場合は何もしない（ユーザーが次へボタンを押すのを待つ）
+            // 譌｢縺ｫtrendData縺後≠繧句ｴ蜷医・菴輔ｂ縺励↑縺・ｼ医Θ繝ｼ繧ｶ繝ｼ縺梧ｬ｡縺ｸ繝懊ち繝ｳ繧呈款縺吶・繧貞ｾ・▽・・
             return;
         };
         await executeStep1(keywords);
-        // Step 1完了後はここで止まり、ユーザーが競合分析結果を確認できる
-        // ユーザーが「次へ」ボタンを押すとhandleStep2Generateが呼ばれる
+        // Step 1螳御ｺ・ｾ後・縺薙％縺ｧ豁｢縺ｾ繧翫√Θ繝ｼ繧ｶ繝ｼ縺檎ｫｶ蜷亥・譫千ｵ先棡繧堤｢ｺ隱阪〒縺阪ｋ
+        // 繝ｦ繝ｼ繧ｶ繝ｼ縺後梧ｬ｡縺ｸ縲阪・繧ｿ繝ｳ繧呈款縺吶→handleStep2Generate縺悟他縺ｰ繧後ｋ
     };
 
-    // Step 2: タイトル生成
-    // trendDataを引数で受け取るように変更（stale closure対策）
+    // Step 2: 繧ｿ繧､繝医Ν逕滓・
+    // trendData繧貞ｼ墓焚縺ｧ蜿励￠蜿悶ｋ繧医≧縺ｫ螟画峩・・tale closure蟇ｾ遲厄ｼ・
     const handleStep2Generate = async (trendDataParam?: typeof trendData) => {
         const effectiveTrendData = trendDataParam || trendData;
         if (!effectiveTrendData) return;
         await executeStep2(effectiveTrendData);
     };
 
-    // Step 3: アウトライン生成
+    // Step 3: 繧｢繧ｦ繝医Λ繧､繝ｳ逕滓・
     const handleStep3Generate = async () => {
         if (!trendData && !selectedTitleSet) return;
 
-        // タイトルセット使用時はトレンドデータがないためダミーを作成
+        // 繧ｿ繧､繝医Ν繧ｻ繝・ヨ菴ｿ逕ｨ譎ゅ・繝医Ξ繝ｳ繝峨ョ繝ｼ繧ｿ縺後↑縺・◆繧√ム繝溘・繧剃ｽ懈・
         const effectiveTrendData = trendData || {
-            keyword: keywords[0] || (selectedTitleSet ? '指定タイトル' : ''),
+            keyword: keywords[0] || (selectedTitleSet ? '謖・ｮ壹ち繧､繝医Ν' : ''),
             searchVolume: 0,
             competition: 'medium',
             trendScore: 0,
@@ -148,11 +147,11 @@ export const MultiStepGenerator: React.FC<MultiStepGeneratorProps> = ({
             tone,
             selectedTitle: localSelectedTitle || undefined,
             customInstructions,
-            targetWordCount // 追加
+            targetWordCount // 霑ｽ蜉
         });
     };
 
-    // Step 4: 本文生成
+    // Step 4: 譛ｬ譁・函謌・
     const handleStep4Generate = async () => {
         if (!outline) return;
 
@@ -162,25 +161,24 @@ export const MultiStepGenerator: React.FC<MultiStepGeneratorProps> = ({
         });
 
         if (result) {
-            // 記事をストアに追加
+            // 險倅ｺ九ｒ繧ｹ繝医い縺ｫ霑ｽ蜉
             addArticle(result);
 
 
         }
     };
 
-    // ステップをレンダリング
+    // 繧ｹ繝・ャ繝励ｒ繝ｬ繝ｳ繝繝ｪ繝ｳ繧ｰ
     const renderCurrentStep = () => {
         switch (currentStep) {
-            case 1:
             case 1:
                 if (isGenerating) {
                     return (
                         <div className="flex flex-col items-center justify-center py-16">
                             <div className="w-12 h-12 border-4 border-purple-200 border-t-purple-600 rounded-full animate-spin mb-4" />
-                            <p className="text-lg font-medium text-gray-900">記事生成の準備中...</p>
+                            <p className="text-lg font-medium text-gray-900">險倅ｺ狗函謌舌・貅門ｙ荳ｭ...</p>
                             <p className="text-sm text-gray-500 mt-2">
-                                競合分析とトレンド調査を行っています
+                                遶ｶ蜷亥・譫舌→繝医Ξ繝ｳ繝芽ｪｿ譟ｻ繧定｡後▲縺ｦ縺・∪縺・
                             </p>
                         </div>
                     );
@@ -245,7 +243,7 @@ export const MultiStepGenerator: React.FC<MultiStepGeneratorProps> = ({
 
     return (
         <div className="space-y-6">
-            {/* ヘッダー */}
+            {/* 繝倥ャ繝繝ｼ */}
             <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-3">
                     <button
@@ -254,30 +252,33 @@ export const MultiStepGenerator: React.FC<MultiStepGeneratorProps> = ({
                         disabled={isGenerating}
                     >
                         <ArrowLeft className="w-4 h-4" />
-                        <span>戻る</span>
+                        <span>謌ｻ繧・</span>
                     </button>
                     <div>
                         <h2 className="text-2xl font-bold text-gray-900 flex items-center space-x-2">
                             <Sparkles className="w-7 h-7 text-purple-600" />
-                            <span>対話型記事生成</span>
+                            <span>蟇ｾ隧ｱ蝙玖ｨ倅ｺ狗函謌・</span>
                         </h2>
                         <p className="text-gray-600 text-sm mt-1">
-                            キーワード: {keywords.join(', ')}
+                            繧ｭ繝ｼ繝ｯ繝ｼ繝・ {keywords.join(', ')}
                         </p>
                     </div>
                 </div>
             </div>
 
-            {/* ステップインジケーター */}
+            {/* 繧ｹ繝・ャ繝励う繝ｳ繧ｸ繧ｱ繝ｼ繧ｿ繝ｼ */}
             <StepIndicator
                 currentStep={(currentStep === 1 ? 1 : currentStep === 2 ? 1 : currentStep === 3 ? 2 : 3) as any}
                 completedSteps={completedSteps.map(s => s === 2 ? 1 : s === 3 ? 2 : s === 4 ? 3 : 0).filter(s => s > 0) as any}
             />
 
-            {/* 現在のステップ */}
+            {/* 迴ｾ蝨ｨ縺ｮ繧ｹ繝・ャ繝・*/}
             <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
                 {renderCurrentStep()}
             </div>
         </div>
     );
 };
+
+
+
