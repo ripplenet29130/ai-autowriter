@@ -1,4 +1,4 @@
-import { supabase } from './supabaseClient';
+﻿import { supabase } from './supabaseClient';
 
 export interface CustomTopic {
   id: string;
@@ -17,6 +17,7 @@ export interface CustomTopic {
 export const customTopicsService = {
   async createTopic(topic: Partial<CustomTopic>): Promise<CustomTopic | null> {
     try {
+      if (!supabase) return null;
       const { data, error } = await supabase
         .from('custom_topics')
         .insert([{
@@ -33,19 +34,20 @@ export const customTopicsService = {
         .single();
 
       if (error) {
-        console.error('トピックの作成に失敗しました:', error);
+        console.error('繝医ヴ繝・け縺ｮ菴懈・縺ｫ螟ｱ謨励＠縺ｾ縺励◆:', error);
         return null;
       }
 
       return this.mapFromDatabase(data);
     } catch (err) {
-      console.error('トピック作成エラー:', err);
+      console.error('繝医ヴ繝・け菴懈・繧ｨ繝ｩ繝ｼ:', err);
       return null;
     }
   },
 
   async updateTopic(id: string, updates: Partial<CustomTopic>): Promise<CustomTopic | null> {
     try {
+      if (!supabase) return null;
       const updateData: any = {};
 
       if (updates.topicName !== undefined) updateData.topic_name = updates.topicName;
@@ -65,38 +67,40 @@ export const customTopicsService = {
         .single();
 
       if (error) {
-        console.error('トピックの更新に失敗しました:', error);
+        console.error('繝医ヴ繝・け縺ｮ譖ｴ譁ｰ縺ｫ螟ｱ謨励＠縺ｾ縺励◆:', error);
         return null;
       }
 
       return this.mapFromDatabase(data);
     } catch (err) {
-      console.error('トピック更新エラー:', err);
+      console.error('繝医ヴ繝・け譖ｴ譁ｰ繧ｨ繝ｩ繝ｼ:', err);
       return null;
     }
   },
 
   async deleteTopic(id: string): Promise<boolean> {
     try {
+      if (!supabase) return false;
       const { error } = await supabase
         .from('custom_topics')
         .delete()
         .eq('id', id);
 
       if (error) {
-        console.error('トピックの削除に失敗しました:', error);
+        console.error('繝医ヴ繝・け縺ｮ蜑企勁縺ｫ螟ｱ謨励＠縺ｾ縺励◆:', error);
         return false;
       }
 
       return true;
     } catch (err) {
-      console.error('トピック削除エラー:', err);
+      console.error('繝医ヴ繝・け蜑企勁繧ｨ繝ｩ繝ｼ:', err);
       return false;
     }
   },
 
   async getTopic(id: string): Promise<CustomTopic | null> {
     try {
+      if (!supabase) return null;
       const { data, error } = await supabase
         .from('custom_topics')
         .select('*')
@@ -104,19 +108,20 @@ export const customTopicsService = {
         .single();
 
       if (error) {
-        console.error('トピックの取得に失敗しました:', error);
+        console.error('繝医ヴ繝・け縺ｮ蜿門ｾ励↓螟ｱ謨励＠縺ｾ縺励◆:', error);
         return null;
       }
 
       return this.mapFromDatabase(data);
     } catch (err) {
-      console.error('トピック取得エラー:', err);
+      console.error('繝医ヴ繝・け蜿門ｾ励お繝ｩ繝ｼ:', err);
       return null;
     }
   },
 
   async getAllTopics(sortBy: 'recent' | 'frequent' | 'favorite' = 'recent', limit: number = 50): Promise<CustomTopic[]> {
     try {
+      if (!supabase) return [];
       let query = supabase.from('custom_topics').select('*');
 
       switch (sortBy) {
@@ -137,13 +142,13 @@ export const customTopicsService = {
       const { data, error } = await query;
 
       if (error) {
-        console.error('トピック一覧の取得に失敗しました:', error);
+        console.error('繝医ヴ繝・け荳隕ｧ縺ｮ蜿門ｾ励↓螟ｱ謨励＠縺ｾ縺励◆:', error);
         return [];
       }
 
       return data.map((item: any) => this.mapFromDatabase(item));
     } catch (err) {
-      console.error('トピック一覧取得エラー:', err);
+      console.error('繝医ヴ繝・け荳隕ｧ蜿門ｾ励お繝ｩ繝ｼ:', err);
       return [];
     }
   },
@@ -154,6 +159,7 @@ export const customTopicsService = {
 
   async getTopicByName(topicName: string): Promise<CustomTopic | null> {
     try {
+      if (!supabase) return null;
       const { data, error } = await supabase
         .from('custom_topics')
         .select('*')
@@ -161,19 +167,20 @@ export const customTopicsService = {
         .maybeSingle();
 
       if (error) {
-        console.error('トピック名での取得に失敗しました:', error);
+        console.error('繝医ヴ繝・け蜷阪〒縺ｮ蜿門ｾ励↓螟ｱ謨励＠縺ｾ縺励◆:', error);
         return null;
       }
 
       return data ? this.mapFromDatabase(data) : null;
     } catch (err) {
-      console.error('トピック名取得エラー:', err);
+      console.error('繝医ヴ繝・け蜷榊叙蠕励お繝ｩ繝ｼ:', err);
       return null;
     }
   },
 
   async incrementUseCount(id: string): Promise<boolean> {
     try {
+      if (!supabase) return false;
       const { error } = await supabase.rpc('increment_topic_use_count', { topic_id: id });
 
       if (error) {
@@ -207,7 +214,7 @@ export const customTopicsService = {
       await this.updateTopic(id, { isFavorite: !topic.isFavorite });
       return true;
     } catch (err) {
-      console.error('お気に入り切替エラー:', err);
+      console.error('縺頑ｰ励↓蜈･繧雁・譖ｿ繧ｨ繝ｩ繝ｼ:', err);
       return false;
     }
   },
@@ -243,3 +250,4 @@ export const customTopicsService = {
     };
   }
 };
+

@@ -58,6 +58,7 @@ export const ContentGenerationStep: React.FC<ContentGenerationStepProps> = ({
     // ファクトチェック用のstate
     const [factCheckResults, setFactCheckResults] = useState<FactCheckResult[]>([]);
     const [isFactChecking, setIsFactChecking] = useState(false);
+    const [factCheckProgress, setFactCheckProgress] = useState<{ total: number; processed: number } | null>(null);
 
     // 初期値として最初のアクティブな設定を選択
     React.useEffect(() => {
@@ -71,6 +72,7 @@ export const ContentGenerationStep: React.FC<ContentGenerationStepProps> = ({
 
         setIsFactChecking(true);
         setFactCheckResults([]);
+        setFactCheckProgress(null);
 
         try {
             const items = factCheckService.extractFacts(article.content);
@@ -84,7 +86,9 @@ export const ContentGenerationStep: React.FC<ContentGenerationStepProps> = ({
                 ? article.keywords[0]
                 : article.title;
 
-            const results = await factCheckService.verifyFacts(items, keyword);
+            const results = await factCheckService.verifyFacts(items, keyword, undefined, (progress) => {
+                setFactCheckProgress(progress);
+            });
             setFactCheckResults(results);
 
             if (results.length > 0) {
@@ -303,7 +307,10 @@ export const ContentGenerationStep: React.FC<ContentGenerationStepProps> = ({
                                         <ShieldCheck className={`w-6 h-6 ${isFactChecking ? 'animate-pulse' : ''}`} />
                                     </button>
                                     <button
-                                        onClick={() => setShowPreview(false)}
+                                        onClick={() => {
+                                            setShowPreview(false);
+                                            setFactCheckProgress(null);
+                                        }}
                                         className="p-3 hover:bg-gray-100 rounded-2xl transition-all"
                                     >
                                         <X className="w-6 h-6 text-gray-400" />
@@ -313,6 +320,14 @@ export const ContentGenerationStep: React.FC<ContentGenerationStepProps> = ({
 
                             {/* モーダルコンテンツ */}
                             <div className="flex-1 overflow-y-auto p-8 custom-scrollbar">
+                                {isFactChecking && factCheckProgress && (
+                                    <div className="mb-4 bg-blue-50 border border-blue-200 rounded-xl p-3">
+                                        <div className="text-sm font-medium text-blue-900">ファクトチェック実行中...</div>
+                                        <div className="text-xs text-blue-700 mt-1">
+                                            {factCheckProgress.processed} / {factCheckProgress.total} 件を処理
+                                        </div>
+                                    </div>
+                                )}
                                 {factCheckResults.length > 0 && (
                                     <div className="mb-6">
                                         <FactCheckResultsDisplay results={factCheckResults} />

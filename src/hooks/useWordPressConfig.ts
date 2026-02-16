@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react';
+import { v4 as uuidv4 } from 'uuid';
 import { WordPressConfig } from '../types';
 import { useAppStore } from '../store/useAppStore';
 import { WordPressService } from '../services/wordPressService';
@@ -12,7 +13,7 @@ const wpLogger = logger.createLogger('WordPressConfig');
  * WordPress設定管理のカスタムフック
  */
 export function useWordPressConfig() {
-    const { wordPressConfigs, addWordPressConfig, updateWordPressConfig, deleteWordPressConfig } = useAppStore();
+    const { wordPressConfigs, addWordPressConfig, updateWordPressConfig, deleteWordPressConfig, activateWordPressConfig } = useAppStore();
     const [isTestingConnection, setIsTestingConnection] = useState(false);
 
     /**
@@ -48,11 +49,11 @@ export function useWordPressConfig() {
      * 設定をアクティブにする
      */
     const setActive = useCallback((configId: string) => {
-        // 選択した設定をアクティブにする（他の設定は変更しない）
-        updateWordPressConfig(configId, { isActive: true });
-        toast.success('アクティブな設定を追加しました');
+        // 他の設定を非アクティブにし、この設定をアクティブにする
+        activateWordPressConfig(configId);
+        toast.success('設定をアクティブにしました');
         wpLogger.info(`設定をアクティブ化: ${configId}`);
-    }, [updateWordPressConfig]);
+    }, [activateWordPressConfig]);
 
     /**
      * アクティブ状態を解除する
@@ -81,8 +82,8 @@ export function useWordPressConfig() {
     const addConfig = useCallback((config: Omit<WordPressConfig, 'id'>) => {
         const newConfig: WordPressConfig = {
             ...config,
-            id: `wp-${Date.now()}`,
-            isActive: wordPressConfigs.length === 0, // 最初の設定は自動的にアクティブ
+            id: uuidv4(),
+            isActive: true, // 全ての設定をデフォルトでアクティブにする
         };
 
         addWordPressConfig(newConfig);
@@ -90,7 +91,7 @@ export function useWordPressConfig() {
         wpLogger.info(`設定を追加: ${newConfig.name}`);
 
         return newConfig;
-    }, [wordPressConfigs.length, addWordPressConfig]);
+    }, [addWordPressConfig]);
 
     return {
         configs: wordPressConfigs,

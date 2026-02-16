@@ -29,14 +29,20 @@ export const PublishControl: React.FC<PublishControlProps> = ({
     const [selectedConfig, setSelectedConfig] = useState<string>('');
     const [category, setCategory] = useState<string>('');
 
-    const activeConfigs = wordPressConfigs.filter(c => c.isActive);
-    const defaultConfig = activeConfigs.length > 0 ? activeConfigs[0].id : '';
+    // アクティブな順にソートして全ての設定を表示
+    const sortedConfigs = [...wordPressConfigs].sort((a, b) => {
+        if (a.isActive === b.isActive) return 0;
+        return a.isActive ? -1 : 1;
+    });
+
+    const activeConfig = wordPressConfigs.find(c => c.isActive) || (wordPressConfigs.length > 0 ? wordPressConfigs[0] : null);
+    const defaultConfigId = activeConfig ? activeConfig.id : '';
 
     React.useEffect(() => {
-        if (defaultConfig && !selectedConfig) {
-            setSelectedConfig(defaultConfig);
+        if (defaultConfigId && !selectedConfig) {
+            setSelectedConfig(defaultConfigId);
         }
-    }, [defaultConfig, selectedConfig]);
+    }, [defaultConfigId, selectedConfig]);
 
     const handlePublish = () => {
         if (selectedConfig) {
@@ -57,19 +63,19 @@ export const PublishControl: React.FC<PublishControlProps> = ({
                 <select
                     value={selectedConfig}
                     onChange={(e) => setSelectedConfig(e.target.value)}
-                    disabled={isPublishing || activeConfigs.length === 0}
+                    disabled={isPublishing || wordPressConfigs.length === 0}
                     className="input-field"
                 >
                     <option value="">選択してください</option>
-                    {activeConfigs.map((config) => (
+                    {sortedConfigs.map((config) => (
                         <option key={config.id} value={config.id}>
-                            {config.name} ({config.url})
+                            {config.name} ({config.url}) {config.isActive ? '★' : ''}
                         </option>
                     ))}
                 </select>
-                {activeConfigs.length === 0 && (
+                {wordPressConfigs.length === 0 && (
                     <p className="text-sm text-red-600 mt-1">
-                        有効なWordPress設定を追加、または有効化してください
+                        WordPress設定を追加してください
                     </p>
                 )}
             </div>
@@ -126,7 +132,7 @@ export const PublishControl: React.FC<PublishControlProps> = ({
             <div className="pt-4 border-t border-gray-200">
                 <button
                     onClick={handlePublish}
-                    disabled={isPublishing || !selectedConfig || activeConfigs.length === 0}
+                    disabled={isPublishing || !selectedConfig || wordPressConfigs.length === 0}
                     className="w-full btn-primary flex items-center justify-center space-x-2 py-3"
                 >
                     {isPublishing ? (

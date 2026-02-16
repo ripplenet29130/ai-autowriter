@@ -1,4 +1,4 @@
-import { supabase } from './supabaseClient';
+﻿import { supabase } from './supabaseClient';
 import { Article } from '../types';
 
 export interface ArticleFilters {
@@ -49,19 +49,23 @@ export const articlesService = {
         .single();
 
       if (error) {
-        console.error('記事の作成に失敗しました:', error);
+        console.error('險倅ｺ九・菴懈・縺ｫ螟ｱ謨励＠縺ｾ縺励◆:', error);
         return null;
       }
 
       return this.mapFromDatabase(data);
     } catch (err) {
-      console.error('記事作成エラー:', err);
+      console.error('險倅ｺ倶ｽ懈・繧ｨ繝ｩ繝ｼ:', err);
       return null;
     }
   },
 
   async updateArticle(id: string, updates: Partial<Article>): Promise<Article | null> {
     try {
+      if (!supabase) {
+        console.warn('Database disabled: supabase client is null');
+        return null;
+      }
       const updateData: any = {};
 
       if (updates.title !== undefined) updateData.title = updates.title;
@@ -93,13 +97,13 @@ export const articlesService = {
         .single();
 
       if (error) {
-        console.error('記事の更新に失敗しました:', error);
+        console.error('險倅ｺ九・譖ｴ譁ｰ縺ｫ螟ｱ謨励＠縺ｾ縺励◆:', error);
         return null;
       }
 
       return this.mapFromDatabase(data);
     } catch (err) {
-      console.error('記事更新エラー:', err);
+      console.error('險倅ｺ区峩譁ｰ繧ｨ繝ｩ繝ｼ:', err);
       return null;
     }
   },
@@ -113,19 +117,23 @@ export const articlesService = {
         .eq('id', id);
 
       if (error) {
-        console.error('記事の削除に失敗しました:', error);
+        console.error('險倅ｺ九・蜑企勁縺ｫ螟ｱ謨励＠縺ｾ縺励◆:', error);
         return false;
       }
 
       return true;
     } catch (err) {
-      console.error('記事削除エラー:', err);
+      console.error('險倅ｺ句炎髯､繧ｨ繝ｩ繝ｼ:', err);
       return false;
     }
   },
 
   async getArticle(id: string): Promise<Article | null> {
     try {
+      if (!supabase) {
+        console.warn('Database disabled: supabase client is null');
+        return null;
+      }
       const { data, error } = await supabase
         .from('articles')
         .select('*')
@@ -133,13 +141,13 @@ export const articlesService = {
         .single();
 
       if (error) {
-        console.error('記事の取得に失敗しました:', error);
+        console.error('險倅ｺ九・蜿門ｾ励↓螟ｱ謨励＠縺ｾ縺励◆:', error);
         return null;
       }
 
       return this.mapFromDatabase(data);
     } catch (err) {
-      console.error('記事取得エラー:', err);
+      console.error('險倅ｺ句叙蠕励お繝ｩ繝ｼ:', err);
       return null;
     }
   },
@@ -188,19 +196,23 @@ export const articlesService = {
       const { data, error } = await query;
 
       if (error) {
-        console.error('記事一覧の取得に失敗しました:', error);
+        console.error('險倅ｺ倶ｸ隕ｧ縺ｮ蜿門ｾ励↓螟ｱ謨励＠縺ｾ縺励◆:', error);
         return [];
       }
 
       return data.map((item: any) => this.mapFromDatabase(item));
     } catch (err) {
-      console.error('記事一覧取得エラー:', err);
+      console.error('險倅ｺ倶ｸ隕ｧ蜿門ｾ励お繝ｩ繝ｼ:', err);
       return [];
     }
   },
 
   async getArticleCount(filters?: ArticleFilters): Promise<number> {
     try {
+      if (!supabase) {
+        console.warn('Database disabled: supabase client is null');
+        return 0;
+      }
       let query = supabase.from('articles').select('*', { count: 'exact', head: true });
 
       if (filters?.status) {
@@ -226,13 +238,13 @@ export const articlesService = {
       const { count, error } = await query;
 
       if (error) {
-        console.error('記事数の取得に失敗しました:', error);
+        console.error('險倅ｺ区焚縺ｮ蜿門ｾ励↓螟ｱ謨励＠縺ｾ縺励◆:', error);
         return 0;
       }
 
       return count || 0;
     } catch (err) {
-      console.error('記事数取得エラー:', err);
+      console.error('險倅ｺ区焚蜿門ｾ励お繝ｩ繝ｼ:', err);
       return 0;
     }
   },
@@ -273,3 +285,4 @@ export const articlesService = {
     };
   }
 };
+

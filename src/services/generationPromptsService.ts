@@ -1,4 +1,4 @@
-import { supabase } from './supabaseClient';
+﻿import { supabase } from './supabaseClient';
 import { GenerationPrompt } from '../types';
 
 export interface GenerationPromptRecord {
@@ -19,6 +19,7 @@ export interface GenerationPromptRecord {
 export const generationPromptsService = {
   async createPrompt(articleId: string | null, prompt: GenerationPrompt): Promise<GenerationPromptRecord | null> {
     try {
+      if (!supabase) return null;
       const { data, error } = await supabase
         .from('generation_prompts')
         .insert([{
@@ -37,19 +38,20 @@ export const generationPromptsService = {
         .single();
 
       if (error) {
-        console.error('プロンプトの保存に失敗しました:', error);
+        console.error('繝励Ο繝ｳ繝励ヨ縺ｮ菫晏ｭ倥↓螟ｱ謨励＠縺ｾ縺励◆:', error);
         return null;
       }
 
       return this.mapFromDatabase(data);
     } catch (err) {
-      console.error('プロンプト保存エラー:', err);
+      console.error('繝励Ο繝ｳ繝励ヨ菫晏ｭ倥お繝ｩ繝ｼ:', err);
       return null;
     }
   },
 
   async getPromptsByArticle(articleId: string): Promise<GenerationPromptRecord[]> {
     try {
+      if (!supabase) return [];
       const { data, error } = await supabase
         .from('generation_prompts')
         .select('*')
@@ -57,19 +59,20 @@ export const generationPromptsService = {
         .order('created_at', { ascending: false });
 
       if (error) {
-        console.error('記事のプロンプト取得に失敗しました:', error);
+        console.error('險倅ｺ九・繝励Ο繝ｳ繝励ヨ蜿門ｾ励↓螟ｱ謨励＠縺ｾ縺励◆:', error);
         return [];
       }
 
       return data.map((item: any) => this.mapFromDatabase(item));
     } catch (err) {
-      console.error('プロンプト取得エラー:', err);
+      console.error('繝励Ο繝ｳ繝励ヨ蜿門ｾ励お繝ｩ繝ｼ:', err);
       return [];
     }
   },
 
   async getRecentPrompts(limit: number = 20): Promise<GenerationPromptRecord[]> {
     try {
+      if (!supabase) return [];
       const { data, error } = await supabase
         .from('generation_prompts')
         .select('*')
@@ -77,13 +80,13 @@ export const generationPromptsService = {
         .limit(limit);
 
       if (error) {
-        console.error('最近のプロンプト取得に失敗しました:', error);
+        console.error('譛霑代・繝励Ο繝ｳ繝励ヨ蜿門ｾ励↓螟ｱ謨励＠縺ｾ縺励◆:', error);
         return [];
       }
 
       return data.map((item: any) => this.mapFromDatabase(item));
     } catch (err) {
-      console.error('プロンプト取得エラー:', err);
+      console.error('繝励Ο繝ｳ繝励ヨ蜿門ｾ励お繝ｩ繝ｼ:', err);
       return [];
     }
   },
@@ -105,3 +108,4 @@ export const generationPromptsService = {
     };
   }
 };
+

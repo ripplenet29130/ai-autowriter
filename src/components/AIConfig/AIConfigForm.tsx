@@ -131,7 +131,7 @@ export const AIConfigForm: React.FC<AIConfigFormProps> = ({
                     toast.error(`Claude API接続エラー: ${error.error?.message || 'Unknown error'}`);
                 }
             } else if (config.provider === 'gemini') {
-                const modelName = config.model || 'gemini-2.0-flash';
+                const modelName = 'gemini-2.0-flash-preview-image-generation';
                 const response = await fetch(
                     `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${config.apiKey}`,
                     {
@@ -177,7 +177,7 @@ export const AIConfigForm: React.FC<AIConfigFormProps> = ({
         setTestingImageGeneration(true);
 
         try {
-            const modelName = config.model || 'gemini-2.0-flash';
+            const modelName = 'gemini-2.0-flash-preview-image-generation';
             const testPrompt = 'テスト用のシンプルな風景画像を1枚生成してください。';
             const response = await fetch(
                 `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${config.apiKey}`,
@@ -192,6 +192,7 @@ export const AIConfigForm: React.FC<AIConfigFormProps> = ({
                             temperature: 0.2,
                             maxOutputTokens: 256,
                         },
+                        responseModalities: ['TEXT', 'IMAGE'],
                     }),
                 }
             );
@@ -219,8 +220,9 @@ export const AIConfigForm: React.FC<AIConfigFormProps> = ({
                 return;
             }
 
-            const imagePart = data?.candidates?.[0]?.content?.parts?.find((part: any) => part.inlineData);
-            if (!imagePart?.inlineData?.data) {
+            const imagePart = data?.candidates?.[0]?.content?.parts?.find((part: any) => part.inlineData || part.inline_data);
+            const inlineData = imagePart?.inlineData || imagePart?.inline_data;
+            if (!inlineData?.data) {
                 toast.error('画像テストは成功しましたが、画像データを取得できませんでした');
                 return;
             }
@@ -516,3 +518,4 @@ export const AIConfigForm: React.FC<AIConfigFormProps> = ({
         </div>
     );
 };
+

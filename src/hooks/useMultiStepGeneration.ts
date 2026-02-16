@@ -299,6 +299,10 @@ export function useMultiStepGeneration() {
         options?: {
             targetLength?: 'short' | 'medium' | 'long';
             tone?: 'professional' | 'casual' | 'technical' | 'friendly';
+            selectedTitle?: string;
+            targetWordCount?: number;
+            customInstructions?: string;
+            imagesPerArticle?: number; // 追加
         }
     ): Promise<Article | null> => {
         try {

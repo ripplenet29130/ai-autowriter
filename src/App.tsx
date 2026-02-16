@@ -1,4 +1,4 @@
-import { BrowserRouter as Router } from 'react-router-dom';
+﻿import { BrowserRouter as Router } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { useEffect } from 'react';
 import { Layout } from './components/Layout';
@@ -20,7 +20,6 @@ function App() {
     loadFromSupabase().catch(error => {
       console.error('Failed to load from Supabase:', error);
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const renderContent = () => {
@@ -53,13 +52,13 @@ function App() {
       return (
         <div className="p-6 text-center">
           <div className="bg-red-50 border border-red-200 rounded-lg p-6">
-            <h2 className="text-xl font-bold text-red-600 mb-4">コンテンツの読み込みエラー</h2>
+            <h2 className="text-xl font-bold text-red-600 mb-4">繧ｳ繝ｳ繝・Φ繝・・隱ｭ縺ｿ霎ｼ縺ｿ繧ｨ繝ｩ繝ｼ</h2>
             <p className="text-red-700 mb-4">このページの表示中にエラーが発生しました。</p>
             <button
               onClick={() => window.location.reload()}
               className="bg-red-600 hover:bg-red-700 text-white font-medium px-6 py-2.5 rounded-lg transition-all duration-200"
             >
-              ページを再読み込み
+              繝壹・繧ｸ繧貞・隱ｭ縺ｿ霎ｼ縺ｿ
             </button>
           </div>
         </div>
@@ -102,13 +101,13 @@ function App() {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
         <div className="bg-white rounded-lg shadow-lg p-8 max-w-md w-full text-center">
-          <h1 className="text-2xl font-bold text-red-600 mb-4">アプリケーションエラー</h1>
+          <h1 className="text-2xl font-bold text-red-600 mb-4">繧｢繝励Μ繧ｱ繝ｼ繧ｷ繝ｧ繝ｳ繧ｨ繝ｩ繝ｼ</h1>
           <p className="text-gray-600 mb-6">アプリケーションの読み込み中にエラーが発生しました。</p>
           <button
             onClick={() => window.location.reload()}
             className="bg-blue-600 hover:bg-blue-700 text-white font-medium px-6 py-2.5 rounded-lg transition-all duration-200"
           >
-            ページを再読み込み
+            繝壹・繧ｸ繧貞・隱ｭ縺ｿ霎ｼ縺ｿ
           </button>
         </div>
       </div>
@@ -117,3 +116,5 @@ function App() {
 }
 
 export default App;
+
+
