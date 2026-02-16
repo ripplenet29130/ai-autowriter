@@ -16,6 +16,7 @@ export interface SectionGenerationRequest {
 export interface FactCheckSettings {
     id: string;
     enabled: boolean;
+    autoFixEnabled?: boolean;
     maxItemsToCheck: number;
     perplexityApiKey: string;
     createdAt?: Date | string;
