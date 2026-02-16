@@ -96,6 +96,14 @@ export const ArticlesList: React.FC = () => {
     }
     return changed;
   };
+  const hasFixableIssues = (results: FactCheckResult[]): boolean => {
+    return results.some((result) => {
+      if (result.verdict === 'incorrect') return true;
+      if (result.verdict === 'partially_correct') return true;
+      if (result.verdict === 'unverified') return true;
+      return false;
+    });
+  };
   const loadArticles = async () => {
     try {
       setIsLoading(true);
@@ -186,7 +194,7 @@ export const ArticlesList: React.FC = () => {
         toast.success(`ファクトチェック完了: ${results.length}件を検証しました`);
         const settings = await factCheckService.getSettings();
         setAutoFixEnabled(Boolean(settings?.auto_fix_enabled));
-        if (settings?.auto_fix_enabled && factCheckService.hasFixableIssues(results)) {
+        if (settings?.auto_fix_enabled && hasFixableIssues(results)) {
           await handleFactCheckFix(results);
         }
       } else {
@@ -231,7 +239,7 @@ export const ArticlesList: React.FC = () => {
       toast.error('先にファクトチェックを実行してください');
       return;
     }
-    if (!factCheckService.hasFixableIssues(results)) {
+    if (!hasFixableIssues(results)) {
       toast('修正対象の指摘は見つかりませんでした', { icon: 'ℹ️' });
       return;
     }
@@ -326,7 +334,7 @@ export const ArticlesList: React.FC = () => {
       .join('\n');
   }, [selectedArticle, factCheckFixedLineNumbers]);
   const categories = Array.from(new Set(localArticles.map(a => a.category).filter(Boolean)));
-  const canApplyFactCheckFix = factCheckService.hasFixableIssues(factCheckResults);
+  const canApplyFactCheckFix = hasFixableIssues(factCheckResults);
 
   return (
     <div className="space-y-6">
@@ -1052,6 +1060,7 @@ export const ArticlesList: React.FC = () => {
     </div >
   );
 };
+
 
 
 
