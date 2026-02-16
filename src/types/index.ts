@@ -1,4 +1,4 @@
-import { FactCheckResult } from './factCheck';
+﻿import { FactCheckResult } from './factCheck';
 export type { FactCheckResult };
 
 export interface Article {
@@ -26,6 +26,7 @@ export interface Article {
   seoScore?: number;
   readingTime?: number;
   wordCount?: number;
+  targetWordCount?: number;
   trendData?: TrendAnalysisResult;
   factCheckResults?: FactCheckResult[];
 }
@@ -45,7 +46,7 @@ export interface WordPressConfig {
 
 export interface AIConfig {
   id?: string;
-  name?: string; // 表示用（DBにカラムがない場合はフロントエンドで生成）
+  name?: string; // 陦ｨ遉ｺ逕ｨ・・B縺ｫ繧ｫ繝ｩ繝縺後↑縺・ｴ蜷医・繝輔Ο繝ｳ繝医お繝ｳ繝峨〒逕滓・・・
   provider: 'openai' | 'claude' | 'gemini';
   apiKey: string;
   model: string;
@@ -53,7 +54,7 @@ export interface AIConfig {
   maxTokens: number;
   imageGenerationEnabled?: boolean;
   imageProvider?: 'nanobanana' | 'dalle3' | 'midjourney' | 'stable-diffusion' | 'unsplash';
-  imagesPerArticle?: number; // 記事あたりの画像生成枚数（0=無効、1-10=枚数）
+  imagesPerArticle?: number; // 險倅ｺ九≠縺溘ｊ縺ｮ逕ｻ蜒冗函謌先椢謨ｰ・・=辟｡蜉ｹ縲・-10=譫壽焚・・
   isActive?: boolean;
   createdAt?: string;
 }
@@ -83,7 +84,7 @@ export interface GenerationPrompt {
   selectedTitleSuggestion?: TitleSuggestion;
   selectedTitle?: string;
   keywordPreferences?: Record<string, KeywordPreference>;
-  // === セクション別生成用の追加フィールド ===
+  // === 繧ｻ繧ｯ繧ｷ繝ｧ繝ｳ蛻･逕滓・逕ｨ縺ｮ霑ｽ蜉繝輔ぅ繝ｼ繝ｫ繝・===
   generationType?: 'full_article' | 'section';
   sectionTitle?: string;
   articleTitle?: string;
@@ -93,7 +94,7 @@ export interface GenerationPrompt {
   previousContent?: string;
   isLead?: boolean;
   customInstructions?: string;
-  imagesPerArticle?: number; // 記事あたりの画像生成枚数
+  imagesPerArticle?: number; // 險倅ｺ九≠縺溘ｊ縺ｮ逕ｻ蜒冗函謌先椢謨ｰ
 }
 
 export interface PromptSet {
@@ -155,8 +156,9 @@ export interface ScheduleSetting {
   keyword_set_id?: string;
   title_set_id?: string;
   generation_mode?: 'keyword' | 'title' | 'both';
-  enable_fact_check?: boolean; // ファクトチェック有効化
-  fact_check_note?: string; // [[]]で囲むチェック優先箇所
+  enable_fact_check?: boolean; // 繝輔ぃ繧ｯ繝医メ繧ｧ繝・け譛牙柑蛹・
+  fact_check_note?: string; // [[]]縺ｧ蝗ｲ繧繝√ぉ繝・け蜆ｪ蜈育ｮ・園
+  ab_test_enabled?: boolean;
 }
 
 export interface TitleSuggestion {
@@ -196,6 +198,7 @@ export interface TrendAnalysisResult {
   trendScore: number;
   searchVolume: number;
   competition: 'low' | 'medium' | 'high';
+  trend?: 'rising' | 'stable' | 'declining';
   relatedKeywords: string[];
   hotTopics: string[];
   seoData: {
@@ -248,12 +251,12 @@ export interface TrendConfig {
   competitorDomains: string[];
 }
 
-// === マルチステップ記事生成用の型定義 ===
+// === 繝槭Ν繝√せ繝・ャ繝苓ｨ倅ｺ狗函謌千畑縺ｮ蝙句ｮ夂ｾｩ ===
 
 export type KeywordPreference = 'default' | 'ng' | 'essential';
 
 /**
- * 記事のアウトライン（見出し構成）
+ * 險倅ｺ九・繧｢繧ｦ繝医Λ繧､繝ｳ・郁ｦ句・縺玲ｧ区・・・
  */
 export interface ArticleOutline {
   id: string;
@@ -267,7 +270,7 @@ export interface ArticleOutline {
 }
 
 /**
- * アウトラインのセクション（見出し）
+ * 繧｢繧ｦ繝医Λ繧､繝ｳ縺ｮ繧ｻ繧ｯ繧ｷ繝ｧ繝ｳ・郁ｦ句・縺暦ｼ・
  */
 export interface OutlineSection {
   id: string;
@@ -294,7 +297,7 @@ export interface StepResult {
 }
 
 /**
- * マルチステップ生成の状態
+ * 繝槭Ν繝√せ繝・ャ繝礼函謌舌・迥ｶ諷・
  */
 export interface MultiStepGenerationState {
   mode: GenerationMode;
@@ -310,7 +313,7 @@ export interface MultiStepGenerationState {
 }
 
 /**
- * アウトライン生成のリクエスト
+ * 繧｢繧ｦ繝医Λ繧､繝ｳ逕滓・縺ｮ繝ｪ繧ｯ繧ｨ繧ｹ繝・
  */
 export interface OutlineGenerationRequest {
   keywords: string[];
@@ -319,13 +322,13 @@ export interface OutlineGenerationRequest {
   tone: 'professional' | 'casual' | 'technical' | 'friendly';
   focusTopics?: string[];
   keywordPreferences?: Record<string, KeywordPreference>;
-  selectedTitle?: string; // ここに追加
+  selectedTitle?: string; // 縺薙％縺ｫ霑ｽ蜉
   customInstructions?: string;
-  targetWordCount?: number; // 目標文字数（数値）
+  targetWordCount?: number; // 逶ｮ讓呎枚蟄玲焚・域焚蛟､・・
 }
 
 /**
- * セクション生成のリクエスト
+ * 繧ｻ繧ｯ繧ｷ繝ｧ繝ｳ逕滓・縺ｮ繝ｪ繧ｯ繧ｨ繧ｹ繝・
  */
 export interface SectionGenerationRequest {
   section: OutlineSection;

@@ -1,18 +1,25 @@
-import { AIConfig, GenerationPrompt } from "../types";
+﻿import { AIConfig, GenerationPrompt } from "../types";
 import { supabase } from "./supabaseClient";
 import { imageGenerationService } from "./imageGenerationService";
+import {
+  DEFAULT_WORD_COUNT_TOLERANCE,
+  getWordCountBounds,
+  resolveTargetWordCount
+} from "../shared/generationPolicy";
+import { buildSummaryPrompt, buildSupplementPrompt } from "../shared/generationPrompts";
+import { buildHighQualitySectionPrompt } from "../shared/sectionGenerationPrompt";
 
 /**
- * AI関連サービス
- * Supabaseのai_configsテーブルに保存された設定を元に、
- * Gemini / OpenAI / Claude などを動的に呼び出します。
+ * AI髢｢騾｣繧ｵ繝ｼ繝薙せ
+ * Supabase縺ｮai_configs繝・・繝悶Ν縺ｫ菫晏ｭ倥＆繧後◆險ｭ螳壹ｒ蜈・↓縲・
+ * Gemini / OpenAI / Claude 縺ｪ縺ｩ繧貞虚逧・↓蜻ｼ縺ｳ蜃ｺ縺励∪縺吶・
  */
 export class AIService {
   private config: AIConfig | null = null;
 
   constructor() { }
 
-  // === 最新のAI設定をSupabaseから取得 ===
+  // === 譛譁ｰ縺ｮAI險ｭ螳壹ｒSupabase縺九ｉ蜿門ｾ・===
   public async loadActiveConfig() {
     try {
       if (!supabase) throw new Error("Supabase client is not initialized");
@@ -26,7 +33,7 @@ export class AIService {
         .maybeSingle();
 
       if (error) {
-        console.error("❌ AI設定の取得に失敗:", error.message);
+        console.error("Failed to fetch AI config:", error.message);
         throw new Error("AI設定の取得に失敗しました");
       }
 
@@ -34,7 +41,7 @@ export class AIService {
         throw new Error("有効なAI設定が見つかりません。AI設定ページで登録してください。");
       }
 
-      // ✅ Supabaseのカラムを内部形式に変換
+      // 笨・Supabase縺ｮ繧ｫ繝ｩ繝繧貞・驛ｨ蠖｢蠑上↓螟画鋤
       this.config = {
         id: data.id,
         provider: data.provider,
@@ -44,37 +51,38 @@ export class AIService {
         maxTokens: data.max_tokens ?? 16384,
         imageGenerationEnabled: data.image_enabled ?? false,
         imageProvider: data.image_provider,
+        imagesPerArticle: data.images_per_article ?? 0,
       };
 
-      console.log("✅ AI設定をロードしました:", this.config);
+      console.log("AI config loaded:", this.config);
     } catch (err) {
-      console.error("AI設定ロード時エラー:", err);
+      console.error("AI config load error:", err);
       throw err;
     }
   }
 
-  // モデル名のバリデーション（旧モデル名のフォールバック）
+  // 繝｢繝・Ν蜷阪・繝舌Μ繝・・繧ｷ繝ｧ繝ｳ・域立繝｢繝・Ν蜷阪・繝輔か繝ｼ繝ｫ繝舌ャ繧ｯ・・
   private validateModelName(provider: string, model: string): string {
     if (provider !== 'gemini') return model;
 
-    // 無効なGeminiモデル名を検知して置換
-    // gemini-1.5系などは非推奨（2.0以上を推奨）
-    const invalidModels = ['gemini-1.0-pro', 'gemini-1.5-pro-latest'];
+    // 辟｡蜉ｹ縺ｪGemini繝｢繝・Ν蜷阪ｒ讀懃衍縺励※鄂ｮ謠・
+    // gemini-1.5邉ｻ縺ｪ縺ｩ縺ｯ髱樊耳螂ｨ・・.0莉･荳翫ｒ謗ｨ螂ｨ・・
+    const invalidModels = ['gemini-1.0-pro', 'gemini-1.5-pro-latest', 'gemini-3.0-pro', 'gemini-3.0-flash'];
     if (invalidModels.includes(model)) {
-      console.warn(`⚠️ 非推奨のモデル名(${model})を検知しました。gemini-2.0-flashにフォールバックします。`);
-      return 'gemini-2.0-flash';
+      console.warn(`Unsupported Gemini model detected (${model}). Fallback to gemini-2.5-flash.`);
+      return 'gemini-2.5-flash';
     }
 
     return model;
   }
 
-  // 設定を取得するためのゲッター
+  // 險ｭ螳壹ｒ蜿門ｾ励☆繧九◆繧√・繧ｲ繝・ち繝ｼ
   public getActiveConfig(): AIConfig | null {
     return this.config;
   }
 
   /**
-   * 独自のプロンプトを指定してJSON形式で結果を取得する
+   * 迢ｬ閾ｪ縺ｮ繝励Ο繝ｳ繝励ヨ繧呈欠螳壹＠縺ｦJSON蠖｢蠑上〒邨先棡繧貞叙蠕励☆繧・
    */
   async generateCustomJson(promptText: string): Promise<any> {
     try {
@@ -83,7 +91,7 @@ export class AIService {
       const jsonPrompt = `
 ${promptText}
 
-重要: 必ず有効なJSONフォーマットのみを出力してください。Markdownのコードブロック（\`\`\`json ... \`\`\`）は不要です。テキストによる説明も不要です。JSONオブジェクトまたは配列のみを返してください。
+重要: 有効なJSONのみを返してください。説明文やMarkdownコードブロックは不要です。
 `;
 
       let text = "";
@@ -101,14 +109,14 @@ ${promptText}
           throw new Error("AI provider not configured for custom JSON");
       }
 
-      // Markdownのコードブロックを除去
+      // Markdown縺ｮ繧ｳ繝ｼ繝峨ヶ繝ｭ繝・け繧帝勁蜴ｻ
       const cleaned = text.replace(/```json\n?|```/g, "").trim();
 
       try {
         return JSON.parse(cleaned);
       } catch (parseError) {
-        console.error("JSON分析エラー:", cleaned);
-        // 部分的に壊れている場合に備えて、正規表現で配列/オブジェクトを探す
+        console.error("JSON parse error:", cleaned);
+        // 驛ｨ蛻・噪縺ｫ螢翫ｌ縺ｦ縺・ｋ蝣ｴ蜷医↓蛯吶∴縺ｦ縲∵ｭ｣隕剰｡ｨ迴ｾ縺ｧ驟榊・/繧ｪ繝悶ず繧ｧ繧ｯ繝医ｒ謗｢縺・
         const match = cleaned.match(/\[[\s\S]*\]|\{[\s\S]*\}/);
         if (match) {
           return JSON.parse(match[0]);
@@ -116,24 +124,24 @@ ${promptText}
         throw parseError;
       }
     } catch (error) {
-      console.error("Custom JSON生成エラー:", error);
+      console.error("Custom JSON generation error:", error);
       throw error;
     }
   }
 
   /**
-   * キーワードに基づいて、関連するサジェストキーワードを生成する
+   * 繧ｭ繝ｼ繝ｯ繝ｼ繝峨↓蝓ｺ縺･縺・※縲・未騾｣縺吶ｋ繧ｵ繧ｸ繧ｧ繧ｹ繝医く繝ｼ繝ｯ繝ｼ繝峨ｒ逕滓・縺吶ｋ
    */
   async generateRelatedKeywords(keyword: string): Promise<string[]> {
     try {
       if (!this.config) await this.loadActiveConfig();
 
       const prompt = `
-以下のキーワードに関連する、検索ボリュームが大きく、ユーザーが次に検索しそうなサブキーワードを10個挙げてください。
-キーワード: ${keyword}
+莉･荳九・繧ｭ繝ｼ繝ｯ繝ｼ繝峨↓髢｢騾｣縺吶ｋ縲∵､懃ｴ｢繝懊Μ繝･繝ｼ繝縺悟､ｧ縺阪￥縲√Θ繝ｼ繧ｶ繝ｼ縺梧ｬ｡縺ｫ讀懃ｴ｢縺励◎縺・↑繧ｵ繝悶く繝ｼ繝ｯ繝ｼ繝峨ｒ10蛟区嫌縺偵※縺上□縺輔＞縲・
+繧ｭ繝ｼ繝ｯ繝ｼ繝・ ${keyword}
 
-JSON形式の配列（文字列の配列）で出力してください。
-例: ["キーワード1", "キーワード2", ...]
+JSON蠖｢蠑上・驟榊・・域枚蟄怜・縺ｮ驟榊・・峨〒蜃ｺ蜉帙＠縺ｦ縺上□縺輔＞縲・
+萓・ ["繧ｭ繝ｼ繝ｯ繝ｼ繝・", "繧ｭ繝ｼ繝ｯ繝ｼ繝・", ...]
 `;
       const result = await this.generateCustomJson(prompt);
       if (Array.isArray(result)) {
@@ -141,24 +149,24 @@ JSON形式の配列（文字列の配列）で出力してください。
       }
       return [];
     } catch (error) {
-      console.error("関連キーワード生成エラー:", error);
+      console.error("Related keyword generation error:", error);
       return [];
     }
   }
 
-  // === 記事生成（メイン処理） ===
+  // === 險倅ｺ狗函謌撰ｼ医Γ繧､繝ｳ蜃ｦ逅・ｼ・===
   async generateArticle(prompt: GenerationPrompt) {
     try {
-      // 設定ロード（未ロードなら実行）
+      // 險ｭ螳壹Ο繝ｼ繝会ｼ域悴繝ｭ繝ｼ繝峨↑繧牙ｮ溯｡鯉ｼ・
       if (!this.config) await this.loadActiveConfig();
 
-      // 必須項目チェック
-      if (!this.config?.provider) throw new Error("AIプロバイダが設定されていません。");
-      if (!this.config?.apiKey) throw new Error("APIキーが設定されていません。");
-      if (!this.config?.model) throw new Error("モデルが設定されていません。");
+      // 蠢・磯・岼繝√ぉ繝・け
+      if (!this.config?.provider) throw new Error("AI provider is not configured.");
+      if (!this.config?.apiKey) throw new Error("API key is not configured.");
+      if (!this.config?.model) throw new Error("Model is not configured.");
 
-      // 初回生成
-      console.log('📝 記事生成開始:', { topic: prompt.topic, length: prompt.length });
+      // 蛻晏屓逕滓・
+      console.log('Article generation started', { topic: prompt.topic, length: prompt.length });
       let result;
       switch (this.config.provider) {
         case "openai":
@@ -171,65 +179,65 @@ JSON形式の配列（文字列の配列）で出力してください。
           result = await this.callClaude(prompt);
           break;
         default:
-          throw new Error(`未対応のAIプロバイダです: ${this.config.provider}`);
+          throw new Error(`Unsupported AI provider: ${this.config.provider}`);
       }
 
       let { title, content } = result;
 
-      // 文字数チェック（要約は無効化）
-      const targetWordCount = prompt.targetWordCount || this.getTargetWordCount(prompt.length);
-      const actualWordCount = this.countWords(content);
-      const minAllowed = Math.floor(targetWordCount * 0.9);
-      const maxAllowed = Math.ceil(targetWordCount * 1.1);
+      // 譁・ｭ玲焚繝√ぉ繝・け・井ｸ崎ｶｳ譎ゅ・霑ｽ險倥∬ｶ・℃譎ゅ・隕∫ｴ・ｼ・
+      const targetWordCount = resolveTargetWordCount(prompt.length, prompt.targetWordCount);
+      const { minAllowed, maxAllowed } = getWordCountBounds(targetWordCount, DEFAULT_WORD_COUNT_TOLERANCE);
+      let currentWordCount = this.countWords(content);
 
-      console.log('📊 文字数チェック:', {
+      console.log('Word count check:', {
         target: targetWordCount,
-        actual: actualWordCount
+        actual: currentWordCount
       });
 
-      if (actualWordCount < minAllowed) {
-        console.log('➕ 文字数不足のため追記補完を実行します...', {
-          actual: actualWordCount,
+      if (currentWordCount < minAllowed) {
+        console.log('Under minimum length. Extending content...', {
+          actual: currentWordCount,
           minAllowed
         });
 
         content = await this.extendToMinimumLength(content, prompt, minAllowed, maxAllowed);
 
         const supplementedCount = this.countWords(content);
-        console.log('✅ 追記補完完了:', {
-          before: actualWordCount,
+        currentWordCount = supplementedCount;
+        console.log('Extension completed:', {
+          before: this.countWords(result.content),
           after: supplementedCount
         });
       }
 
-      // 要約処理は無効化（AIに正確な文字数で生成させる）
-      // if (actualWordCount > maxAllowed) {
-      //   console.log('✂️ 文字数超過のため要約を実行します...');
-      //   content = await this.summarizeToWordCount(
-      //     content,
-      //     title,
-      //     targetWordCount,
-      //     prompt.keywords || []
-      //   );
-      //   const newWordCount = this.countWords(content);
-      //   console.log('✅ 要約完了:', { before: actualWordCount, after: newWordCount });
-      // }
+      if (currentWordCount > maxAllowed) {
+        console.log('Over maximum length. Summarizing content...', {
+          actual: currentWordCount,
+          maxAllowed
+        });
+        content = await this.summarizeToWordCount(
+          content,
+          title,
+          targetWordCount,
+          prompt.keywords || []
+        );
+        const newWordCount = this.countWords(content);
+        console.log('Summary completed:', { before: currentWordCount, after: newWordCount });
+      }
 
       const excerpt = this.generateExcerpt(content);
       const keywords = this.extractKeywords(content, prompt.topic);
       const seoScore = this.calculateSEOScore(title, content, keywords);
       const readingTime = this.calculateReadingTime(content);
 
-      // 画像生成が有効な場合、記事に画像を挿入
-      // プロンプトで指定された枚数を優先、なければ設定値を使用
+      // 逕ｻ蜒冗函謌舌′譛牙柑縺ｪ蝣ｴ蜷医∬ｨ倅ｺ九↓逕ｻ蜒上ｒ謖ｿ蜈･
+      // 繝励Ο繝ｳ繝励ヨ縺ｧ謖・ｮ壹＆繧後◆譫壽焚繧貞━蜈医√↑縺代ｌ縺ｰ險ｭ螳壼､繧剃ｽｿ逕ｨ
       const imageCount = prompt.imagesPerArticle !== undefined
         ? prompt.imagesPerArticle
         : (this.config.imagesPerArticle || 0);
 
-      if (this.config.imageGenerationEnabled &&
-        this.config.imageProvider === 'nanobanana' &&
-        imageCount > 0) {
-        console.log('🖼️ 画像生成を開始します...', {
+      if (this.config.imageGenerationEnabled && imageCount > 0) {
+        console.log('Starting image generation...', {
           count: imageCount,
           provider: this.config.imageProvider
         });
@@ -241,78 +249,52 @@ JSON形式の配列（文字列の配列）で出力してください。
             keywords,
             imageCount
           );
-          console.log('✅ 画像生成・挿入完了');
+          console.log('画像生成・挿入完了');
         } catch (error: any) {
-          console.error('⚠️ 画像生成エラー:', error);
-          // エラー内容を記事の末尾に追記（デバッグ用）
+          console.error('Image generation error:', error);
+          // 繧ｨ繝ｩ繝ｼ蜀・ｮｹ繧定ｨ倅ｺ九・譛ｫ蟆ｾ縺ｫ霑ｽ險假ｼ医ョ繝舌ャ繧ｰ逕ｨ・・
           content += `\n\n> [!WARNING]\n> **画像生成エラーが発生しました**\n> ${error.message || '不明なエラー'}\n> 設定やAPIキーを確認してください。`;
         }
       }
 
       return { title, content, excerpt, keywords, seoScore, readingTime };
     } catch (error) {
-      console.error("記事生成エラー:", error);
+      console.error("Article generation error:", error);
       throw error;
     }
   }
 
-  // === 文字数カウント ===
+  // === 譁・ｭ玲焚繧ｫ繧ｦ繝ｳ繝・===
   private countWords(content: string): number {
-    // Markdown記号を除外して文字数をカウント
+    // Markdown險伜捷繧帝勁螟悶＠縺ｦ譁・ｭ玲焚繧偵き繧ｦ繝ｳ繝・
     const cleaned = content
-      .replace(/^#+\s+/gm, '') // 見出し記号
-      .replace(/\*\*/g, '')     // 太字
-      .replace(/\*/g, '')       // イタリック
-      .replace(/^[-*]\s+/gm, '') // リスト記号
-      .replace(/\n+/g, '\n')    // 連続改行を1つに
+      .replace(/^#+\s+/gm, '') // 隕句・縺苓ｨ伜捷
+      .replace(/\*\*/g, '')     // 螟ｪ蟄・
+      .replace(/\*/g, '')       // 繧､繧ｿ繝ｪ繝・け
+      .replace(/^[-*]\s+/gm, '') // 繝ｪ繧ｹ繝郁ｨ伜捷
+      .replace(/\n+/g, '\n')    // 騾｣邯壽隼陦後ｒ1縺､縺ｫ
       .trim();
     return cleaned.length;
   }
 
-  // === 目標文字数の取得 ===
+  // === 逶ｮ讓呎枚蟄玲焚縺ｮ蜿門ｾ・===
   private getTargetWordCount(length?: 'short' | 'medium' | 'long'): number {
-    switch (length) {
-      case 'short':
-        return 1000;
-      case 'medium':
-        return 2000;
-      case 'long':
-        return 4000;
-      default:
-        return 2000;
-    }
+    return resolveTargetWordCount(length);
   }
 
-  // === 指定文字数への要約 ===
+  // === 謖・ｮ壽枚蟄玲焚縺ｸ縺ｮ隕∫ｴ・===
   private async summarizeToWordCount(
     originalContent: string,
     title: string,
     targetWordCount: number,
     keywords: string[]
   ): Promise<string> {
-    const summaryPrompt = `
-以下の記事を、正確に${targetWordCount}文字にまとめ直してください。
-
-【元の記事タイトル】
-${title}
-
-【元の記事内容】
-${originalContent}
-
-【要約の条件】
-1. **文字数**: 正確に${targetWordCount}文字（±10%以内厳守）
-2. **キーワード維持**: 以下のキーワードを必ず自然な形で含める
-   ${keywords.length > 0 ? keywords.join('、') : '（指定なし）'}
-3. **構成維持**: 元の見出し構造（##）を可能な限り保持
-4. **情報密度**: 冗長な表現を削り、重要な情報のみを残す
-5. **自然な文章**: 途中で切れることなく、完結した文章にする
-
-【出力形式】
-- Markdown形式で出力
-- 見出しには ## を使用
-- タイトル行は出力しない（本文のみ）
-- 「本文:」などの接頭辞は禁止
-`;
+    const summaryPrompt = buildSummaryPrompt({
+      originalContent,
+      title,
+      targetWordCount,
+      keywords
+    });
 
     try {
       let summarizedText = '';
@@ -332,13 +314,13 @@ ${originalContent}
 
       return summarizedText.trim();
     } catch (error) {
-      console.error('要約エラー:', error);
-      // 要約に失敗した場合は、段落単位で切り詰める
+      console.error('Summary error:', error);
+      // 隕∫ｴ・↓螟ｱ謨励＠縺溷ｴ蜷医・縲∵ｮｵ關ｽ蜊倅ｽ阪〒蛻・ｊ隧ｰ繧√ｋ
       return this.truncateByParagraph(originalContent, targetWordCount);
     }
   }
 
-  // === 段落単位での切り詰め（フォールバック） ===
+  // === 谿ｵ關ｽ蜊倅ｽ阪〒縺ｮ蛻・ｊ隧ｰ繧・ｼ医ヵ繧ｩ繝ｼ繝ｫ繝舌ャ繧ｯ・・===
   private truncateByParagraph(content: string, targetWordCount: number): string {
     const paragraphs = content.split('\n\n');
     let result = '';
@@ -357,7 +339,7 @@ ${originalContent}
     return result.trim();
   }
 
-  // === 不足文字数の追記補完 ===
+  // === 荳崎ｶｳ譁・ｭ玲焚縺ｮ霑ｽ險倩｣懷ｮ・===
   private async extendToMinimumLength(
     originalContent: string,
     prompt: GenerationPrompt,
@@ -374,37 +356,18 @@ ${originalContent}
       const isSection = prompt.generationType === 'section';
       const summarySplit = !isSection ? this.splitFinalSummarySection(merged) : null;
       const baseContent = summarySplit?.hasSummary ? summarySplit.body : merged;
-      const supplementPrompt = `
-以下の既存本文はそのまま維持し、末尾に自然につながる追記だけを作成してください。
-
-【現在の文字数】
-${currentCount}文字
-
-【必須要件】
-1. 追記後の合計を最低${minAllowed}文字以上にする
-2. 追記後の合計は${maxAllowed}文字を超えない
-3. 既存本文は書き換えない
-4. 出力は「追記本文のみ」（タイトル、注釈、説明文は禁止）
-5. 文末は必ず句点（。）で完結させる
-6. 「まとめ」「結論」「おわりに」「最後に」「総括」など締めくくりの見出し・文言は絶対に書かない
-7. 要約調・結論調の締め文（例: 「以上のように」「〜といえるでしょう」）で終えない
-${isSection ? '8. 見出し（#, ##, ###）は一切出力しない' : '8. 既存のMarkdown構成に自然になじむ内容にする'}
-${summarySplit?.hasSummary ? '9. この追記は、既存記事にある最後の「まとめ」見出しより前に入る本文として作成する' : ''}
-${prompt.keywords?.length ? `10. 次のキーワードを不自然にならない範囲で含める: ${prompt.keywords.join('、')}` : ''}
-${!isSection ? '11. 追記は既存記事と同じくMarkdown見出しタグを使う（大項目は`##`、必要なら小項目は`###`）' : ''}
-
-【不足の目安】
-あと約${remaining}文字（不足分を埋める量を目安）
-
-【記事タイトル】
-${prompt.articleTitle || prompt.selectedTitle || prompt.topic || ''}
-
-【今回のセクション】
-${prompt.sectionTitle || prompt.topic || ''}
-
-【既存本文】
-${baseContent}
-`;
+      const supplementPrompt = buildSupplementPrompt({
+        originalContent: baseContent,
+        currentCount,
+        minAllowed,
+        maxAllowed,
+        remaining,
+        title: prompt.articleTitle || prompt.selectedTitle || prompt.topic || '',
+        sectionTitle: prompt.sectionTitle || prompt.topic || '',
+        keywords: prompt.keywords || [],
+        isSection,
+        hasSummaryAnchor: !!summarySplit?.hasSummary
+      });
 
       let addition = '';
       switch (this.config?.provider) {
@@ -438,14 +401,14 @@ ${baseContent}
 
       return merged;
     } catch (error) {
-      console.error('追記補完エラー:', error);
+      console.error('Content extension error:', error);
       return originalContent;
     }
   }
 
-  // === 記事末尾の「まとめ」セクションを分離 ===
+  // === 險倅ｺ区忰蟆ｾ縺ｮ縲後∪縺ｨ繧√阪そ繧ｯ繧ｷ繝ｧ繝ｳ繧貞・髮｢ ===
   private splitFinalSummarySection(content: string): { hasSummary: boolean; body: string; summary: string } {
-    const headingRegex = /^##+\s*(まとめ|結論|おわりに|最後に|総括)[^\n]*$/gim;
+    const headingRegex = /^##+\s*(縺ｾ縺ｨ繧－邨占ｫ翻縺翫ｏ繧翫↓|譛蠕後↓|邱乗峡)[^\n]*$/gim;
     let lastMatch: RegExpExecArray | null = null;
     let match: RegExpExecArray | null;
 
@@ -464,7 +427,7 @@ ${baseContent}
     return { hasSummary: true, body, summary };
   }
 
-  // === 追記文から「まとめ」系の文言を除去 ===
+  // === 霑ｽ險俶枚縺九ｉ縲後∪縺ｨ繧√咲ｳｻ縺ｮ譁・ｨ繧帝勁蜴ｻ ===
   private sanitizeSupplementText(addition: string): string {
     const paragraphs = addition
       .split(/\n{2,}/)
@@ -473,16 +436,16 @@ ${baseContent}
 
     const filtered = paragraphs.filter(p => {
       const normalized = p.replace(/\s+/g, '');
-      if (/^#{1,6}(まとめ|結論|おわりに|最後に|総括)/i.test(p)) return false;
-      if (/^(まとめ|結論|おわりに|最後に|総括)/.test(normalized)) return false;
-      if (/^(以上のように|以上より|以上から|要するに|まとめると)/.test(normalized)) return false;
+      if (/^#{1,6}(縺ｾ縺ｨ繧－邨占ｫ翻縺翫ｏ繧翫↓|譛蠕後↓|邱乗峡)/i.test(p)) return false;
+      if (/^(縺ｾ縺ｨ繧－邨占ｫ翻縺翫ｏ繧翫↓|譛蠕後↓|邱乗峡)/.test(normalized)) return false;
+      if (/^(莉･荳翫・繧医≧縺ｫ|莉･荳翫ｈ繧掛莉･荳翫°繧榎隕√☆繧九↓|縺ｾ縺ｨ繧√ｋ縺ｨ)/.test(normalized)) return false;
       return true;
     });
 
     return filtered.join('\n\n').trim();
   }
 
-  // === 追記の生テキスト正規化 ===
+  // === 霑ｽ險倥・逕溘ユ繧ｭ繧ｹ繝域ｭ｣隕丞喧 ===
   private normalizeSupplementRawText(raw: string, isSection: boolean): string {
     let cleaned = raw.replace(/```[\s\S]*?```/g, '').trim();
 
@@ -490,21 +453,24 @@ ${baseContent}
       cleaned = cleaned.replace(/^#+\s+/gm, '');
     }
 
-    cleaned = cleaned.replace(/^##+\s*(まとめ|結論|おわりに|最後に|総括)[^\n]*$/gim, '').trim();
+    cleaned = cleaned.replace(/^##+\s*(縺ｾ縺ｨ繧－邨占ｫ翻縺翫ｏ繧翫↓|譛蠕後↓|邱乗峡)[^\n]*$/gim, '').trim();
     return cleaned;
   }
 
-  // === 画像生成・挿入 ===
+  // === 逕ｻ蜒冗函謌舌・謖ｿ蜈･ ===
   /**
-   * 記事内の見出しに画像を生成して挿入
+   * 險倅ｺ句・縺ｮ隕句・縺励↓逕ｻ蜒上ｒ逕滓・縺励※謖ｿ蜈･
    */
-  private async insertGeneratedImages(
+  /**
+  * 逕滓・縺輔ｌ縺溽判蜒上ｒ險倅ｺ九↓謖ｿ蜈･・亥・髢九Γ繧ｽ繝・ラ縺ｫ螟画峩・・
+  */
+  public async insertGeneratedImages(
     content: string,
     title: string,
     keywords: string[],
     imageCount: number
   ): Promise<string> {
-    // 見出し（##）を抽出
+    // 隕句・縺暦ｼ・#・峨ｒ謚ｽ蜃ｺ
     const headingRegex = /^##\s+(.+)$/gm;
     const headings: { text: string; index: number }[] = [];
     let match;
@@ -521,29 +487,29 @@ ${baseContent}
       return content;
     }
 
-    // 画像を挿入する見出しを選択（均等に分散）
+    // 逕ｻ蜒上ｒ謖ｿ蜈･縺吶ｋ隕句・縺励ｒ驕ｸ謚橸ｼ亥插遲峨↓蛻・淵・・
     const selectedHeadings = this.selectHeadingsForImages(headings, imageCount);
-    console.log(`${selectedHeadings.length}個の見出しに画像を挿入します`);
+    console.log(`${selectedHeadings.length}箇所の見出しに画像を挿入します`);
 
-    // 各見出しに画像を生成・挿入
+    // 蜷・ｦ句・縺励↓逕ｻ蜒上ｒ逕滓・繝ｻ謖ｿ蜈･
     let processedContent = content;
     let offset = 0;
 
     for (const heading of selectedHeadings) {
       try {
-        // 画像生成プロンプトを作成
+        // 逕ｻ蜒冗函謌舌・繝ｭ繝ｳ繝励ヨ繧剃ｽ懈・
         const imagePrompt = imageGenerationService.createImagePrompt(
           heading.text,
           keywords
         );
 
-        console.log(`画像生成中: "${heading.text}"`);
+        console.log(`Generating image: "${heading.text}"`);
         const generatedImage = await imageGenerationService.generateImage({
           prompt: imagePrompt,
           aspectRatio: '16:9'
         });
 
-        // Base64画像をMarkdownに挿入
+        // Base64逕ｻ蜒上ｒMarkdown縺ｫ謖ｿ蜈･
         const imageMarkdown = `\n\n![${heading.text}](data:${generatedImage.mimeType};base64,${generatedImage.base64Data})\n\n`;
         const insertPosition = heading.index + offset;
 
@@ -553,10 +519,10 @@ ${baseContent}
           processedContent.slice(insertPosition);
 
         offset += imageMarkdown.length;
-        console.log(`✅ 画像挿入完了: "${heading.text}"`);
+        console.log(`Image inserted: "${heading.text}"`);
       } catch (error) {
-        console.error(`画像生成失敗: "${heading.text}"`, error);
-        // エラーが発生しても次の画像生成を続行
+        console.error(`Image generation failed: "${heading.text}"`, error);
+        // 繧ｨ繝ｩ繝ｼ縺檎匱逕溘＠縺ｦ繧よｬ｡縺ｮ逕ｻ蜒冗函謌舌ｒ邯夊｡・
       }
     }
 
@@ -564,7 +530,7 @@ ${baseContent}
   }
 
   /**
-   * 画像を挿入する見出しを選択（均等に分散）
+   * 逕ｻ蜒上ｒ謖ｿ蜈･縺吶ｋ隕句・縺励ｒ驕ｸ謚橸ｼ亥插遲峨↓蛻・淵・・
    */
   private selectHeadingsForImages(
     headings: { text: string; index: number }[],
@@ -585,7 +551,7 @@ ${baseContent}
     return selected;
   }
 
-  // === Proxy呼び出しヘルパー ===
+  // === Proxy蜻ｼ縺ｳ蜃ｺ縺励・繝ｫ繝代・ ===
   private async callProxy(payload: any): Promise<any> {
     const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
     const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -594,10 +560,10 @@ ${baseContent}
       throw new Error("Supabase configurations are missing");
     }
 
-    // Supabase Edge Functionのエンドポイント
+    // Supabase Edge Function縺ｮ繧ｨ繝ｳ繝峨・繧､繝ｳ繝・
     const endpoint = `${supabaseUrl}/functions/v1/ai-proxy`;
 
-    console.log('🔍 Supabase Edge Function経由でAPI呼び出し', { endpoint, provider: payload.provider });
+    console.log('Supabase Edge Function経由でAPI呼び出し', { endpoint, provider: payload.provider });
 
     const response = await fetch(endpoint, {
       method: 'POST',
@@ -610,10 +576,28 @@ ${baseContent}
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
-      console.error('❌ AI Proxy Error:', { status: response.status, errorData });
+      console.error('AI Proxy Error:', { status: response.status, errorData });
+      const proxyErrorMessage = typeof errorData?.error === 'string'
+        ? errorData.error
+        : JSON.stringify(errorData);
+
+      const isGeminiQuotaError =
+        /Gemini API error \(429\)/i.test(proxyErrorMessage) ||
+        /RESOURCE_EXHAUSTED/i.test(proxyErrorMessage) ||
+        /quota exceeded/i.test(proxyErrorMessage);
+
+      if (isGeminiQuotaError) {
+        const retryMatch = proxyErrorMessage.match(/Please retry in\s+([\d.]+)s/i);
+        const retrySeconds = retryMatch ? Math.ceil(Number(retryMatch[1])) : null;
+        const retryMessage = retrySeconds
+          ? `約${retrySeconds}秒後に再試行してください。`
+          : 'しばらく待ってから再試行してください。';
+
+        throw new Error(`RATE_LIMIT_ERROR: Gemini APIの利用上限に達しました。Google AI Studioのクォータ/請求設定を確認してください。${retryMessage}`);
+      }
 
       if (response.status === 429) {
-        throw new Error("RATE_LIMIT_ERROR: APIの利用制限に達しました。しばらく待ってから再度お試しください。");
+        throw new Error("RATE_LIMIT_ERROR: API usage limit reached. Please retry later.");
       }
       throw new Error(`AI Proxy Error (${response.status}): ${errorData.error || 'Unknown error'}`);
     }
@@ -621,7 +605,7 @@ ${baseContent}
     return await response.json();
   }
 
-  // === 直接API呼び出し（ローカル開発用） ===
+  // === 逶ｴ謗･API蜻ｼ縺ｳ蜃ｺ縺暦ｼ医Ο繝ｼ繧ｫ繝ｫ髢狗匱逕ｨ・・===
   private async callDirectAPI(payload: any): Promise<any> {
     const { provider, apiKey, model, temperature, maxTokens } = payload;
 
@@ -704,18 +688,18 @@ ${baseContent}
     }
   }
 
-  // 生のテキストを取得するためのヘルパー
+  // 逕溘・繝・く繧ｹ繝医ｒ蜿門ｾ励☆繧九◆繧√・繝倥Ν繝代・
   private async callRawGemini(prompt: string): Promise<string> {
     const { apiKey, model, temperature, maxTokens } = this.config!;
 
-    // Proxy経由でGeminiを呼び出し
+    // Proxy邨檎罰縺ｧGemini繧貞他縺ｳ蜃ｺ縺・
     const data = await this.callProxy({
       provider: 'gemini',
       apiKey,
       model,
       temperature,
       maxTokens,
-      prompt // Gemini用のプロンプト
+      prompt // Gemini逕ｨ縺ｮ繝励Ο繝ｳ繝励ヨ
     });
 
     return data.candidates?.[0]?.content?.parts?.[0]?.text || "";
@@ -724,7 +708,7 @@ ${baseContent}
   private async callRawClaude(prompt: string): Promise<string> {
     const { apiKey, model, temperature, maxTokens } = this.config!;
 
-    // Proxy経由でClaudeを呼び出し
+    // Proxy邨檎罰縺ｧClaude繧貞他縺ｳ蜃ｺ縺・
     const data = await this.callProxy({
       provider: 'claude',
       apiKey,
@@ -740,7 +724,7 @@ ${baseContent}
   private async callRawOpenAI(prompt: string): Promise<string> {
     const { apiKey, model, temperature, maxTokens } = this.config!;
 
-    // Proxy経由でOpenAIを呼び出し
+    // Proxy邨檎罰縺ｧOpenAI繧貞他縺ｳ蜃ｺ縺・
     const data = await this.callProxy({
       provider: 'openai',
       apiKey,
@@ -753,21 +737,48 @@ ${baseContent}
     return data.choices?.[0]?.message?.content || "";
   }
 
-  // === プロンプト生成 ===
+  public async generateRawText(prompt: string, maxTokens?: number): Promise<string> {
+    if (!this.config) await this.loadActiveConfig();
+
+    if (!this.config?.provider) {
+      throw new Error("AI provider not configured");
+    }
+
+    const originalMaxTokens = this.config.maxTokens;
+    if (maxTokens && maxTokens > 0) {
+      this.config.maxTokens = maxTokens;
+    }
+
+    try {
+      switch (this.config.provider) {
+        case 'openai':
+          return await this.callRawOpenAI(prompt);
+        case 'gemini':
+          return await this.callRawGemini(prompt);
+        case 'claude':
+          return await this.callRawClaude(prompt);
+        default:
+          throw new Error(`Unsupported provider: ${this.config.provider}`);
+      }
+    } finally {
+      this.config.maxTokens = originalMaxTokens;
+    }
+  }
+  // === 繝励Ο繝ｳ繝励ヨ逕滓・ ===
   private buildPrompt(prompt: GenerationPrompt): string {
     const isSection = prompt.generationType === 'section';
 
     const lengthText = isSection
       ? (prompt.length === "short"
-        ? "約300〜500文字"
+        ? "約400〜600文字"
         : prompt.length === "medium"
-          ? "約500〜800文字"
-          : "約800〜1,200文字")
+          ? "約700〜900文字"
+          : "約1000〜1200文字")
       : (prompt.length === "short"
-        ? "約1,000〜2,000文字"
+        ? "約1000〜2000文字"
         : prompt.length === "medium"
-          ? "約2,000〜4,000文字"
-          : "約4,000〜6,000文字");
+          ? "約2000〜3000文字"
+          : "約3000〜5000文字");
 
     const toneText = (() => {
       switch (prompt.tone) {
@@ -778,13 +789,13 @@ ${baseContent}
         case "technical":
           return "技術的で正確な文体で書いてください。";
         case "friendly":
-          return "読者に語りかけるようなフレンドリーな文体で書いてください。";
+          return "読者に寄り添うフレンドリーな文体で書いてください。";
         default:
           return "";
       }
     })();
 
-    // キーワード選別状態の処理
+    // 繧ｭ繝ｼ繝ｯ繝ｼ繝蛾∈蛻･迥ｶ諷九・蜃ｦ逅・
     let keywordPreferenceText = "";
     if (prompt.keywordPreferences) {
       const essential = Object.entries(prompt.keywordPreferences)
@@ -795,128 +806,67 @@ ${baseContent}
         .map(([kw]) => kw);
 
       if (essential.length > 0 || ng.length > 0) {
-        keywordPreferenceText = "\n【キーワードの制約】\n";
+        keywordPreferenceText = "\n【キーワード優先度】\n";
         if (essential.length > 0) {
-          keywordPreferenceText += `- 必須キーワード（必ず含める）: ${essential.join("、")}\n`;
+          keywordPreferenceText += `- 必須キーワード: ${essential.join("、")}\n`;
         }
         if (ng.length > 0) {
-          keywordPreferenceText += `- NGキーワード（絶対に使わない）: ${ng.join("、")}\n`;
+          keywordPreferenceText += `- NGキーワード: ${ng.join("、")}\n`;
         }
       }
     }
 
     if (isSection) {
       const targetChars = prompt.targetWordCount || (prompt.length === 'short' ? 400 : prompt.length === 'medium' ? 800 : 1200);
-
-      return `
-あなた、SEOに精通したプロのWebライターです。
-読者がスマホでもストレスなく読めるよう、**高品質かつ読みやすい**ブログ記事の${prompt.isLead ? '導入部分（リード文）' : '特定の章（セクション）'}を執筆してください。
-
-【記事全体のタイトル】
-${prompt.articleTitle || prompt.selectedTitle || '未指定'}
-
-【記事の全体構成（目次）】
-${prompt.totalOutline || '未指定'}
-
-【今回執筆するセクションの見出し】
-${prompt.sectionTitle || prompt.topic}
-
-${prompt.previousContent ? `
-【前の章の内容（文脈維持のため）】
-${prompt.previousContent.substring(0, 500)}...
-` : ''}
-
-【キーワード】
-${prompt.keywords?.join("、") || "（指定なし）"}
-※ 以下のキーワードは、文脈に沿って**自然な形で**適宜含めてください。無理に全てのキーワードを何度も使う必要はありません。
-
-【トーン】
-${toneText}
-
-【目標文字数】
-**${targetChars}文字（絶対に超過しないでください。±10%以内を厳守）**
-
-【スタイル・可読性の指示（最重要）】
-1. **1段落は最大2〜3文（80文字程度）以内に抑え、こまめに改行を入れてください。**
-2. 接続詞を適切に使い、論理的かつリズムの良い文章にしてください。
-3. **主語を毎回キーワードにするのではなく、省略や指示語（「これ」「同施設」「同地域」など）を活用して自然な流れを作ってください。**
-4. 箇条書きを適宜活用し、視覚的な分かりやすさを追求してください。
-5. 専門用語は分かりやすく解説するか、平易な言葉に置き換えてください。
-6. 「〜です」「〜ます」調で統一してください。
-
-【執筆の指示】
-- **重要: 指定された${prompt.isLead ? 'リード文' : '見出し'}の本文テキストのみを出力してください。**
-- **文字数制限（${targetChars}文字）を絶対に守ってください。冗長な表現は削り、情報密度を最大化してください。**
-- **【最重要】文章は必ず完結させてください。途中で切れたり、文が中途半端に終わることは絶対に避けてください。**
-- **文章の最後は必ず句点（。）で終わらせ、読者に完結した印象を与えてください。**
-- **「以上のように〜」「次に〜について解説します」といったセクション毎の前置きや結びの言葉は一切不要です。**
-- **キーワードスタッフィング（過剰な詰め込み）は厳禁です。出現率は自然な範囲（概ね3%以内）に留めてください。**
-- 文脈に応じて「この」「同施設」といった指示代名詞や類義語を適切に使い、文章のリズムを整えてください。
-- 見出し（##、###など）や記事タイトル、導入文（はじめに）、結論（まとめ）などは含めないでください。
-${prompt.isLead ? '- **これは記事の冒頭です。読者の興味を惹きつけ、記事を読み進めたくなるような魅力的な書き出しにしてください。**' : ''}
-${prompt.isLead ? '- **見出し（## リード文 など）は絶対に出力しないでください。単純なテキストのみを出力してください。**' : '- 前の章からの自然な流れを意識しつつ、同じ情報の繰り返しは避けてください。'}
-- 出力は純粋な本文テキストのみとしてください（「本文:」「【本文】」などのラベルや接頭辞、記号は一切禁止）。
-${keywordPreferenceText}
-${prompt.customInstructions ? `\n【カスタム指示（優先）】\n${prompt.customInstructions}\n` : ''}
-`;
+      return buildHighQualitySectionPrompt({
+        articleTitle: prompt.articleTitle || prompt.selectedTitle || '未設定',
+        totalOutline: prompt.totalOutline || '未設定',
+        sectionTitle: prompt.sectionTitle || prompt.topic,
+        previousContent: prompt.previousContent,
+        keywords: prompt.keywords,
+        tone: prompt.tone,
+        targetChars,
+        isLead: prompt.isLead,
+        customInstructions: prompt.customInstructions,
+        keywordPreferences: prompt.keywordPreferences
+      });
     }
 
     const sections = [];
-    if (prompt.includeIntroduction) sections.push("導入部分（冒頭）");
-    if (prompt.includeConclusion) sections.push("まとめ（結論）");
-    if (prompt.includeSources) sections.push("参考文献や引用元リスト");
+    if (prompt.includeIntroduction) sections.push("導入");
+    if (prompt.includeConclusion) sections.push("まとめ");
+    if (prompt.includeSources) sections.push("参考情報");
     const sectionText = sections.length ? `${sections.join("、")}を含めてください。` : "";
 
     return `
-以下の条件に基づいて、日本語でSEO最適化されたブログ記事を書いてください。
+以下の条件で日本語記事を作成してください。
 
 【トピック】
 ${prompt.topic}
 
-${prompt.selectedTitle ? `
-【記事タイトル（重要）】
-${prompt.selectedTitle}
-※ この記事タイトルの文脈に沿って、上記のトピック（見出し）の内容を執筆してください。他のタイトル案に関することは書かないでください。
-` : ''}
-
+${prompt.selectedTitle ? `【固定タイトル】\n${prompt.selectedTitle}\n` : ''}
 【キーワード】
-${prompt.keywords?.join("、") || "（指定なし）"}
-※ 以下のキーワードは、文脈に沿って**自然な形で**適宜含めてください。無理に全てのキーワードを何度も使う必要はありません。
+${prompt.keywords?.join("、") || "なし"}
 
-【トーン】
+【文体】
 ${toneText}
 
-【文字数】
-${prompt.targetWordCount
-        ? `**目標: ${prompt.targetWordCount}文字（必ず${Math.floor(prompt.targetWordCount * 0.9)}文字以上、${Math.ceil(prompt.targetWordCount * 1.1)}文字以下で執筆してください）**`
-        : lengthText}
+【目標文字数】
+${prompt.targetWordCount ? `約${prompt.targetWordCount}文字（±10%）` : lengthText}
 
-**【最重要】文字数制限について:**
-- 上記の目標文字数を厳守してください。最低文字数を下回ることは絶対に避けてください。
-- 内容が不足している場合は、以下を追加して文字数を確保してください:
-  - 具体例や事例の追加
-  - ユーザーメリットの詳細説明
-  - よくある質問（FAQ）や補足情報
-  - 関連する背景情報や歴史的経緯
-- 短すぎる記事は品質が低いと判断されます。必ず指定範囲内で執筆してください。
-
-【構成】
+【要件】
 ${sectionText}
 ${keywordPreferenceText}
-${prompt.customInstructions ? `\n【カスタム指示（優先）】\n${prompt.customInstructions}\n` : ''}
+${prompt.customInstructions ? `\n【追加指示】\n${prompt.customInstructions}\n` : ''}
 
-【指示】
-- 見出しには「##」を使用して構造化してください。
-- 内容をわかりやすく、段落を分けて書いてください。
-- **【最重要】記事は必ず完結させてください。途中で切れたり、文が中途半端に終わることは絶対に避けてください。**
-- **記事の最後は必ず適切な結論や締めくくりの文章で終わらせ、読者に完結した印象を与えてください。**
-- **キーワードを無理に詰め込まず（キーワードスタッフィング禁止）、指示代名詞や言い換えを用いて自然な日本語で執筆してください。**
-- 1行目にタイトル（または見出し）のみを出力してください（「タイトル:」などの接頭辞は禁止）。
-- 2行目以降に本文のみを出力してください（「本文:」「【本文】」などの接頭辞は禁止）。
+【出力形式】
+- Markdownで出力
+- 文章は自然で読みやすく
+- 見出しや段落を適切に利用
 `;
   }
 
-  // === Gemini呼び出し ===
+  // === Gemini蜻ｼ縺ｳ蜃ｺ縺・===
   private async callGemini(prompt: GenerationPrompt) {
     const text = await this.callRawGemini(this.buildPrompt(prompt));
     if (prompt.generationType === 'section') {
@@ -931,7 +881,7 @@ ${prompt.customInstructions ? `\n【カスタム指示（優先）】\n${prompt.
     };
   }
 
-  // === Claude呼び出し ===
+  // === Claude蜻ｼ縺ｳ蜃ｺ縺・===
   private async callClaude(prompt: GenerationPrompt) {
     const text = await this.callRawClaude(this.buildPrompt(prompt));
     if (prompt.generationType === 'section') {
@@ -946,7 +896,7 @@ ${prompt.customInstructions ? `\n【カスタム指示（優先）】\n${prompt.
     };
   }
 
-  // === OpenAI呼び出し ===
+  // === OpenAI蜻ｼ縺ｳ蜃ｺ縺・===
   private async callOpenAI(prompt: GenerationPrompt) {
     const text = await this.callRawOpenAI(this.buildPrompt(prompt));
     if (prompt.generationType === 'section') {
@@ -993,5 +943,7 @@ ${prompt.customInstructions ? `\n【カスタム指示（優先）】\n${prompt.
   }
 }
 
-// aiService インスタンスをエクスポート
+// aiService 繧､繝ｳ繧ｹ繧ｿ繝ｳ繧ｹ繧偵お繧ｯ繧ｹ繝昴・繝・
 export const aiService = new AIService();
+
+

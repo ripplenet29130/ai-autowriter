@@ -7,6 +7,15 @@ import { logger } from '../utils/logger';
 import { handleError } from '../utils/errorHandler';
 
 const publishLogger = logger.createLogger('WordPressPublish');
+const BASE64_IMAGE_MARKDOWN_REGEX = /!\[([^\]]*)\]\(data:image\/([^;]+);base64,([^)]+)\)/g;
+
+function stripBase64ImagesFromContent(content: string): string {
+    if (!content) return content;
+    return content.replace(
+        BASE64_IMAGE_MARKDOWN_REGEX,
+        '\n\n> [画像はアップロード失敗のため本文から除去されました]\n\n'
+    );
+}
 
 /**
  * 記事内のBase64画像をWordPressにアップロードしてURLに置換
@@ -15,10 +24,10 @@ async function processImagesBeforePublish(
     article: Article,
     wpService: WordPressService
 ): Promise<Article> {
-    const base64ImageRegex = /!\[([^\]]*)\]\(data:image\/([^;]+);base64,([^)]+)\)/g;
+    const base64ImageRegex = BASE64_IMAGE_MARKDOWN_REGEX;
     let processedContent = article.content;
-    let match;
     let imageIndex = 1;
+    let failedUploads = 0;
 
     const matches = [...article.content.matchAll(base64ImageRegex)];
 
@@ -43,12 +52,19 @@ async function processImagesBeforePublish(
                 console.log(`画像をアップロードして置換しました: ${filename} -> ${uploadResult.url}`);
             } else {
                 console.warn(`画像アップロードに失敗しました: ${filename}`, uploadResult.error);
+                failedUploads++;
             }
         } catch (error) {
             console.error(`画像処理エラー: ${filename}`, error);
+            failedUploads++;
         }
 
         imageIndex++;
+    }
+
+    // Base64画像が残ったまま投稿するとWordPress編集画面が重くなり開けなくなるため中止する
+    if (failedUploads > 0 || /data:image\/[^;]+;base64,/i.test(processedContent)) {
+        throw new Error(`画像のアップロードに失敗しました（${failedUploads}件）。Base64画像が本文に残るため投稿を中止しました。`);
     }
 
     return {
@@ -73,7 +89,7 @@ export function useWordPressPublish() {
         category?: string,
         status: 'publish' | 'draft' | 'future' = 'publish',
         publishDate?: Date
-    ): Promise<boolean> => {
+    ): Promise<Article | boolean> => {
         const config = wordPressConfigs.find(c => c.id === configId);
 
         if (!config) {
@@ -96,12 +112,13 @@ export function useWordPressPublish() {
             const result = await service.publishArticle(processedArticle, status, publishDate);
 
             if (result.success && result.wordPressId) {
-                // 記事情報を更新
+                // 記事情報を更新（Base64をURLに置換したコンテンツを保存）
                 const newStatus = status === 'future' ? 'scheduled' : status === 'publish' ? 'published' : 'draft';
                 const now = new Date().toISOString();
 
                 updateArticle(article.id, {
                     status: newStatus,
+                    content: processedArticle.content, // ここで置換後のコンテンツを保存
                     publishedAt: status === 'publish' ? now : undefined,
                     scheduledAt: status === 'future' && publishDate ? publishDate.toISOString() : undefined,
                     wordPressPostId: result.wordPressId.toString(),
@@ -112,7 +129,7 @@ export function useWordPressPublish() {
 
                 toast.success('記事を投稿しました');
                 publishLogger.info(`投稿成功: ${article.title}`, { wordPressId: result.wordPressId });
-                return true;
+                return processedArticle; // 処理後の記事を返す
             } else {
                 toast.error(result.error || '投稿に失敗しました');
                 publishLogger.error(`投稿失敗: ${result.error}`);
@@ -123,7 +140,8 @@ export function useWordPressPublish() {
             handleError(error, 'WordPressPublish');
             toast.error('投稿中にエラーが発生しました');
 
-            updateArticle(article.id, { status: 'failed' });
+            const sanitizedContent = stripBase64ImagesFromContent(article.content);
+            updateArticle(article.id, { status: 'failed', content: sanitizedContent });
             return false;
         } finally {
             setIsPublishing(false);

@@ -24,6 +24,7 @@ interface AppState {
   addWordPressConfig: (config: WordPressConfig) => void;
   updateWordPressConfig: (id: string, updates: Partial<WordPressConfig>) => void;
   deleteWordPressConfig: (id: string) => void;
+  activateWordPressConfig: (id: string) => Promise<void>;
   // Prompt Set Actions
   addPromptSet: (promptSet: PromptSet) => Promise<void>;
   updatePromptSet: (id: string, updates: Partial<PromptSet>) => Promise<void>;
@@ -156,6 +157,25 @@ export const useAppStore = create<AppState>()(
           await supabaseSchedulerService.deleteWordPressConfig(id);
         } catch (error) {
           console.error('Error deleting WordPress config:', error);
+        }
+      },
+
+      activateWordPressConfig: async (id) => {
+        try {
+          const target = get().wordPressConfigs.find(c => c.id === id);
+          if (!target) return;
+
+          const updatedTarget = { ...target, isActive: true };
+
+          set((state) => ({
+            wordPressConfigs: state.wordPressConfigs.map(c =>
+              c.id === id ? updatedTarget : c
+            )
+          }));
+
+          await supabaseSchedulerService.saveWordPressConfig(updatedTarget);
+        } catch (error) {
+          console.error('Error activating WordPress config:', error);
         }
       },
 
@@ -401,7 +421,6 @@ export const useAppStore = create<AppState>()(
         wordPressConfigs: state.wordPressConfigs,
         aiConfigs: state.aiConfigs,
         aiConfig: state.aiConfig,
-        articles: state.articles,
         promptSets: state.promptSets
       }),
     }

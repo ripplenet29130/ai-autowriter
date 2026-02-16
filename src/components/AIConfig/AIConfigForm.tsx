@@ -16,31 +16,45 @@ export const AIConfigForm: React.FC<AIConfigFormProps> = ({
     onSubmit,
     onCancel,
 }) => {
+    const getDefaultImageProviderByAIProvider = (
+        aiProvider: 'openai' | 'claude' | 'gemini'
+    ): AIConfig['imageProvider'] => {
+        if (aiProvider === 'openai') return 'dalle3';
+        if (aiProvider === 'gemini') return 'nanobanana';
+        return 'nanobanana';
+    };
+
     const [config, setConfig] = useState<AIConfig>({
         provider: provider,
         apiKey: '',
         model: provider === 'openai' ? 'gpt-5.2' :
-            provider === 'claude' ? 'claude-4-5-sonnet-20250929' : 'gemini-3.0-flash',
+            provider === 'claude' ? 'claude-4-5-sonnet-20250929' : 'gemini-2.5-flash',
         temperature: 0.7,
         maxTokens: 4000,
         imageGenerationEnabled: true,
-        imageProvider: 'nanobanana',
+        imageProvider: getDefaultImageProviderByAIProvider(provider),
         imagesPerArticle: 3
     });
 
     const [testingConnection, setTestingConnection] = useState(false);
+    const [testingImageGeneration, setTestingImageGeneration] = useState(false);
     const [connectionStatus, setConnectionStatus] = useState<'idle' | 'success' | 'error'>('idle');
 
     useEffect(() => {
         if (initialConfig) {
-            setConfig(initialConfig);
+            setConfig({
+                ...initialConfig,
+                provider,
+                imageProvider: getDefaultImageProviderByAIProvider(provider),
+            });
         } else {
             // Reset to defaults for this provider if no initial config
             setConfig(prev => ({
                 ...prev,
                 provider: provider,
                 model: provider === 'openai' ? 'gpt-5.2' :
-                    provider === 'claude' ? 'claude-4-5-sonnet-20250929' : 'gemini-3.0-flash',
+                    provider === 'claude' ? 'claude-4-5-sonnet-20250929' : 'gemini-2.5-flash',
+                imageProvider: getDefaultImageProviderByAIProvider(provider),
             }));
         }
     }, [initialConfig, provider]);
@@ -54,7 +68,8 @@ export const AIConfigForm: React.FC<AIConfigFormProps> = ({
         // Ensure provider and correct model are set
         onSubmit({
             ...config,
-            provider // Force provider from prop
+            provider, // Force provider from prop
+            imageProvider: getDefaultImageProviderByAIProvider(provider),
         });
     };
 
@@ -148,6 +163,76 @@ export const AIConfigForm: React.FC<AIConfigFormProps> = ({
         }
     };
 
+    const handleTestImageGeneration = async () => {
+        if (provider !== 'gemini') {
+            toast.error('画像テストはGemini設定でのみ利用できます');
+            return;
+        }
+
+        if (!config.apiKey.trim()) {
+            toast.error('APIキーを入力してください');
+            return;
+        }
+
+        setTestingImageGeneration(true);
+
+        try {
+            const modelName = config.model || 'gemini-2.0-flash';
+            const testPrompt = 'テスト用のシンプルな風景画像を1枚生成してください。';
+            const response = await fetch(
+                `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${config.apiKey}`,
+                {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        contents: [{ parts: [{ text: testPrompt }] }],
+                        generationConfig: {
+                            temperature: 0.2,
+                            maxOutputTokens: 256,
+                        },
+                    }),
+                }
+            );
+
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                const errorMessage = data?.error?.message || response.statusText || 'Unknown error';
+                const isQuotaError =
+                    response.status === 429 ||
+                    /RESOURCE_EXHAUSTED/i.test(errorMessage) ||
+                    /quota exceeded/i.test(errorMessage);
+
+                if (isQuotaError) {
+                    const retryMatch = String(errorMessage).match(/Please retry in\s+([\d.]+)s/i);
+                    const retrySeconds = retryMatch ? Math.ceil(Number(retryMatch[1])) : null;
+                    toast.error(
+                        retrySeconds
+                            ? `Gemini無料枠の上限に達しました。約${retrySeconds}秒後に再試行してください。`
+                            : 'Gemini無料枠の上限に達しました。Google AI Studioのクォータ/請求設定を確認してください。'
+                    );
+                    return;
+                }
+
+                toast.error(`画像生成テストエラー: ${errorMessage}`);
+                return;
+            }
+
+            const imagePart = data?.candidates?.[0]?.content?.parts?.find((part: any) => part.inlineData);
+            if (!imagePart?.inlineData?.data) {
+                toast.error('画像テストは成功しましたが、画像データを取得できませんでした');
+                return;
+            }
+
+            toast.success('nanobanana画像生成テスト成功（1枚）');
+        } catch (error: any) {
+            toast.error(`画像生成テストでエラーが発生しました: ${error.message}`);
+        } finally {
+            setTestingImageGeneration(false);
+        }
+    };
+
     const getModelOptions = () => {
         switch (config.provider) {
             case 'openai':
@@ -156,7 +241,10 @@ export const AIConfigForm: React.FC<AIConfigFormProps> = ({
                     { value: 'gpt-5', label: 'GPT-5 (推論・コーディング)' },
                     { value: 'gpt-5-mini', label: 'GPT-5 mini (高速・低コスト)' },
                     { value: 'gpt-4.1', label: 'GPT-4.1 (安定版)' },
-                    { value: 'gpt-4o', label: 'GPT-4o' }
+                    { value: 'gpt-4.1-mini', label: 'GPT-4.1 mini (低コスト・推奨)' },
+                    { value: 'gpt-4.1-nano', label: 'GPT-4.1 nano (最安・超高速)' },
+                    { value: 'gpt-4o', label: 'GPT-4o' },
+                    { value: 'gpt-4o-mini', label: 'GPT-4o mini (低コスト)' }
                 ];
             case 'claude':
                 return [
@@ -167,20 +255,13 @@ export const AIConfigForm: React.FC<AIConfigFormProps> = ({
                 ];
             case 'gemini':
                 return [
-                    { value: 'gemini-3.0-pro', label: 'Google Gemini (gemini-3.0-pro) (最新・高性能)' },
-                    { value: 'gemini-3.0-flash', label: 'Google Gemini (gemini-3.0-flash) (最新・高速)' },
+                    { value: 'gemini-2.5-pro', label: 'Google Gemini (gemini-2.5-pro) (最新・高性能)' },
+                    { value: 'gemini-2.5-flash', label: 'Google Gemini (gemini-2.5-flash) (最新・高速)' },
                     { value: 'gemini-2.0-flash', label: 'Google Gemini (gemini-2.0-flash) (安定版)' }
                 ];
             default:
                 return [];
         }
-    };
-
-    const getImageProviderOptions = () => {
-        return [
-            { value: 'nanobanana', label: 'Gemini Image (nanobanana) - 推奨' },
-            { value: 'dalle3', label: 'DALL-E 3 (OpenAI)' }
-        ];
     };
 
     const getConnectionStatusIcon = () => {
@@ -332,32 +413,30 @@ export const AIConfigForm: React.FC<AIConfigFormProps> = ({
                             <input
                                 type="checkbox"
                                 checked={config.imageGenerationEnabled || false}
-                                onChange={(e) => setConfig(prev => ({ ...prev, imageGenerationEnabled: e.target.checked }))}
+                                onChange={(e) =>
+                                    setConfig(prev => ({
+                                        ...prev,
+                                        imageGenerationEnabled: e.target.checked,
+                                        imageProvider: e.target.checked
+                                            ? getDefaultImageProviderByAIProvider(provider)
+                                            : prev.imageProvider,
+                                    }))
+                                }
                                 className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                             />
                             <span className="ml-2 text-sm font-medium text-gray-700">画像自動生成を有効にする</span>
                         </label>
+                        <p className="text-xs text-gray-500 mt-2">
+                            {provider === 'openai'
+                                ? 'OpenAI選択時は DALL-E 3 を自動使用します'
+                                : provider === 'gemini'
+                                    ? 'Gemini選択時は nanobanana を自動使用します'
+                                    : '現在のAI設定に応じて画像プロバイダーを自動使用します'}
+                        </p>
                     </div>
 
                     {config.imageGenerationEnabled && (
                         <>
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-2">
-                                    画像生成プロバイダー
-                                </label>
-                                <select
-                                    value={config.imageProvider || 'nanobanana'}
-                                    onChange={(e) => setConfig(prev => ({ ...prev, imageProvider: e.target.value as any }))}
-                                    className="input-field"
-                                >
-                                    {getImageProviderOptions().map(option => (
-                                        <option key={option.value} value={option.value}>
-                                            {option.label}
-                                        </option>
-                                    ))}
-                                </select>
-                            </div>
-
                             <div>
                                 <label className="block text-sm font-medium text-gray-700 mb-2">
                                     記事あたりの画像枚数 ({config.imagesPerArticle || 0}枚)
@@ -377,7 +456,9 @@ export const AIConfigForm: React.FC<AIConfigFormProps> = ({
                                     <span>10枚</span>
                                 </div>
                                 <p className="text-xs text-gray-500 mt-2">
-                                    ※ nanobanana: 約1枚あたり$0.039（約5.5円）
+                                    {provider === 'openai'
+                                        ? '※ DALL-E 3: 約1枚あたり$0.08（約11円）/ Standard・縦横長サイズ'
+                                        : '※ nanobanana: 約1枚あたり$0.039（約5.5円）'}
                                 </p>
                             </div>
                         </>
@@ -386,6 +467,26 @@ export const AIConfigForm: React.FC<AIConfigFormProps> = ({
             </div>
 
             <div className="flex justify-end space-x-3 mt-6 pt-4 border-t border-gray-200">
+                {provider === 'gemini' && config.imageGenerationEnabled && (
+                    <button
+                        onClick={handleTestImageGeneration}
+                        disabled={testingImageGeneration || !config.apiKey.trim()}
+                        className="btn-secondary flex items-center space-x-2 disabled:opacity-50"
+                    >
+                        {testingImageGeneration ? (
+                            <>
+                                <div className="w-4 h-4 border-2 border-gray-600 border-t-transparent rounded-full animate-spin"></div>
+                                <span>画像テスト中...</span>
+                            </>
+                        ) : (
+                            <>
+                                <Image className="w-4 h-4" />
+                                <span>画像テスト(1枚)</span>
+                            </>
+                        )}
+                    </button>
+                )}
+
                 <button
                     onClick={handleTestConnection}
                     disabled={testingConnection || !config.apiKey.trim()}

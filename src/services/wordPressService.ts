@@ -17,10 +17,16 @@ export interface WordPressConfig {
 
 export class WordPressService {
   private config: WordPressConfig | null = null;
+  private normalizeWordPressUrl(url: string): string {
+    return url.replace(/\/+$/, '');
+  }
 
   constructor(config?: WordPressConfig) {
     if (config) {
-      this.config = config;
+      this.config = {
+        ...config,
+        url: this.normalizeWordPressUrl(config.url)
+      };
     }
   }
 
@@ -45,7 +51,7 @@ export class WordPressService {
     this.config = {
       id: configData.id,
       name: configData.name,
-      url: configData.url,
+      url: this.normalizeWordPressUrl(configData.url),
       username: configData.username,
       applicationPassword: configData.password, // Supabase側が「password」カラムの場合
       isActive: configData.is_active,
@@ -107,8 +113,7 @@ export class WordPressService {
         formData,
         {
           headers: {
-            ...this.getAuthHeaders(),
-            'Content-Disposition': `attachment; filename="${filename}"`
+            Authorization: this.getAuthHeaders().Authorization
           }
         }
       );
@@ -125,6 +130,9 @@ export class WordPressService {
       return { success: false, error: 'アップロードに失敗しました' };
     } catch (error: any) {
       console.error('WordPress画像アップロードエラー:', error);
+      if (error?.response?.data) {
+        console.error('WordPress画像アップロード詳細:', error.response.data);
+      }
       return {
         success: false,
         error: error.response?.data?.message || '画像アップロードでエラーが発生しました'

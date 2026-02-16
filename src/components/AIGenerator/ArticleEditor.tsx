@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { Edit, Eye, Edit3, RefreshCw, ShieldCheck } from 'lucide-react';
+import { Eye, Edit3, RefreshCw, ShieldCheck, Wand2 } from 'lucide-react';
 import { Article } from '../../types';
-import ReactMarkdown from 'react-markdown';
+import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { RegenerateModal, RegenerateOptions } from './RegenerateModal';
 
@@ -11,11 +11,14 @@ interface ArticleEditorProps {
     onRegenerate?: (options: RegenerateOptions) => Promise<void>;
     onFactCheck?: () => void;
     isFactChecking?: boolean;
+    onFactCheckFix?: () => void;
+    isFactCheckFixing?: boolean;
+    canFactCheckFix?: boolean;
     readOnly?: boolean;
 }
 
 /**
- * 記事編集コンポーネント - タブ切り替えによるプレビュー機能付き
+ * 記事編集コンポーネント: タブ切り替えによるプレビュー表示付き
  */
 export const ArticleEditor: React.FC<ArticleEditorProps> = ({
     article,
@@ -23,11 +26,23 @@ export const ArticleEditor: React.FC<ArticleEditorProps> = ({
     onRegenerate,
     onFactCheck,
     isFactChecking = false,
+    onFactCheckFix,
+    isFactCheckFixing = false,
+    canFactCheckFix = false,
     readOnly = false,
 }) => {
     const [viewMode, setViewMode] = useState<'edit' | 'preview'>('edit');
     const [showRegenerateModal, setShowRegenerateModal] = useState(false);
     const [isRegenerating, setIsRegenerating] = useState(false);
+    const currentCharCount = article.content?.length || 0;
+    const targetCharCount = article.targetWordCount;
+    const charDiff = typeof targetCharCount === 'number' ? currentCharCount - targetCharCount : null;
+    const markdownUrlTransform = (url: string, key?: string) => {
+        if (key === 'src' && /^data:image\/[a-zA-Z0-9.+-]+;base64,/i.test(url)) {
+            return url;
+        }
+        return defaultUrlTransform(url);
+    };
 
     return (
         <div className="space-y-6">
@@ -81,12 +96,24 @@ export const ArticleEditor: React.FC<ArticleEditorProps> = ({
                             <RefreshCw className={`w-5 h-5 ${isRegenerating ? 'animate-spin' : ''}`} />
                         </button>
                     )}
+                    {onFactCheckFix && (
+                        <button
+                            onClick={onFactCheckFix}
+                            disabled={isFactCheckFixing || !canFactCheckFix}
+                            className={`p-2.5 rounded-lg transition-all border ${isFactCheckFixing || !canFactCheckFix
+                                ? 'bg-gray-50 border-gray-200 text-gray-400 cursor-not-allowed'
+                                : 'bg-white border-orange-200 text-orange-600 hover:bg-orange-50 hover:border-orange-300 hover:shadow-sm active:scale-95'
+                                }`}
+                            title={isFactCheckFixing ? '修正中...' : 'ファクトチェック結果をAIで修正'}
+                        >
+                            <Wand2 className={`w-5 h-5 ${isFactCheckFixing ? 'animate-pulse' : ''}`} />
+                        </button>
+                    )}
                 </div>
             </div>
 
             {viewMode === 'edit' ? (
                 <div className="space-y-4 animate-in fade-in duration-300">
-                    {/* Title */}
                     <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center space-x-2">
                             <Edit3 className="w-4 h-4" />
@@ -101,7 +128,6 @@ export const ArticleEditor: React.FC<ArticleEditorProps> = ({
                         />
                     </div>
 
-                    {/* Excerpt */}
                     <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">
                             抜粋
@@ -115,7 +141,6 @@ export const ArticleEditor: React.FC<ArticleEditorProps> = ({
                         />
                     </div>
 
-                    {/* Content */}
                     <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">
                             本文
@@ -138,15 +163,14 @@ export const ArticleEditor: React.FC<ArticleEditorProps> = ({
                         </div>
                     )}
                     <div className="article-prose">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                        <ReactMarkdown remarkPlugins={[remarkGfm]} urlTransform={markdownUrlTransform}>
                             {article.content}
                         </ReactMarkdown>
                     </div>
                 </div>
             )}
 
-            {/* Metadata (Always shown) */}
-            <div className="grid grid-cols-2 gap-4 pt-4 border-t border-gray-100 mt-6">
+            <div className="grid grid-cols-1 gap-4 pt-4 border-t border-gray-100 mt-6">
                 <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">
                         トーン
@@ -166,38 +190,28 @@ export const ArticleEditor: React.FC<ArticleEditorProps> = ({
 
                 <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">
-                        長さ
+                        文字数
                     </label>
-                    <select
-                        value={article.length || 'medium'}
-                        onChange={(e) => onUpdate({ length: e.target.value as any })}
-                        disabled={readOnly}
-                        className="input-field"
-                    >
-                        <option value="short">短い</option>
-                        <option value="medium">中程度</option>
-                        <option value="long">長い</option>
-                    </select>
+                    <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+                        <div className="text-xs text-gray-500">目標文字数</div>
+                        <div className="mt-1 text-base font-semibold text-gray-900">
+                            {typeof targetCharCount === 'number'
+                                ? `${targetCharCount.toLocaleString('ja-JP')} 文字`
+                                : '未指定'}
+                        </div>
+                        <div className="mt-2 text-xs text-gray-500">現在文字数</div>
+                        <div className="mt-1 text-sm font-medium text-gray-800">
+                            {currentCharCount.toLocaleString('ja-JP')} 文字
+                        </div>
+                        {charDiff !== null && (
+                            <div className={`mt-1 text-xs font-semibold ${charDiff >= 0 ? 'text-blue-700' : 'text-amber-700'}`}>
+                                差分: {charDiff >= 0 ? '+' : ''}{charDiff.toLocaleString('ja-JP')} 文字
+                            </div>
+                        )}
+                    </div>
                 </div>
             </div>
 
-            {/* Stats */}
-            {article.wordCount && (
-                <div className="bg-blue-50/50 rounded-lg p-4 border border-blue-100/50">
-                    <div className="flex items-center justify-between text-sm">
-                        <span className="text-gray-600">文字数 :</span>
-                        <span className="font-semibold text-blue-700">{article.wordCount.toLocaleString('ja-JP')} 文字</span>
-                    </div>
-                    {article.readingTime && (
-                        <div className="flex items-center justify-between text-sm mt-2">
-                            <span className="text-gray-600">想定読了時間:</span>
-                            <span className="font-semibold text-blue-700">{article.readingTime} 分</span>
-                        </div>
-                    )}
-                </div>
-            )}
-
-            {/* Regenerate Modal */}
             {showRegenerateModal && onRegenerate && (
                 <RegenerateModal
                     currentArticle={{

@@ -60,6 +60,37 @@ export function convertToGutenbergBlocks(content: string): string {
             continue;
         }
 
+        // Markdown image: ![alt](url)
+        const markdownImageMatch = line.match(/^!\[([^\]]*)\]\(([^)\s]+)\)$/);
+        if (markdownImageMatch) {
+            if (inList) {
+                result += createListBlock(listItems);
+                inList = false;
+                listItems = [];
+            }
+            const altText = markdownImageMatch[1];
+            const imageUrl = markdownImageMatch[2];
+            result += createImageBlock(imageUrl, altText);
+            continue;
+        }
+
+        // Plain HTML image line
+        const htmlImageMatch = line.match(/^<img[^>]*src=["']([^"']+)["'][^>]*alt=["']([^"']*)["'][^>]*>$/i)
+            || line.match(/^<img[^>]*alt=["']([^"']*)["'][^>]*src=["']([^"']+)["'][^>]*>$/i);
+        if (htmlImageMatch) {
+            if (inList) {
+                result += createListBlock(listItems);
+                inList = false;
+                listItems = [];
+            }
+            const first = htmlImageMatch[1];
+            const second = htmlImageMatch[2];
+            const imageUrl = first.startsWith('http') || first.startsWith('data:') ? first : second;
+            const altText = imageUrl === first ? second : first;
+            result += createImageBlock(imageUrl, altText);
+            continue;
+        }
+
         // Check for <li> tags
         const liMatch = line.match(/^<li>(.*?)<\/li>$/);
         if (liMatch) {
@@ -122,6 +153,15 @@ function createListBlock(items: string[]): string {
     return `<!-- wp:list -->
 <ul class="wp-block-list">${listItems}</ul>
 <!-- /wp:list -->
+
+`;
+}
+
+function createImageBlock(url: string, alt: string): string {
+    const escapedAlt = alt.replace(/"/g, '&quot;');
+    return `<!-- wp:image -->
+<figure class="wp-block-image"><img src="${url}" alt="${escapedAlt}"/></figure>
+<!-- /wp:image -->
 
 `;
 }

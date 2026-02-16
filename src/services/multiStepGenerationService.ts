@@ -1,4 +1,4 @@
-import { v4 as uuidv4 } from 'uuid';
+﻿import { v4 as uuidv4 } from 'uuid';
 import {
     Article,
     ArticleOutline,
@@ -11,14 +11,15 @@ import { realTrendAnalysisService } from './realTrendAnalysisService';
 import { outlineGenerationService } from './outlineGenerationService';
 import { titleGenerationService } from './titleGenerationService';
 import { aiService } from './aiService';
+import { generateArticleFromOutlineWithSharedCore } from '../shared/articleGenerationCore';
 
 /**
- * マルチステップ記事生成サービス
- * トレンド分析 → アウトライン生成 → セクション別本文生成 → 記事組み立て
+ * 繝槭Ν繝√せ繝・ャ繝苓ｨ倅ｺ狗函謌舌し繝ｼ繝薙せ
+ * 繝医Ξ繝ｳ繝牙・譫・竊・繧｢繧ｦ繝医Λ繧､繝ｳ逕滓・ 竊・繧ｻ繧ｯ繧ｷ繝ｧ繝ｳ蛻･譛ｬ譁・函謌・竊・險倅ｺ狗ｵ・∩遶九※
  */
 export class MultiStepGenerationService {
     /**
-     * Step 1: トレンド分析
+     * Step 1: 繝医Ξ繝ｳ繝牙・譫・
      */
     async analyzeTrends(keywords: string[]): Promise<TrendAnalysisResult> {
         try {
@@ -30,38 +31,38 @@ export class MultiStepGenerationService {
                     region: 'JP',
                     timeframe: 'today 12-m'
                 });
-                console.log('Step 1: トレンド分析完了（実データ）', trendData);
+                console.log('Step 1: トレンド分析結果', trendData);
                 return trendData;
             } catch (apiError) {
-                console.warn('実APIでのトレンド分析に失敗。モックデータを使用します:', apiError);
+                console.warn('Trend API failed. Falling back to mock trend data.', apiError);
                 const { trendAnalysisService } = await import('./trendAnalysisService');
                 const mockTrendData = await trendAnalysisService.analyzeTrends(keyword);
                 return mockTrendData;
             }
         } catch (error) {
-            console.error('トレンド分析エラー:', error);
+            console.error('Trend analysis failed:', error);
             throw new Error('トレンド分析に失敗しました');
         }
     }
 
     /**
-     * Step 2: タイトル案を生成
+     * Step 2: 繧ｿ繧､繝医Ν譯医ｒ逕滓・
      */
     async generateTitles(
         trendData: TrendAnalysisResult,
         keywordPreferences?: Record<string, import('../types').KeywordPreference>
     ): Promise<import('../types').TitleSuggestion[]> {
         try {
-            console.log('Step 2: タイトル案生成開始');
+            console.log('Step 2: タイトル生成開始');
             return await titleGenerationService.generateTitleSuggestions(trendData, 5, keywordPreferences);
         } catch (error) {
-            console.error('タイトル生成エラー:', error);
+            console.error('Title generation failed:', error);
             throw new Error('タイトル生成に失敗しました');
         }
     }
 
     /**
-     * Step 3: AIによるアウトライン生成
+     * Step 3: AI縺ｫ繧医ｋ繧｢繧ｦ繝医Λ繧､繝ｳ逕滓・
      */
     async generateOutline(
         keywords: string[],
@@ -73,7 +74,7 @@ export class MultiStepGenerationService {
             selectedTitle?: string;
             keywordPreferences?: Record<string, import('../types').KeywordPreference>;
             customInstructions?: string;
-            targetWordCount?: number; // 追加
+            targetWordCount?: number; // 霑ｽ蜉
         }
     ): Promise<ArticleOutline> {
         try {
@@ -85,10 +86,10 @@ export class MultiStepGenerationService {
                 targetLength: options?.targetLength || 'medium',
                 tone: options?.tone || 'professional',
                 focusTopics: options?.focusTopics,
-                selectedTitle: options?.selectedTitle, // これを追加
+                selectedTitle: options?.selectedTitle, // 縺薙ｌ繧定ｿｽ蜉
                 keywordPreferences: options?.keywordPreferences,
                 customInstructions: options?.customInstructions,
-                targetWordCount: options?.targetWordCount // 追加
+                targetWordCount: options?.targetWordCount // 霑ｽ蜉
             };
 
             const outline = await outlineGenerationService.generateOutline(request);
@@ -97,19 +98,19 @@ export class MultiStepGenerationService {
                 outline.title = options.selectedTitle;
             }
 
-            // キーワード設定を保存しておく
+            // 繧ｭ繝ｼ繝ｯ繝ｼ繝芽ｨｭ螳壹ｒ菫晏ｭ倥＠縺ｦ縺翫￥
             outline.keywordPreferences = options?.keywordPreferences;
 
             console.log('Step 3: アウトライン生成完了', outline);
             return outline;
         } catch (error) {
-            console.error('アウトライン生成エラー:', error);
+            console.error('Outline generation failed:', error);
             throw new Error('アウトライン生成に失敗しました');
         }
     }
 
     /**
-     * Step 4: セクション別に本文を生成
+     * Step 4: 繧ｻ繧ｯ繧ｷ繝ｧ繝ｳ蛻･縺ｫ譛ｬ譁・ｒ逕滓・
      */
     async generateSections(
         outline: ArticleOutline,
@@ -120,12 +121,12 @@ export class MultiStepGenerationService {
         }
     ): Promise<Map<string, string>> {
         try {
-            console.log('Step 4: セクション別本文生成開始');
+            console.log('Step 4: セクション本文生成開始');
 
             const sectionContents = new Map<string, string>();
             const totalSections = outline.sections.length;
 
-            // 全体構成をテキスト化してAIに渡せるようにする
+            // 蜈ｨ菴捺ｧ区・繧偵ユ繧ｭ繧ｹ繝亥喧縺励※AI縺ｫ貂｡縺帙ｋ繧医≧縺ｫ縺吶ｋ
             const totalOutlineStr = outline.sections
                 .map(s => `${s.level === 1 ? 'H1: ' : s.level === 2 ? 'H2: ' : 'H3: '}${s.title}`)
                 .join('\n');
@@ -135,7 +136,7 @@ export class MultiStepGenerationService {
             for (let i = 0; i < outline.sections.length; i++) {
                 const section = outline.sections[i];
 
-                // 開始を通知
+                // 髢句ｧ九ｒ騾夂衍
                 if (options?.onProgress) {
                     const progress = (i / totalSections) * 100;
                     options.onProgress(section, progress);
@@ -146,37 +147,37 @@ export class MultiStepGenerationService {
                     outline,
                     previousSections: outline.sections.slice(0, i),
                     tone: options?.tone || 'professional',
-                    // ハイブリッド・コンテキスト用の追加情報
+                    // 繝上う繝悶Μ繝・ラ繝ｻ繧ｳ繝ｳ繝・く繧ｹ繝育畑縺ｮ霑ｽ蜉諠・ｱ
                     totalOutline: totalOutlineStr,
                     previousContent: accumulatedContent,
                     customInstructions: options?.customInstructions
-                } as any); // 型定義を拡張するかキャスト
+                } as any); // 蝙句ｮ夂ｾｩ繧呈僑蠑ｵ縺吶ｋ縺九く繝｣繧ｹ繝・
 
                 sectionContents.set(section.id, content);
                 section.content = content;
                 section.isGenerated = true;
 
-                // 文脈維持用に今回の内容を蓄積（長すぎるとプロンプトを圧迫するので直近分のみに絞るなどの調整も可）
+                // 譁・ц邯ｭ謖∫畑縺ｫ莉雁屓縺ｮ蜀・ｮｹ繧定塘遨搾ｼ磯聞縺吶℃繧九→繝励Ο繝ｳ繝励ヨ繧貞悸霑ｫ縺吶ｋ縺ｮ縺ｧ逶ｴ霑大・縺ｮ縺ｿ縺ｫ邨槭ｋ縺ｪ縺ｩ縺ｮ隱ｿ謨ｴ繧ょ庄・・
                 accumulatedContent += `\n\n${content}`;
 
-                // 完了を通知
+                // 螳御ｺ・ｒ騾夂衍
                 if (options?.onProgress) {
                     const progress = ((i + 1) / totalSections) * 100;
                     options.onProgress(section, progress);
                 }
 
-                console.log(`セクション ${i + 1}/${totalSections} 生成完了:`, section.title);
+                console.log(`Section ${i + 1}/${totalSections} generated`, section.title);
             }
 
             return sectionContents;
         } catch (error) {
-            console.error('セクション生成エラー:', error);
+            console.error('Section generation failed:', error);
             throw new Error('セクション生成に失敗しました');
         }
     }
 
     /**
-     * 個別セクションの本文を生成
+     * 蛟句挨繧ｻ繧ｯ繧ｷ繝ｧ繝ｳ縺ｮ譛ｬ譁・ｒ逕滓・
      */
     async generateSection(request: SectionGenerationRequest & { totalOutline?: string; previousContent?: string; customInstructions?: string }): Promise<string> {
         const { section, outline, previousSections, tone, totalOutline, previousContent, customInstructions } = request;
@@ -194,42 +195,42 @@ export class MultiStepGenerationService {
                 selectedTitle: outline.title,
                 keywords: effectiveKeywords,
                 tone,
-                targetWordCount: section.estimatedWordCount, // 推定文字数をターゲットにする
+                targetWordCount: section.estimatedWordCount, // 謗ｨ螳壽枚蟄玲焚繧偵ち繝ｼ繧ｲ繝・ヨ縺ｫ縺吶ｋ
                 totalOutline: totalOutline,
                 previousContent: previousContent,
                 includeIntroduction: false,
                 includeConclusion: false,
                 includeSources: false,
                 keywordPreferences: outline.keywordPreferences,
-                length: 'medium', // フォールバック用
-                isLead: section.isLead, // リード文フラグを渡す
+                length: 'medium', // 繝輔か繝ｼ繝ｫ繝舌ャ繧ｯ逕ｨ
+                isLead: section.isLead, // 繝ｪ繝ｼ繝画枚繝輔Λ繧ｰ繧呈ｸ｡縺・
                 customInstructions: customInstructions
             });
 
-            // 見出しレベルに応じたプレフィックス（通常はH2）
+            // 隕句・縺励Ξ繝吶Ν縺ｫ蠢懊§縺溘・繝ｬ繝輔ぅ繝・け繧ｹ・磯壼ｸｸ縺ｯH2・・
             const prefix = section.level === 1 ? '## ' : section.level === 2 ? '## ' : section.level === 3 ? '### ' : '#### ';
 
-            // 本文から冒頭の重複した見出しテキストなどを除去（念のため）
+            // 譛ｬ譁・°繧牙・鬆ｭ縺ｮ驥崎､・＠縺溯ｦ句・縺励ユ繧ｭ繧ｹ繝医↑縺ｩ繧帝勁蜴ｻ・亥ｿｵ縺ｮ縺溘ａ・・
             let cleanContent = result.content.trim();
-            // もしAIが「## 見出し」の形式で出力してしまったら除去
+            // 繧ゅ＠AI縺後・# 隕句・縺励阪・蠖｢蠑上〒蜃ｺ蜉帙＠縺ｦ縺励∪縺｣縺溘ｉ髯､蜴ｻ
             if (cleanContent.startsWith('#')) {
                 cleanContent = cleanContent.replace(/^#+\s*.*?\n/, '').trim();
             }
 
-            // リード文の場合は見出しを付与しない
+            // 繝ｪ繝ｼ繝画枚縺ｮ蝣ｴ蜷医・隕句・縺励ｒ莉倅ｸ弱＠縺ｪ縺・
             if (section.isLead) {
                 return cleanContent;
             }
 
             return `${prefix}${section.title}\n\n${cleanContent}`;
         } catch (error) {
-            console.error('セクション生成エラー:', error);
+            console.error('Section generation failed:', error);
             return this.generateFallbackContent(section);
         }
     }
 
     /**
-     * 完全な記事を組み立て
+     * 螳悟・縺ｪ險倅ｺ九ｒ邨・∩遶九※
      */
     async assembleArticle(
         outline: ArticleOutline,
@@ -265,52 +266,120 @@ export class MultiStepGenerationService {
                 generatedAt: new Date().toISOString(),
                 createdAt: new Date().toISOString(),
                 wordCount: fullContent.length,
-                seoScore: 0, // 以前は計算していたが、不要になったため固定値または削除検討（型定義に合わせて保持）
-                readingTime: 0, // 同上
+                seoScore: 0, // 莉･蜑阪・險育ｮ励＠縺ｦ縺・◆縺後∽ｸ崎ｦ√↓縺ｪ縺｣縺溘◆繧∝崋螳壼､縺ｾ縺溘・蜑企勁讀懆ｨ趣ｼ亥梛螳夂ｾｩ縺ｫ蜷医ｏ縺帙※菫晄戟・・
+                readingTime: 0, // 蜷御ｸ・
                 trendData: outline.trendData
             };
 
             return article;
         } catch (error) {
-            console.error('記事組み立てエラー:', error);
+            console.error('Article assembly failed:', error);
             throw new Error('記事の組み立てに失敗しました');
         }
     }
 
     /**
-     * 自動モード用
+     * 閾ｪ蜍輔Δ繝ｼ繝臥畑
      */
     async generateArticleAuto(
         keywords: string[],
         options?: {
             targetLength?: 'short' | 'medium' | 'long';
             tone?: 'professional' | 'casual' | 'technical' | 'friendly';
+            selectedTitle?: string;
+            targetWordCount?: number;
+            customInstructions?: string;
+            imagesPerArticle?: number; // 逕ｻ蜒乗椢謨ｰ繧定ｿｽ蜉
             onStepComplete?: (step: number, data: any) => void;
         }
     ): Promise<Article> {
-        // Step 1: 分析
+        // Step 1: 蛻・梵
         const trendData = await this.analyzeTrends(keywords);
         options?.onStepComplete?.(1, trendData);
 
-        // Step 2: タイトル
-        const titles = await this.generateTitles(trendData);
-        const selectedTitle = titles[0]?.title || `${keywords[0]}について`;
-        options?.onStepComplete?.(2, titles);
+        // Step 2: 繧ｿ繧､繝医Ν・・electedTitle謖・ｮ壽凾縺ｯ繧ｹ繧ｭ繝・・・・
+        let selectedTitle: string;
+        if (options?.selectedTitle) {
+            selectedTitle = options.selectedTitle;
+            options?.onStepComplete?.(2, [{ title: selectedTitle }]);
+        } else {
+            const titles = await this.generateTitles(trendData);
+            selectedTitle = titles[0]?.title || `${keywords[0]}について`;
+            options?.onStepComplete?.(2, titles);
+        }
 
-        // Step 3: アウトライン
+        // Step 3: 繧｢繧ｦ繝医Λ繧､繝ｳ
         const outline = await this.generateOutline(keywords, trendData, {
             targetLength: options?.targetLength,
             tone: options?.tone,
-            selectedTitle
+            selectedTitle,
+            targetWordCount: options?.targetWordCount,
+            customInstructions: options?.customInstructions
         });
         options?.onStepComplete?.(3, outline);
 
-        // Step 4: 本文
-        const sectionContents = await this.generateSections(outline, {
-            tone: options?.tone
+        // Step 4: 譛ｬ譁・
+        const sectionContents = new Map<string, string>();
+
+        await aiService.loadActiveConfig();
+        const activeAIConfig = aiService.getActiveConfig();
+        if (!activeAIConfig) {
+            throw new Error('AI configuration is not loaded');
+        }
+
+        const generationResult = await generateArticleFromOutlineWithSharedCore({
+            outline: {
+                title: outline.title,
+                sections: outline.sections.map((section) => ({
+                    title: section.title,
+                    level: section.level,
+                    description: section.description || '',
+                    isLead: !!section.isLead,
+                    estimatedWordCount: section.estimatedWordCount
+                }))
+            },
+            keywords,
+            tone: options?.tone || 'professional',
+            targetWordCount: options?.targetWordCount,
+            customInstructions: options?.customInstructions,
+            defaultMaxTokens: activeAIConfig.maxTokens || 2000,
+            callAI: (prompt, maxTokens) => aiService.generateRawText(prompt, maxTokens),
+            qualityRetryCount: 1
+        });
+
+        outline.sections.forEach((section, index) => {
+            const generated = generationResult.sectionsWithContent[index];
+            if (!generated) return;
+
+            const formatted = generated.isLead
+                ? generated.content
+                : `${generated.level === 2 ? '##' : '###'} ${generated.title}\n\n${generated.content}`;
+
+            sectionContents.set(section.id, formatted);
+            section.content = generated.content;
+            section.isGenerated = true;
         });
 
         const article = await this.assembleArticle(outline, sectionContents);
+        article.tone = options?.tone || 'professional';
+        article.length = options?.targetLength || 'medium';
+        article.targetWordCount = options?.targetWordCount;
+
+        // 逕ｻ蜒冗函謌仙・逅・ｒ霑ｽ蜉
+        if (options?.imagesPerArticle && options.imagesPerArticle > 0) {
+            try {
+                const updatedContent = await aiService.insertGeneratedImages(
+                    article.content,
+                    article.title, // 縺ｾ縺溘・ keywords[0]
+                    keywords,
+                    options.imagesPerArticle
+                );
+                article.content = updatedContent;
+            } catch (imageError) {
+                console.error('Image insertion failed, continuing without images:', imageError);
+            }
+        }
+
         return article;
     }
 
@@ -321,7 +390,7 @@ export class MultiStepGenerationService {
     }
 
     private generateFallbackContent(section: OutlineSection): string {
-        return `## ${section.title}\n\n${section.description || '執筆中です。'}`;
+        return `## ${section.title}\n\n${section.description || '詳細を執筆中です。'}`;
     }
 
     private generateExcerpt(content: string): string {
@@ -339,3 +408,5 @@ export class MultiStepGenerationService {
 }
 
 export const multiStepGenerationService = new MultiStepGenerationService();
+
+

@@ -139,6 +139,7 @@ class SupabaseSchedulerService {
       max_tokens: config.maxTokens || 4000,
       image_enabled: config.imageGenerationEnabled,
       image_provider: config.imageProvider,
+      images_per_article: config.imagesPerArticle ?? 0,
     };
 
     // Check for existing config for this provider
@@ -225,6 +226,7 @@ class SupabaseSchedulerService {
       maxTokens: item.max_tokens,
       imageGenerationEnabled: item.image_enabled,
       imageProvider: item.image_provider as any,
+      imagesPerArticle: item.images_per_article ?? 0,
       isActive: item.is_active,
       createdAt: item.created_at,
     }));
@@ -288,6 +290,7 @@ class SupabaseSchedulerService {
       maxTokens: data.max_tokens,
       imageGenerationEnabled: data.image_enabled,
       imageProvider: data.image_provider as any,
+      imagesPerArticle: data.images_per_article ?? 0,
       isActive: data.is_active,
       createdAt: data.created_at,
     };
