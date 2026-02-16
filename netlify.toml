@@ -1,7 +1,7 @@
-[build]
+﻿[build]
   functions = "netlify/functions"
-  publish = "dist"
-  command = "npx vite build"
+  publish = "build"
+  command = "npm run build"
 
 [functions]
   node_bundler = "esbuild"
@@ -13,6 +13,5 @@
   targetPort = 5173
   framework = "#custom"
 
-# === scheduler.ts を毎分実行（テスト） ===
-[functions."scheduler"]
-  schedule = "*/1 * * * *"
+# Scheduler is executed by Supabase Cron (scheduler-executor).
+# Netlify scheduled execution is intentionally disabled to avoid double runs.
