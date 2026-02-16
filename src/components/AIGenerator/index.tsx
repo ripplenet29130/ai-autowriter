@@ -231,6 +231,15 @@ export const AIGenerator: React.FC = () => {
         }
     };
 
+    const hasFixableIssues = (results: FactCheckResult[]): boolean => {
+        return results.some((result) => {
+            if (result.verdict === 'incorrect') return true;
+            if (result.verdict === 'partially_correct') return true;
+            if (result.verdict === 'unverified') return true;
+            return false;
+        });
+    };
+
     const runFactCheck = async (items: FactCheckItem[], keyword: string) => {
         if (!generatedArticle) return;
 
@@ -272,7 +281,7 @@ export const AIGenerator: React.FC = () => {
 
             const settings = await factCheckService.getSettings();
             setAutoFixEnabled(Boolean(settings?.auto_fix_enabled));
-            if (settings?.auto_fix_enabled && factCheckService.hasFixableIssues(results)) {
+            if (settings?.auto_fix_enabled && hasFixableIssues(results)) {
                 await handleApplyFactCheckFixes(results);
             }
 
@@ -313,7 +322,7 @@ export const AIGenerator: React.FC = () => {
             toast.error('先にファクトチェックを実行してください');
             return;
         }
-        if (!factCheckService.hasFixableIssues(results)) {
+        if (!hasFixableIssues(results)) {
             toast('修正対象の指摘は見つかりませんでした', { icon: 'ℹ️' });
             return;
         }
@@ -362,7 +371,7 @@ export const AIGenerator: React.FC = () => {
         setFactCheckDraftKeyword('');
     };
 
-    const canApplyFactCheckFix = factCheckService.hasFixableIssues((generatedArticle?.factCheckResults || factCheckResults || []));
+    const canApplyFactCheckFix = hasFixableIssues((generatedArticle?.factCheckResults || factCheckResults || []));
 
     const handleRegenerateArticle = async (options: import('./RegenerateModal').RegenerateOptions) => {
         if (!generatedArticle) return;
@@ -1015,6 +1024,7 @@ export const AIGenerator: React.FC = () => {
 };
 
 export default AIGenerator;
+
 
 
 
