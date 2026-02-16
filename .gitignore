@@ -26,3 +26,9 @@ dist-ssr
 
 # Local Netlify folder
 .netlify
+
+# Local build artifacts and temp files
+build/
+req.json
+supabase/.temp/
+*.tsbuildinfo
