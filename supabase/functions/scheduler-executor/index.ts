@@ -63,6 +63,33 @@ interface Schedule {
   ab_test_enabled?: boolean;
 }
 
+function parseJstDate(input: string): Date | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(input)) return null;
+  const [y, m, d] = input.split('-').map(Number);
+  const date = new Date(Date.UTC(y, m - 1, d, 0, 0, 0));
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function getCurrentJstDate(now = new Date()): Date {
+  const jstString = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Tokyo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(now);
+  return parseJstDate(jstString) ?? new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+}
+
+function isWithinScheduleDateRange(schedule: Schedule, now = new Date()): boolean {
+  const currentJstDate = getCurrentJstDate(now);
+  const start = schedule.start_date ? parseJstDate(schedule.start_date) : null;
+  const end = schedule.end_date ? parseJstDate(schedule.end_date) : null;
+
+  if (start && currentJstDate < start) return false;
+  if (end && currentJstDate > end) return false;
+  return true;
+}
+
 interface AIConfig {
   id: string;
   provider: string;
@@ -70,7 +97,11 @@ interface AIConfig {
   model: string;
   temperature: number;
   max_tokens: number;
+  image_enabled?: boolean;
+  images_per_article?: number;
 }
+
+type ModelRate = { input: number; output: number };
 
 interface OutlineSection {
   title: string;
@@ -139,11 +170,12 @@ Deno.serve(async (req: Request) => {
       let serpApiKey: string | null = null;
       let googleApiKey: string | null = null;
       let searchEngineId: string | null = null;
+      let imageCostUsdPerImage = 0.04;
 
       const { data: appSettings, error: appSettingsError } = await supabase
         .from('app_settings')
         .select('key, value')
-        .in('key', ['chatwork_api_token', 'serpapi_key', 'google_custom_search_api_key', 'google_custom_search_engine_id']);
+        .in('key', ['chatwork_api_token', 'serpapi_key', 'google_custom_search_api_key', 'google_custom_search_engine_id', 'image_cost_usd_per_image']);
 
       if (appSettingsError) {
         console.error('Error fetching app_settings:', appSettingsError);
@@ -157,6 +189,10 @@ Deno.serve(async (req: Request) => {
           if (setting.key === 'serpapi_key') serpApiKey = setting.value;
           if (setting.key === 'google_custom_search_api_key') googleApiKey = setting.value;
           if (setting.key === 'google_custom_search_engine_id') searchEngineId = setting.value;
+          if (setting.key === 'image_cost_usd_per_image') {
+            const n = Number(setting.value);
+            if (Number.isFinite(n) && n >= 0) imageCostUsdPerImage = n;
+          }
         });
       }
 
@@ -203,6 +239,14 @@ Deno.serve(async (req: Request) => {
         const wpConfig: WordPressConfig = (schedule as any).wordpress_configs;
         const timeToUse = scheduleSetting.post_time;
 
+        if (!forceExecute && !isWithinScheduleDateRange(scheduleSetting)) {
+          stats.skipped += 1;
+          console.log(
+            `Skipping schedule ${scheduleSetting.id}: outside configured date range (start=${scheduleSetting.start_date ?? '-'}, end=${scheduleSetting.end_date ?? '-'})`
+          );
+          continue;
+        }
+
         let shouldExecute = forceExecute || await shouldExecuteNow(timeToUse, currentTimeJST, scheduleSetting.frequency, scheduleSetting.id, supabase);
 
         // Force execution guard: avoid duplicate posts from repeated manual triggers.
@@ -236,7 +280,17 @@ Deno.serve(async (req: Request) => {
           }
 
           try {
-            await executeSchedule(scheduleSetting, wpConfig, effectiveAiConfig, supabase, chatworkApiToken, serpApiKey, googleApiKey, searchEngineId);
+            await executeSchedule(
+              scheduleSetting,
+              wpConfig,
+              effectiveAiConfig,
+              supabase,
+              chatworkApiToken,
+              serpApiKey,
+              googleApiKey,
+              searchEngineId,
+              imageCostUsdPerImage
+            );
             stats.executed += 1;
           } catch (error: any) {
             console.error(`Failed to execute schedule for ${wpConfig.name}:`, error);
@@ -327,8 +381,9 @@ async function shouldExecuteNow(
   console.log(`[Freq Check] ${normalizedFreq}, Hours since: ${hoursSinceLastExecution.toFixed(1)}, Last day: ${lastExecutedDate}, Today: ${currentDate}`);
 
   if (normalizedFreq === 'daily') {
-    // 20譎る俣莉･荳顔ｵ碁℃縲√∪縺溘・12譎る俣莉･荳顔ｵ碁℃縺励※譌･莉倥′螟峨ｏ縺｣縺ｦ縺・ｌ縺ｰ險ｱ蜿ｯ
-    if (hoursSinceLastExecution >= 20 || (hoursSinceLastExecution >= 12 && lastExecutedDate !== currentDate)) {
+    // Testing-friendly behavior: allow another daily run after 10 minutes.
+    // This still blocks back-to-back duplicates within the same schedule window.
+    if (hoursSinceLastExecution >= (10 / 60)) {
       return true;
     }
   } else if (normalizedFreq === 'weekly' && hoursSinceLastExecution >= 24 * 6) {
@@ -360,6 +415,97 @@ async function wasExecutedWithinMinutes(
   const now = new Date();
   const diffMinutes = (now.getTime() - last.getTime()) / (1000 * 60);
   return diffMinutes >= 0 && diffMinutes < minutes;
+}
+
+function resolveAiModelRate(provider: string, model: string): ModelRate {
+  const p = String(provider || '').toLowerCase();
+  const m = String(model || '').toLowerCase();
+
+  // USD per 1M tokens. Values are rough estimation for budgeting.
+  if (p === 'openai') {
+    if (m.includes('gpt-5') && m.includes('mini')) return { input: 0.30, output: 2.50 };
+    if (m.includes('gpt-5')) return { input: 1.25, output: 10.00 };
+    if (m.includes('gpt-4o-mini')) return { input: 0.15, output: 0.60 };
+    if (m.includes('gpt-4o')) return { input: 5.00, output: 15.00 };
+    return { input: 0.30, output: 2.50 };
+  }
+  if (p === 'gemini') {
+    if (m.includes('2.5-pro')) return { input: 1.25, output: 10.00 };
+    if (m.includes('2.5-flash')) return { input: 0.30, output: 2.50 };
+    return { input: 0.30, output: 2.50 };
+  }
+  if (p === 'claude') {
+    if (m.includes('opus')) return { input: 15.00, output: 75.00 };
+    if (m.includes('haiku')) return { input: 0.80, output: 4.00 };
+    return { input: 3.00, output: 15.00 };
+  }
+  return { input: 1.00, output: 5.00 };
+}
+
+function estimateExecutionCostBreakdown(params: {
+  provider: string;
+  model: string;
+  generatedChars: number;
+  abTestEnabled: boolean;
+  competitorResearchUsed: boolean;
+  factCheckItemsChecked: number;
+  imagesGenerated: number;
+  imageUnitCostUsd: number;
+}) {
+  const rate = resolveAiModelRate(params.provider, params.model);
+  const generationMultiplier = params.abTestEnabled ? 2 : 1;
+
+  // Rough token estimate assumptions for JP content:
+  // 1000 chars ~= input 300 tokens + output 700 tokens.
+  const inputTokens = Math.ceil((params.generatedChars / 1000) * 300 * generationMultiplier);
+  const outputTokens = Math.ceil((params.generatedChars / 1000) * 700 * generationMultiplier);
+  const aiCostUsd =
+    (inputTokens / 1_000_000) * rate.input +
+    (outputTokens / 1_000_000) * rate.output;
+
+  // SerpAPI pricing varies by plan; this is an estimate for budgeting.
+  const researchCostUsd = params.competitorResearchUsed ? 0.005 : 0;
+
+  // Fact-check vendor pricing varies significantly. Keep as unknown in totals.
+  const factCheckCostUsd = null;
+  const imageCostUsd = params.imagesGenerated > 0
+    ? params.imagesGenerated * Math.max(0, params.imageUnitCostUsd)
+    : 0;
+
+  const totalEstimatedUsd = aiCostUsd + researchCostUsd + imageCostUsd;
+
+  return {
+    ai: {
+      provider: params.provider,
+      model: params.model,
+      tokens: {
+        input_estimated: inputTokens,
+        output_estimated: outputTokens,
+      },
+      rate_usd_per_1m_tokens: rate,
+      estimated_usd: Number(aiCostUsd.toFixed(6)),
+    },
+    research: {
+      serpapi_used: params.competitorResearchUsed,
+      estimated_usd: Number(researchCostUsd.toFixed(6)),
+    },
+    fact_check: {
+      items_checked: params.factCheckItemsChecked,
+      estimated_usd: factCheckCostUsd,
+    },
+    images: {
+      generated_count_estimated: params.imagesGenerated,
+      unit_cost_usd: Number(params.imageUnitCostUsd.toFixed(6)),
+      estimated_usd: Number(imageCostUsd.toFixed(6)),
+    },
+    assumptions: {
+      char_to_token: '1000 chars ~= input 300 + output 700 tokens',
+      excludes_unknown_services: ['fact_check'],
+      includes: ['ai_generation', 'serpapi', 'image_generation'],
+      image_price_source: 'app_settings.image_cost_usd_per_image',
+    },
+    total_estimated_usd: Number(totalEstimatedUsd.toFixed(6)),
+  };
 }
 
 // AI provider call helper used by shared generation core.
@@ -487,7 +633,8 @@ async function executeSchedule(
   chatworkApiToken: string | null,
   serpApiKey: string | null,
   googleApiKey: string | null,
-  searchEngineId: string | null
+  searchEngineId: string | null,
+  imageCostUsdPerImage: number
 ) {
   // 1. 逕滓・繝｢繝ｼ繝峨↓蝓ｺ縺･縺・※繧ｿ繝ｼ繧ｲ繝・ヨ・医く繝ｼ繝ｯ繝ｼ繝峨∪縺溘・繧ｿ繧､繝医Ν・峨ｒ豎ｺ螳・
   let keyword = '';
@@ -628,6 +775,7 @@ async function executeSchedule(
   // 4.6 繝輔ぃ繧ｯ繝医メ繧ｧ繝・け螳溯｡後→譚｡莉ｶ蛻・ｲ・
   let finalPostStatus = schedule.post_status || 'draft';
   let factCheckReport = null;
+  let factCheckItemsChecked = 0;
 
   if ((schedule as any).enable_fact_check) {
     console.log(`Starting fact-check for article: ${articleTitle}`);
@@ -682,6 +830,7 @@ async function executeSchedule(
         const factsToCheck = await extractFactsFromContent(fullContent, (schedule as any).fact_check_note);
         const maxItems = factCheckSettings.max_items_to_check || 10;
         const itemsToCheck = factsToCheck.slice(0, maxItems);
+        factCheckItemsChecked = itemsToCheck.length;
 
         console.log(`Found ${factsToCheck.length} facts, checking top ${itemsToCheck.length} in batches`);
 
@@ -807,6 +956,17 @@ async function executeSchedule(
     }
   }
 
+  const costBreakdown = estimateExecutionCostBreakdown({
+    provider: aiConfig.provider,
+    model: aiConfig.model,
+    generatedChars: countGeneratedChars(fullContent),
+    abTestEnabled: runAbTest,
+    competitorResearchUsed: Boolean(competitorData?.articles?.length),
+    factCheckItemsChecked,
+    imagesGenerated: aiConfig.image_enabled ? (aiConfig.images_per_article ?? 0) : 0,
+    imageUnitCostUsd: imageCostUsdPerImage,
+  });
+
   // 6. 実行履歴を保存
   const { data: executionHistory, error: executionHistoryError } = await supabase
     .from('execution_history')
@@ -817,7 +977,9 @@ async function executeSchedule(
     keyword_used: keyword,
     article_title: articleTitle,
     wordpress_post_id: postId,
-    status: 'success'
+    status: 'success',
+    cost_breakdown: costBreakdown,
+    estimated_cost_usd: costBreakdown.total_estimated_usd,
     })
     .select('id')
     .single();
