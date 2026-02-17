@@ -61,6 +61,7 @@ interface Schedule {
   generation_mode?: 'keyword' | 'title' | 'both';
   keyword_set_id?: string;
   ab_test_enabled?: boolean;
+  image_generation_enabled?: boolean;
 }
 
 function parseJstDate(input: string): Date | null {
@@ -171,11 +172,19 @@ Deno.serve(async (req: Request) => {
       let googleApiKey: string | null = null;
       let searchEngineId: string | null = null;
       let imageCostUsdPerImage = 0.04;
+      let maxPostsPerSitePerRun = 1;
 
       const { data: appSettings, error: appSettingsError } = await supabase
         .from('app_settings')
         .select('key, value')
-        .in('key', ['chatwork_api_token', 'serpapi_key', 'google_custom_search_api_key', 'google_custom_search_engine_id', 'image_cost_usd_per_image']);
+        .in('key', [
+          'chatwork_api_token',
+          'serpapi_key',
+          'google_custom_search_api_key',
+          'google_custom_search_engine_id',
+          'image_cost_usd_per_image',
+          'scheduler_max_posts_per_run'
+        ]);
 
       if (appSettingsError) {
         console.error('Error fetching app_settings:', appSettingsError);
@@ -192,6 +201,12 @@ Deno.serve(async (req: Request) => {
           if (setting.key === 'image_cost_usd_per_image') {
             const n = Number(setting.value);
             if (Number.isFinite(n) && n >= 0) imageCostUsdPerImage = n;
+          }
+          if (setting.key === 'scheduler_max_posts_per_run') {
+            const n = Number(setting.value);
+            if (Number.isFinite(n) && n > 0) {
+              maxPostsPerSitePerRun = Math.floor(n);
+            }
           }
         });
       }
@@ -231,13 +246,42 @@ Deno.serve(async (req: Request) => {
         hour: '2-digit', minute: '2-digit', hour12: false
       });
       const currentTimeJST = jstFormatter.format(now);
+      const currentDateTimeJST = new Intl.DateTimeFormat('ja-JP', {
+        timeZone: 'Asia/Tokyo',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+      }).format(now);
+      console.log(`Current JST datetime: ${currentDateTimeJST} (time-check=${currentTimeJST})`);
 
       // 3. 蜷・せ繧ｱ繧ｸ繝･繝ｼ繝ｫ蜃ｦ逅・
+      const executedWpConfigIds = new Set<string>();
       for (const schedule of schedules) {
         stats.considered += 1;
         const scheduleSetting: Schedule = schedule as any;
         const wpConfig: WordPressConfig = (schedule as any).wordpress_configs;
         const timeToUse = scheduleSetting.post_time;
+
+        if (!forceExecute && executedWpConfigIds.has(wpConfig.id)) {
+          stats.skipped += 1;
+          console.log(`Skipping schedule ${scheduleSetting.id}: already executed for site ${wpConfig.id} in this run`);
+          continue;
+        }
+
+        if (!forceExecute && maxPostsPerSitePerRun > 0) {
+          const recentExecutionCount = await countExecutionsForWpConfigWithinMinutes(supabase, wpConfig.id, 2);
+          if (recentExecutionCount >= maxPostsPerSitePerRun) {
+            stats.skipped += 1;
+            console.log(
+              `Skipping schedule ${scheduleSetting.id}: site throttle active for ${wpConfig.id} (executions in last 2 min: ${recentExecutionCount}, limit per site: ${maxPostsPerSitePerRun})`
+            );
+            continue;
+          }
+        }
 
         if (!forceExecute && !isWithinScheduleDateRange(scheduleSetting)) {
           stats.skipped += 1;
@@ -292,6 +336,7 @@ Deno.serve(async (req: Request) => {
               imageCostUsdPerImage
             );
             stats.executed += 1;
+            executedWpConfigIds.add(wpConfig.id);
           } catch (error: any) {
             console.error(`Failed to execute schedule for ${wpConfig.name}:`, error);
             stats.failed += 1;
@@ -415,6 +460,26 @@ async function wasExecutedWithinMinutes(
   const now = new Date();
   const diffMinutes = (now.getTime() - last.getTime()) / (1000 * 60);
   return diffMinutes >= 0 && diffMinutes < minutes;
+}
+
+async function countExecutionsForWpConfigWithinMinutes(
+  supabase: any,
+  wpConfigId: string,
+  minutes: number
+): Promise<number> {
+  const since = new Date(Date.now() - minutes * 60 * 1000).toISOString();
+  const { count, error } = await supabase
+    .from('execution_history')
+    .select('id', { count: 'exact', head: true })
+    .eq('wordpress_config_id', wpConfigId)
+    .gte('executed_at', since);
+
+  if (error) {
+    console.error(`Failed to count recent executions for wp_config ${wpConfigId}:`, error);
+    return 0;
+  }
+
+  return count ?? 0;
 }
 
 function resolveAiModelRate(provider: string, model: string): ModelRate {
@@ -755,6 +820,7 @@ async function executeSchedule(
   };
 
   const runAbTest = schedule.ab_test_enabled === true;
+  const scheduleImageGenerationEnabled = schedule.image_generation_enabled !== false;
   const [schedulerRun, manualRun] = await Promise.all([
     runGeneration(),
     runAbTest ? runGeneration() : Promise.resolve(null)
@@ -963,7 +1029,7 @@ async function executeSchedule(
     abTestEnabled: runAbTest,
     competitorResearchUsed: Boolean(competitorData?.articles?.length),
     factCheckItemsChecked,
-    imagesGenerated: aiConfig.image_enabled ? (aiConfig.images_per_article ?? 0) : 0,
+    imagesGenerated: scheduleImageGenerationEnabled && aiConfig.image_enabled ? (aiConfig.images_per_article ?? 0) : 0,
     imageUnitCostUsd: imageCostUsdPerImage,
   });
 

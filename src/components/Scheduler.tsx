@@ -64,6 +64,7 @@ export const Scheduler: React.FC = () => {
     enable_fact_check: false,
     fact_check_note: '',
     ab_test_enabled: false,
+    image_generation_enabled: true,
   });
 
   const timeOptions = useMemo(() => {
@@ -243,6 +244,7 @@ export const Scheduler: React.FC = () => {
       enable_fact_check: schedule.enable_fact_check || false,
       fact_check_note: schedule.fact_check_note || '',
       ab_test_enabled: schedule.ab_test_enabled || false,
+      image_generation_enabled: schedule.image_generation_enabled ?? true,
     });
     // Scroll to top to show the form
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -329,6 +331,7 @@ export const Scheduler: React.FC = () => {
       enable_fact_check: false,
       fact_check_note: '',
       ab_test_enabled: false,
+      image_generation_enabled: true,
     });
     setEditingSchedule(null);
   };
@@ -867,6 +870,20 @@ export const Scheduler: React.FC = () => {
             </label>
           </div>
 
+          {/* 画像生成設定 */}
+          <div className="flex items-center space-x-2">
+            <input
+              type="checkbox"
+              id="image_generation_enabled"
+              checked={formData.image_generation_enabled ?? true}
+              onChange={(e) => setFormData({ ...formData, image_generation_enabled: e.target.checked })}
+              className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+            />
+            <label htmlFor="image_generation_enabled" className="text-sm font-medium text-gray-700">
+              画像生成を有効化（スケジュール単位）
+            </label>
+          </div>
+
           {/* スケジュール有効化 */}
           <div className="flex items-center space-x-2">
             <input
@@ -1070,7 +1087,7 @@ export const Scheduler: React.FC = () => {
                     </div>
 
                     {/* Additional Info Block (Moved to bottom) */}
-                    {(schedule.start_date || schedule.chatwork_room_id || promptSetName || schedule.enable_fact_check) && (
+                    {(schedule.start_date || schedule.chatwork_room_id || promptSetName || schedule.enable_fact_check || schedule.image_generation_enabled !== undefined) && (
                       <div className="mb-4 pt-4 border-t border-gray-100 flex flex-wrap gap-6">
                         {schedule.start_date && (
                           <div className="flex items-center space-x-2 text-sm">
@@ -1105,6 +1122,16 @@ export const Scheduler: React.FC = () => {
                           </span>
                           <span className="font-mono text-xs bg-gray-50 text-gray-600 px-2 py-0.5 rounded border border-gray-200">
                             {schedule.target_word_count || 3000}文字
+                          </span>
+                        </div>
+
+                        <div className="flex items-center space-x-2 text-sm">
+                          <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Image:</span>
+                          <span className={`text-xs px-2 py-0.5 rounded border ${(schedule.image_generation_enabled ?? true)
+                            ? 'text-blue-700 bg-blue-50 border-blue-100'
+                            : 'text-gray-600 bg-gray-50 border-gray-200'
+                            }`}>
+                            {(schedule.image_generation_enabled ?? true) ? 'Enabled' : 'Disabled'}
                           </span>
                         </div>
 

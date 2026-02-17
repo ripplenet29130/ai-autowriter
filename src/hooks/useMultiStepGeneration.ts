@@ -220,6 +220,7 @@ export function useMultiStepGeneration() {
             tone?: 'professional' | 'casual' | 'technical' | 'friendly';
             onProgress?: (section: OutlineSection, progress: number) => void;
             customInstructions?: string;
+            targetWordCount?: number;
         }
     ): Promise<Article | null> => {
         try {
@@ -259,6 +260,10 @@ export function useMultiStepGeneration() {
                 outline,
                 sectionContents
             );
+
+            if (options?.targetWordCount) {
+                article.targetWordCount = options.targetWordCount;
+            }
 
             const stepResult: StepResult = {
                 step: 4,

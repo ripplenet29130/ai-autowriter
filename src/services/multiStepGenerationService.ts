@@ -18,6 +18,83 @@ import { generateArticleFromOutlineWithSharedCore } from '../shared/articleGener
  * 繝医Ξ繝ｳ繝牙・譫・竊・繧｢繧ｦ繝医Λ繧､繝ｳ逕滓・ 竊・繧ｻ繧ｯ繧ｷ繝ｧ繝ｳ蛻･譛ｬ譁・函謌・竊・險倅ｺ狗ｵ・∩遶九※
  */
 export class MultiStepGenerationService {
+    private formatReadableParagraphs(content: string): string {
+        const text = (content || '').trim();
+        if (!text) return '';
+
+        const blocks = text.split(/\n{2,}/);
+        const formattedBlocks = blocks
+            .map((block) => {
+                const trimmed = block.trim();
+                if (!trimmed) return '';
+                if (/^(```|#{1,6}\s|[-*]\s|\d+\.\s|>\s|\|)/m.test(trimmed)) {
+                    return trimmed;
+                }
+
+                return trimmed
+                    .replace(/。(?=\S)/g, '。\n')
+                    .replace(/！(?=\S)/g, '！\n')
+                    .replace(/？(?=\S)/g, '？\n')
+                    .replace(/\n{3,}/g, '\n\n')
+                    .trim();
+            })
+            .filter(Boolean);
+
+        return formattedBlocks.join('\n\n').trim();
+    }
+
+    private isSummaryTitle(title: string): boolean {
+        const normalized = (title || '').trim().toLowerCase();
+        return (
+            normalized.includes('まとめ') ||
+            normalized.includes('結論') ||
+            normalized.includes('おわりに') ||
+            normalized.includes('総括') ||
+            normalized.includes('最後に') ||
+            normalized.includes('summary') ||
+            normalized.includes('conclusion')
+        );
+    }
+
+    private ensureFinalSummarySection(outline: ArticleOutline): ArticleOutline {
+        const sections = [...outline.sections];
+        const existingIndex = sections.findIndex((s) => this.isSummaryTitle(s.title));
+
+        const totalWords = Math.max(
+            0,
+            sections.reduce((sum, section) => sum + (section.estimatedWordCount || 0), 0)
+        );
+        const summaryWords = Math.max(200, Math.round(totalWords * 0.12));
+
+        let summarySection: OutlineSection;
+        if (existingIndex >= 0) {
+            summarySection = { ...sections[existingIndex] };
+            sections.splice(existingIndex, 1);
+            summarySection.title = 'まとめ';
+            summarySection.level = 2;
+            summarySection.description = summarySection.description || '記事全体の要点を整理し、次の行動を示します。';
+            summarySection.estimatedWordCount = Math.max(summarySection.estimatedWordCount || 0, summaryWords);
+        } else {
+            summarySection = {
+                id: uuidv4(),
+                title: 'まとめ',
+                level: 2,
+                description: '記事全体の要点を整理し、次の行動を示します。',
+                estimatedWordCount: summaryWords,
+                order: sections.length,
+                isGenerated: false
+            };
+        }
+
+        sections.push(summarySection);
+        const normalizedSections = sections.map((section, index) => ({ ...section, order: index }));
+
+        return {
+            ...outline,
+            sections: normalizedSections
+        };
+    }
+
     /**
      * Step 1: 繝医Ξ繝ｳ繝牙・譫・
      */
@@ -92,7 +169,7 @@ export class MultiStepGenerationService {
                 targetWordCount: options?.targetWordCount // 霑ｽ蜉
             };
 
-            const outline = await outlineGenerationService.generateOutline(request);
+            let outline = await outlineGenerationService.generateOutline(request);
 
             if (options?.selectedTitle) {
                 outline.title = options.selectedTitle;
@@ -100,6 +177,7 @@ export class MultiStepGenerationService {
 
             // 繧ｭ繝ｼ繝ｯ繝ｼ繝芽ｨｭ螳壹ｒ菫晏ｭ倥＠縺ｦ縺翫￥
             outline.keywordPreferences = options?.keywordPreferences;
+            outline = this.ensureFinalSummarySection(outline);
 
             console.log('Step 3: アウトライン生成完了', outline);
             return outline;
@@ -216,6 +294,7 @@ export class MultiStepGenerationService {
             if (cleanContent.startsWith('#')) {
                 cleanContent = cleanContent.replace(/^#+\s*.*?\n/, '').trim();
             }
+            cleanContent = this.formatReadableParagraphs(cleanContent);
 
             // 繝ｪ繝ｼ繝画枚縺ｮ蝣ｴ蜷医・隕句・縺励ｒ莉倅ｸ弱＠縺ｪ縺・
             if (section.isLead) {

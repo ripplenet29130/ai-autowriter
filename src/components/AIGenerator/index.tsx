@@ -14,13 +14,14 @@ import { FactCheckResultsDisplay } from '../FactCheckResultsDisplay';
 import { factCheckService } from '../../services/factCheckService';
 import type { FactCheckResult } from '../../types';
 import type { FactCheckItem } from '../../types/factCheck';
+import type { Article } from '../../types';
 import toast from 'react-hot-toast';
 
 /**
  * AI記事生成メインコンポーネント
  */
 export const AIGenerator: React.FC = () => {
-    const { addArticle, updateArticle, wordPressConfigs, promptSets, titleSets, keywordSets } = useAppStore();
+    const { addArticle, updateArticle, wordPressConfigs, promptSets, titleSets, keywordSets, aiConfigs, aiConfig } = useAppStore();
     const { isGenerating, generatedArticle, generateArticle, clearArticle, setGeneratedArticle } = useArticleGeneration();
     const { executeAutoMode, isGenerating: isAutoGenerating } = useMultiStepGeneration();
     const { isPublishing, publishToWordPress } = useWordPressPublish();
@@ -31,6 +32,10 @@ export const AIGenerator: React.FC = () => {
     const [length, setLength] = useState<'short' | 'medium' | 'long'>('medium');
     const [generationMode, setGenerationMode] = useState<'auto' | 'interactive'>('interactive');
     const [showMultiStep, setShowMultiStep] = useState(false);
+    const [useDefaultAIConfig, setUseDefaultAIConfig] = useState(true);
+    const [selectedAIProvider, setSelectedAIProvider] = useState<'' | 'openai' | 'claude' | 'gemini'>('');
+    const [selectedAIConfigId, setSelectedAIConfigId] = useState<string>('');
+    const [selectedAIModel, setSelectedAIModel] = useState<string>('');
     const [factCheckModel, setFactCheckModel] = useState<'sonar' | 'sonar-reasoning'>('sonar');
 
     // Fact Check State
@@ -100,6 +105,142 @@ export const AIGenerator: React.FC = () => {
         };
         void loadFactCheckSettings();
     }, []);
+
+    React.useEffect(() => {
+        if (aiConfigs.length === 0) {
+            setSelectedAIProvider('');
+            setSelectedAIConfigId('');
+            return;
+        }
+
+        const current = selectedAIConfigId
+            ? aiConfigs.find(c => c.id === selectedAIConfigId)
+            : null;
+
+        if (current) {
+            if (selectedAIProvider !== current.provider) {
+                setSelectedAIProvider(current.provider);
+            }
+            return;
+        }
+
+        const fallback = (aiConfig?.id && aiConfigs.find(c => c.id === aiConfig.id))
+            || aiConfigs.find(c => c.isActive)
+            || aiConfigs[0];
+
+        if (fallback?.provider && selectedAIProvider !== fallback.provider) {
+            setSelectedAIProvider(fallback.provider);
+        }
+        if (fallback?.id && selectedAIConfigId !== fallback.id) {
+            setSelectedAIConfigId(fallback.id);
+        }
+    }, [aiConfig?.id, aiConfigs, selectedAIConfigId, selectedAIProvider]);
+
+    const availableProviders = Array.from(new Set(aiConfigs.map(c => c.provider)));
+    const providerConfigs = selectedAIProvider
+        ? aiConfigs.filter(c => c.provider === selectedAIProvider)
+        : [];
+
+    const getProviderModelOptions = (provider: '' | 'openai' | 'claude' | 'gemini'): string[] => {
+        if (provider === 'openai') {
+            return ['gpt-5.2', 'gpt-5', 'gpt-5-mini', 'gpt-4.1', 'gpt-4.1-mini', 'gpt-4.1-nano', 'gpt-4o', 'gpt-4o-mini'];
+        }
+        if (provider === 'claude') {
+            return ['claude-4-5-sonnet-20250929', 'claude-4-5-opus-20251124', 'claude-4-5-haiku-20251015', 'claude-3-5-sonnet-latest'];
+        }
+        if (provider === 'gemini') {
+            return ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.0-flash'];
+        }
+        return [];
+    };
+
+    const getModelTierLabel = (model: string): string => {
+        if (['gemini-2.5-pro', 'claude-4-5-opus-20251124', 'gpt-5.2', 'gpt-5'].includes(model)) {
+            return '高品質・高単価';
+        }
+        if (['gemini-2.5-flash', 'claude-4-5-sonnet-20250929', 'claude-3-5-sonnet-latest', 'gpt-4.1', 'gpt-4o'].includes(model)) {
+            return 'バランス';
+        }
+        return '低価格・高速';
+    };
+
+    const getEstimatedCostPer1000Chars = (model: string): string | null => {
+        // Assumption: per 1000 Japanese chars ~= input 300 tokens + output 700 tokens.
+        const tokenIn = 300;
+        const tokenOut = 700;
+        const usdJpyRate = 150; // fixed display rate for rough estimation
+        const rateMap: Record<string, { input: number; output: number }> = {
+            // OpenAI pricing (per 1M tokens)
+            'gpt-5.2': { input: 1.75, output: 14.0 },
+            'gpt-5': { input: 1.25, output: 10.0 },
+            'gpt-5-mini': { input: 0.25, output: 2.0 },
+            'gpt-4.1': { input: 2.0, output: 8.0 },
+            'gpt-4.1-mini': { input: 0.40, output: 1.60 },
+            'gpt-4.1-nano': { input: 0.10, output: 0.40 },
+            'gpt-4o': { input: 2.50, output: 10.0 },
+            'gpt-4o-mini': { input: 0.15, output: 0.60 },
+
+            // Gemini pricing (per 1M tokens)
+            'gemini-2.5-pro': { input: 1.25, output: 10.0 },
+            'gemini-2.5-flash': { input: 0.30, output: 2.50 },
+            'gemini-2.0-flash': { input: 0.10, output: 0.40 },
+        };
+
+        const rate = rateMap[model];
+        if (!rate) return null;
+
+        const usd = (tokenIn / 1_000_000) * rate.input + (tokenOut / 1_000_000) * rate.output;
+        const jpy = usd * usdJpyRate;
+        return `1000文字あたり概算: 約${jpy.toFixed(2)}円（$1=150円換算 / 入力300tok + 出力700tok想定）`;
+    };
+
+    const providerModelOptions = getProviderModelOptions(selectedAIProvider);
+
+    React.useEffect(() => {
+        if (!selectedAIProvider) {
+            setSelectedAIModel('');
+            return;
+        }
+
+        const options = getProviderModelOptions(selectedAIProvider);
+        const currentConfig = providerConfigs.find(c => c.id === selectedAIConfigId) || providerConfigs[0];
+
+        if (options.length === 0) {
+            setSelectedAIModel('');
+            return;
+        }
+
+        // ユーザーが既に有効なモデルを選択している場合は維持する
+        if (selectedAIModel && options.includes(selectedAIModel)) {
+            return;
+        }
+
+        if (currentConfig?.model && options.includes(currentConfig.model)) {
+            setSelectedAIModel(currentConfig.model);
+            return;
+        }
+
+        setSelectedAIModel(options[0]);
+    }, [selectedAIProvider, selectedAIConfigId, providerConfigs, selectedAIModel]);
+
+    const applySelectedAIConfig = async () => {
+        if (useDefaultAIConfig) {
+            await aiService.loadActiveConfig();
+            return;
+        }
+        if (selectedAIConfigId) {
+            const selected = aiConfigs.find(c => c.id === selectedAIConfigId);
+            if (!selected) {
+                throw new Error('選択したAI設定が見つかりません');
+            }
+            aiService.useConfig({
+                ...selected,
+                model: selectedAIModel || selected.model,
+            });
+            return;
+        }
+        await aiService.loadActiveConfig();
+    };
 
 
     const getChangedLines = (beforeText: string, afterText: string, maxLines = 60) => {
@@ -180,6 +321,7 @@ export const AIGenerator: React.FC = () => {
 
             // プロンプトセットの取得
             const selectedPromptSet = promptSets.find(ps => ps.id === selectedPromptSetId);
+            await applySelectedAIConfig();
 
             const article = await executeAutoMode(finalKeywords, {
                 tone,
@@ -198,17 +340,20 @@ export const AIGenerator: React.FC = () => {
         }
 
         // --- これ以降は対話モード (Interactive Mode) ---
-
-        // タイトルセット選択時
-        if (selectedTitleSetId) {
-            setShowMultiStep(true);
-            return;
+        // 対話モードは必ずキーワード検索（Step1: トレンド分析）から開始する
+        if (finalKeywords.length === 0 && selectedTitleSetId && selectedTitle) {
+            const inferred = selectedTitle.split(/[？?！!：:]/)[0].trim();
+            if (inferred) {
+                finalKeywords = [inferred];
+                setKeywords(finalKeywords);
+            }
         }
 
         if (finalKeywords.length === 0) {
-            toast.error('キーワードを入力してください');
+            toast.error('対話モードでは最初にキーワードを入力してください');
             return;
         }
+        await applySelectedAIConfig();
 
         setShowMultiStep(true);
     };
@@ -415,7 +560,8 @@ export const AIGenerator: React.FC = () => {
         }
     };
 
-    const handleMultiStepComplete = () => {
+    const handleMultiStepComplete = (article: Article) => {
+        setGeneratedArticle(article as any);
         setShowMultiStep(false);
     };
 
@@ -485,6 +631,73 @@ export const AIGenerator: React.FC = () => {
                                 タイトル選択 → アウトライン編集 → 本文生成の順に進めます
                             </p>
                         )}
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="md:col-span-2">
+                            <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+                                <input
+                                    type="checkbox"
+                                    checked={useDefaultAIConfig}
+                                    onChange={(e) => setUseDefaultAIConfig(e.target.checked)}
+                                    disabled={isGenerating || isAutoGenerating}
+                                />
+                                デフォルト（AI設定のアクティブ構成）を使用
+                            </label>
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                                生成に使用するAI
+                            </label>
+                            <select
+                                value={selectedAIProvider}
+                                onChange={(e) => {
+                                    const provider = e.target.value as '' | 'openai' | 'claude' | 'gemini';
+                                    setSelectedAIProvider(provider);
+                                    const nextConfigs = aiConfigs.filter(c => c.provider === provider);
+                                    const preferred = nextConfigs.find(c => c.isActive) || nextConfigs[0];
+                                    setSelectedAIConfigId(preferred?.id || '');
+                                }}
+                                disabled={isGenerating || isAutoGenerating || useDefaultAIConfig}
+                                className="input-field"
+                            >
+                                {aiConfigs.length === 0 && <option value="">AI設定がありません</option>}
+                                {availableProviders.map((provider) => (
+                                    <option key={provider} value={provider}>
+                                        {provider}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                                生成に使用するモデル
+                            </label>
+                            <select
+                                value={selectedAIModel}
+                                onChange={(e) => setSelectedAIModel(e.target.value)}
+                                disabled={isGenerating || isAutoGenerating || !selectedAIProvider || useDefaultAIConfig}
+                                className="input-field"
+                            >
+                                {providerModelOptions.length === 0 && <option value="">モデルがありません</option>}
+                                {providerModelOptions.map((model) => (
+                                    <option key={model} value={model}>
+                                        {`${model}（${getModelTierLabel(model)}）`}
+                                    </option>
+                                ))}
+                            </select>
+                            {getEstimatedCostPer1000Chars(selectedAIModel) && (
+                                <p className="text-xs text-gray-500 mt-1">
+                                    {getEstimatedCostPer1000Chars(selectedAIModel)}
+                                </p>
+                            )}
+                        </div>
+                        <p className="text-xs text-gray-500 md:col-span-2">
+                            {useDefaultAIConfig
+                                ? 'AI設定でアクティブなAI/モデルをそのまま使います'
+                                : 'この画面の生成実行時のみ、AIとモデルを上書きして使います'}
+                        </p>
                     </div>
 
 

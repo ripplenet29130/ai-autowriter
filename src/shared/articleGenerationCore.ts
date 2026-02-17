@@ -157,6 +157,29 @@ function stripHeading(content: string): string {
   return content.replace(/^#+\s*.*?\n/, '').trim();
 }
 
+function formatReadableParagraphs(content: string): string {
+  const text = (content || '').trim();
+  if (!text) return '';
+
+  const blocks = text.split(/\n{2,}/);
+  const formattedBlocks = blocks.map((block) => {
+    const trimmed = block.trim();
+    if (!trimmed) return '';
+    if (/^(```|#{1,6}\s|[-*]\s|\d+\.\s|>\s|\|)/m.test(trimmed)) {
+      return trimmed;
+    }
+
+    return trimmed
+      .replace(/。(?=\S)/g, '。\n')
+      .replace(/！(?=\S)/g, '！\n')
+      .replace(/？(?=\S)/g, '？\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+  }).filter(Boolean);
+
+  return formattedBlocks.join('\n\n').trim();
+}
+
 function buildOutlineSnapshot(outline: SharedArticleOutline): string {
   return outline.sections
     .map((section) => `${section.level === 2 ? 'H2' : 'H3'}: ${section.title}`)
@@ -169,6 +192,86 @@ export function assembleArticleMarkdown(sections: SharedSectionWithContent[]): s
     const heading = section.level === 2 ? `## ${section.title}` : `### ${section.title}`;
     return `${heading}\n\n${section.content}`;
   }).join('\n\n');
+}
+const SUMMARY_TITLE_PATTERN = /(まとめ|結論|総括|おわりに|最後に|summary|conclusion)/i;
+
+function calculateEdgeSectionWordCount(targetWordCount: number): number {
+  if (!Number.isFinite(targetWordCount) || targetWordCount <= 0) return 250;
+  return Math.max(150, Math.round(targetWordCount * 0.15));
+}
+
+function normalizeOutlineSections(
+  sections: SharedOutlineSection[],
+  targetWordCount: number
+): SharedOutlineSection[] {
+  const normalized = sections.map((section) => ({ ...section }));
+
+  const leadWordCount = calculateEdgeSectionWordCount(targetWordCount);
+  const summaryWordCount = calculateEdgeSectionWordCount(targetWordCount);
+
+  const leadIndex = normalized.findIndex((section) => section.isLead);
+  if (leadIndex === -1) {
+    normalized.unshift({
+      title: '導入',
+      level: 2,
+      description: '記事全体の導入',
+      isLead: true,
+      estimatedWordCount: leadWordCount
+    });
+  } else if (leadIndex > 0) {
+    const [lead] = normalized.splice(leadIndex, 1);
+    normalized.unshift({
+      ...lead,
+      title: lead.title?.trim() || '導入',
+      level: 2,
+      isLead: true
+    });
+  } else {
+    normalized[0] = {
+      ...normalized[0],
+      title: normalized[0].title?.trim() || '導入',
+      level: 2,
+      isLead: true
+    };
+  }
+
+  for (let i = 1; i < normalized.length; i++) {
+    if (normalized[i].isLead) {
+      normalized[i] = { ...normalized[i], isLead: false };
+    }
+  }
+
+  const summaryIndex = normalized.findIndex((section, index) => (
+    index > 0 && SUMMARY_TITLE_PATTERN.test(section.title || '')
+  ));
+
+  if (summaryIndex === -1) {
+    normalized.push({
+      title: 'まとめ',
+      level: 2,
+      description: '記事全体の要点を総括',
+      isLead: false,
+      estimatedWordCount: summaryWordCount
+    });
+  } else if (summaryIndex !== normalized.length - 1) {
+    const [summary] = normalized.splice(summaryIndex, 1);
+    normalized.push({
+      ...summary,
+      title: 'まとめ',
+      level: 2,
+      isLead: false
+    });
+  } else {
+    const last = normalized[normalized.length - 1];
+    normalized[normalized.length - 1] = {
+      ...last,
+      title: 'まとめ',
+      level: 2,
+      isLead: false
+    };
+  }
+
+  return normalized;
 }
 
 async function normalizeLengthWithQualityGate(
@@ -274,7 +377,7 @@ async function generateSectionWithQualityGate(
     break;
   }
 
-  return content.trim();
+  return formatReadableParagraphs(content);
 }
 
 export async function generateOutlineWithSharedCore(
@@ -299,18 +402,8 @@ export async function generateOutlineWithSharedCore(
     estimatedWordCount: section.estimatedWordCount
   }));
 
-  if (sections.length === 0) {
-    return {
-      title,
-      sections: [
-        { title: 'はじめに', level: 2, description: '導入', isLead: true, estimatedWordCount: 300 },
-        { title: `${params.keyword} の基本`, level: 2, description: '解説', isLead: false, estimatedWordCount: 500 },
-        { title: 'まとめ', level: 2, description: '総括', isLead: false, estimatedWordCount: 300 }
-      ]
-    };
-  }
-
-  return { title, sections };
+  const normalizedSections = normalizeOutlineSections(sections, params.targetWordCount);
+  return { title, sections: normalizedSections };
 }
 
 export async function generateArticleFromOutlineWithSharedCore(
@@ -355,3 +448,4 @@ export async function generateArticleFromOutlineWithSharedCore(
     wordCount: countGeneratedChars(fullContent)
   };
 }
+

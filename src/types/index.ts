@@ -159,6 +159,7 @@ export interface ScheduleSetting {
   enable_fact_check?: boolean; // 繝輔ぃ繧ｯ繝医メ繧ｧ繝・け譛牙柑蛹・
   fact_check_note?: string; // [[]]縺ｧ蝗ｲ繧繝√ぉ繝・け蜆ｪ蜈育ｮ・園
   ab_test_enabled?: boolean;
+  image_generation_enabled?: boolean;
 }
 
 export interface TitleSuggestion {

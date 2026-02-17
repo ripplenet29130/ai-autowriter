@@ -38,6 +38,7 @@ class ScheduleService {
                 generation_mode: schedule.generation_mode || 'keyword',
                 enable_fact_check: schedule.enable_fact_check || false,
                 fact_check_note: schedule.fact_check_note || null,
+                image_generation_enabled: schedule.image_generation_enabled ?? true,
             })
             .select()
             .single();
