@@ -64,6 +64,7 @@ export const AIGenerator: React.FC = () => {
 
     // Keyword Set State
     const [selectedKeywordSetId, setSelectedKeywordSetId] = useState<string>('');
+    const [contentSourceMode, setContentSourceMode] = useState<'keyword' | 'title' | 'both'>('keyword');
 
     // Target Word Count State
     const [targetWordCount, setTargetWordCount] = useState<number>(2000);
@@ -143,7 +144,7 @@ export const AIGenerator: React.FC = () => {
 
     const getProviderModelOptions = (provider: '' | 'openai' | 'claude' | 'gemini'): string[] => {
         if (provider === 'openai') {
-            return ['gpt-5.2', 'gpt-5', 'gpt-5-mini', 'gpt-4.1', 'gpt-4.1-mini', 'gpt-4.1-nano', 'gpt-4o', 'gpt-4o-mini'];
+            return ['gpt-5.2', 'gpt-5-mini', 'gpt-4.1', 'gpt-4o-mini'];
         }
         if (provider === 'claude') {
             return ['claude-4-5-sonnet-20250929', 'claude-4-5-opus-20251124', 'claude-4-5-haiku-20251015', 'claude-3-5-sonnet-latest'];
@@ -291,9 +292,10 @@ export const AIGenerator: React.FC = () => {
 
     const handleStartGeneration = async () => {
         let finalKeywords = [...keywords];
+        const titleModeKeyword = selectedTitle ? selectedTitle.split(/[？?！!：:]/)[0].trim() : '';
 
         // 入力フィールドに値がある場合はそれも追加
-        if (inputValue.trim()) {
+        if ((contentSourceMode === 'keyword' || contentSourceMode === 'both') && inputValue.trim()) {
             const trimmed = inputValue.trim();
             if (!finalKeywords.includes(trimmed)) {
                 finalKeywords.push(trimmed);
@@ -304,16 +306,25 @@ export const AIGenerator: React.FC = () => {
 
         // 自動モード実行 (最優先)
         if (generationMode === 'auto') {
-            // タイトルセット選択時はコンテキストとしてタイトルを使用
-            if (selectedTitleSetId && selectedTitle) {
+            if (contentSourceMode === 'title' || contentSourceMode === 'both') {
+                if (!selectedTitleSetId || !selectedTitle) {
+                    toast.error('タイトルセットと使用するタイトルを選択してください');
+                    return;
+                }
+                if (finalKeywords.length === 0 && titleModeKeyword) {
+                    finalKeywords = [titleModeKeyword];
+                }
+            } else if (contentSourceMode === 'keyword' && selectedTitleSetId && selectedTitle) {
+                // タイトルセット選択時はコンテキストとしてタイトルを使用
                 if (finalKeywords.length === 0) {
-                    // タイトルからキーワードを推定
-                    finalKeywords = [selectedTitle.split(/[？?！!：:]/)[0].trim()];
+                    finalKeywords = [titleModeKeyword];
                 }
             }
 
             if (finalKeywords.length === 0) {
-                toast.error('キーワードを入力するか、タイトルセットを選択してください');
+                toast.error((contentSourceMode === 'title' || contentSourceMode === 'both')
+                    ? 'タイトルからキーワード推定に失敗しました。別のタイトルを選択してください'
+                    : 'キーワードを入力してください');
                 return;
             }
 
@@ -341,8 +352,8 @@ export const AIGenerator: React.FC = () => {
 
         // --- これ以降は対話モード (Interactive Mode) ---
         // 対話モードは必ずキーワード検索（Step1: トレンド分析）から開始する
-        if (finalKeywords.length === 0 && selectedTitleSetId && selectedTitle) {
-            const inferred = selectedTitle.split(/[？?！!：:]/)[0].trim();
+        if (finalKeywords.length === 0 && (contentSourceMode === 'title' || contentSourceMode === 'both') && selectedTitleSetId && selectedTitle) {
+            const inferred = titleModeKeyword;
             if (inferred) {
                 finalKeywords = [inferred];
                 setKeywords(finalKeywords);
@@ -350,7 +361,9 @@ export const AIGenerator: React.FC = () => {
         }
 
         if (finalKeywords.length === 0) {
-            toast.error('対話モードでは最初にキーワードを入力してください');
+            toast.error((contentSourceMode === 'title' || contentSourceMode === 'both')
+                ? '対話モードでは、タイトルから推定したキーワードが必要です。タイトルを選び直してください'
+                : '対話モードでは最初にキーワードを入力してください');
             return;
         }
         await applySelectedAIConfig();
@@ -735,131 +748,171 @@ export const AIGenerator: React.FC = () => {
                         )}
                     </div>
 
-                    {/* Title Set Selector */}
+                    {/* Content Source Mode */}
                     <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">
-                            タイトルセット（登録済みタイトルから選ぶ）
+                            生成モード
                         </label>
-                        <select
-                            value={selectedTitleSetId}
-                            onChange={(e) => {
-                                setSelectedTitleSetId(e.target.value);
-                                setSelectedTitle('');
-                            }}
-                            disabled={isGenerating || isAutoGenerating}
-                            className="input-field"
-                        >
-                            <option value="">（指定なし）</option>
-                            {(titleSets || []).map(ts => (
-                                <option key={ts.id} value={ts.id}>
-                                    {ts.name} ({ts.titles.length}個)
-                                </option>
-                            ))}
-                        </select>
-                        {selectedTitleSetId && (
-                            <p className="text-xs text-gray-500 mt-1">
-                                登録タイトルからタイトルを選択して記事を生成します
-                            </p>
-                        )}
-
-                        {/* 個別タイトル選択 */}
-                        {selectedTitleSetId && (() => {
-                            const selectedSet = titleSets.find(s => s.id === selectedTitleSetId);
-                            return selectedSet && selectedSet.titles.length > 0 && (
-                                <div className="mt-3">
-                                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                                        使用するタイトルを選択
-                                    </label>
-                                    <select
-                                        value={selectedTitle}
-                                        onChange={(e) => setSelectedTitle(e.target.value)}
-                                        disabled={isGenerating || isAutoGenerating}
-                                        className="input-field"
-                                    >
-                                        <option value="">タイトルを選択してください...</option>
-                                        {(selectedSet.titles || []).map((title, index) => (
-                                            <option key={index} value={title}>
-                                                {title}
-                                            </option>
-                                        ))}
-                                    </select>
-                                </div>
-                            );
-                        })()}
+                        <div className="flex gap-3">
+                            <label className="flex items-center px-4 py-2 border-2 rounded-lg cursor-pointer transition-all hover:bg-gray-50 has-[:checked]:border-blue-500 has-[:checked]:bg-blue-50">
+                                <input
+                                    type="radio"
+                                    name="content_source_mode"
+                                    value="keyword"
+                                    checked={contentSourceMode === 'keyword'}
+                                    onChange={() => setContentSourceMode('keyword')}
+                                    className="mr-2"
+                                    disabled={isGenerating || isAutoGenerating}
+                                />
+                                <span className="text-sm font-medium">キーワードから生成</span>
+                            </label>
+                            <label className="flex items-center px-4 py-2 border-2 rounded-lg cursor-pointer transition-all hover:bg-gray-50 has-[:checked]:border-purple-500 has-[:checked]:bg-purple-50">
+                                <input
+                                    type="radio"
+                                    name="content_source_mode"
+                                    value="title"
+                                    checked={contentSourceMode === 'title'}
+                                    onChange={() => setContentSourceMode('title')}
+                                    className="mr-2"
+                                    disabled={isGenerating || isAutoGenerating}
+                                />
+                                <span className="text-sm font-medium">タイトルから生成</span>
+                            </label>
+                            <label className="flex items-center px-4 py-2 border-2 rounded-lg cursor-pointer transition-all hover:bg-gray-50 has-[:checked]:border-green-500 has-[:checked]:bg-green-50">
+                                <input
+                                    type="radio"
+                                    name="content_source_mode"
+                                    value="both"
+                                    checked={contentSourceMode === 'both'}
+                                    onChange={() => setContentSourceMode('both')}
+                                    className="mr-2"
+                                    disabled={isGenerating || isAutoGenerating}
+                                />
+                                <span className="text-sm font-medium">両方から生成</span>
+                            </label>
+                        </div>
                     </div>
 
-                    {/* Keyword Set Selector */}
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                            キーワードセット(登録済みキーワードから選ぶ)
-                        </label>
-                        <select
-                            value={selectedKeywordSetId}
-                            onChange={(e) => {
-                                const setId = e.target.value;
-                                setSelectedKeywordSetId(setId);
-                                if (setId) {
-                                    // キーワードセットを選択したら、既存のキーワードをクリア
-                                    setKeywords([]);
-                                    setInputValue('');
-                                }
-                            }}
-                            disabled={isGenerating || isAutoGenerating}
-                            className="input-field"
-                        >
-                            <option value="">(指定なし)</option>
-                            {(keywordSets || []).map(ks => (
-                                <option key={ks.id} value={ks.id}>
-                                    {ks.name} ({ks.keywords.length}個)
-                                </option>
-                            ))}
-                        </select>
-                        {selectedKeywordSetId && (() => {
-                            const selectedSet = keywordSets.find(s => s.id === selectedKeywordSetId);
-                            return selectedSet && selectedSet.keywords.length > 0 && (
-                                <div className="mt-3">
-                                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                                        使用するキーワードを選択
-                                    </label>
-                                    <div className="space-y-2 max-h-48 overflow-y-auto p-3 bg-gray-50 rounded-lg border border-gray-200">
-                                        {(selectedSet.keywords || []).map((keyword, index) => (
-                                            <label key={index} className="flex items-center space-x-2 cursor-pointer hover:bg-gray-100 p-1 rounded">
-                                                <input
-                                                    type="checkbox"
-                                                    checked={keywords.includes(keyword)}
-                                                    onChange={(e) => {
-                                                        if (e.target.checked) {
-                                                            setKeywords([...keywords, keyword]);
-                                                        } else {
-                                                            setKeywords(keywords.filter(k => k !== keyword));
-                                                        }
-                                                    }}
-                                                    disabled={isGenerating || isAutoGenerating}
-                                                    className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-                                                />
-                                                <span className="text-sm text-gray-700">{keyword}</span>
-                                            </label>
-                                        ))}
+                    {(contentSourceMode === 'title' || contentSourceMode === 'both') && (
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                                タイトルセット（登録済みタイトルから選ぶ）
+                            </label>
+                            <select
+                                value={selectedTitleSetId}
+                                onChange={(e) => {
+                                    setSelectedTitleSetId(e.target.value);
+                                    setSelectedTitle('');
+                                }}
+                                disabled={isGenerating || isAutoGenerating}
+                                className="input-field"
+                            >
+                                <option value="">セットを選択してください...</option>
+                                {(titleSets || []).map(ts => (
+                                    <option key={ts.id} value={ts.id}>
+                                        {ts.name} ({ts.titles.length}個)
+                                    </option>
+                                ))}
+                            </select>
+
+                            {selectedTitleSetId && (() => {
+                                const selectedSet = titleSets.find(s => s.id === selectedTitleSetId);
+                                return selectedSet && selectedSet.titles.length > 0 && (
+                                    <div className="mt-3">
+                                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                                            使用するタイトルを選択
+                                        </label>
+                                        <select
+                                            value={selectedTitle}
+                                            onChange={(e) => setSelectedTitle(e.target.value)}
+                                            disabled={isGenerating || isAutoGenerating}
+                                            className="input-field"
+                                        >
+                                            <option value="">タイトルを選択してください...</option>
+                                            {(selectedSet.titles || []).map((title, index) => (
+                                                <option key={index} value={title}>
+                                                    {title}
+                                                </option>
+                                            ))}
+                                        </select>
                                     </div>
-                                    {keywords.length > 0 && (
-                                        <div className="mt-3 p-3 bg-blue-50 rounded-lg border border-blue-200">
-                                            <p className="text-xs font-medium text-blue-900 mb-1">選択中: {keywords.length}個</p>
-                                            <div className="flex flex-wrap gap-1">
-                                                {keywords.map((kw, i) => (
-                                                    <span key={i} className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded text-xs">
-                                                        {kw}
-                                                    </span>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    )}
-                                </div>
-                            );
-                        })()}
-                    </div>
+                                );
+                            })()}
+                        </div>
+                    )}
 
-                    {/* Keywords - タイトルセットとキーワードセット未選択時のみ表示 */}
-                    {!selectedKeywordSetId && (
+                    {(contentSourceMode === 'keyword' || contentSourceMode === 'both') && (
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                                キーワードセット(登録済みキーワードから選ぶ)
+                            </label>
+                            <select
+                                value={selectedKeywordSetId}
+                                onChange={(e) => {
+                                    const setId = e.target.value;
+                                    setSelectedKeywordSetId(setId);
+                                    if (setId) {
+                                        setKeywords([]);
+                                        setInputValue('');
+                                    }
+                                }}
+                                disabled={isGenerating || isAutoGenerating}
+                                className="input-field"
+                            >
+                                <option value="">(指定なし)</option>
+                                {(keywordSets || []).map(ks => (
+                                    <option key={ks.id} value={ks.id}>
+                                        {ks.name} ({ks.keywords.length}個)
+                                    </option>
+                                ))}
+                            </select>
+                            {selectedKeywordSetId && (() => {
+                                const selectedSet = keywordSets.find(s => s.id === selectedKeywordSetId);
+                                return selectedSet && selectedSet.keywords.length > 0 && (
+                                    <div className="mt-3">
+                                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                                            使用するキーワードを選択
+                                        </label>
+                                        <div className="space-y-2 max-h-48 overflow-y-auto p-3 bg-gray-50 rounded-lg border border-gray-200">
+                                            {(selectedSet.keywords || []).map((keyword, index) => (
+                                                <label key={index} className="flex items-center space-x-2 cursor-pointer hover:bg-gray-100 p-1 rounded">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={keywords.includes(keyword)}
+                                                        onChange={(e) => {
+                                                            if (e.target.checked) {
+                                                                setKeywords([...keywords, keyword]);
+                                                            } else {
+                                                                setKeywords(keywords.filter(k => k !== keyword));
+                                                            }
+                                                        }}
+                                                        disabled={isGenerating || isAutoGenerating}
+                                                        className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                                                    />
+                                                    <span className="text-sm text-gray-700">{keyword}</span>
+                                                </label>
+                                            ))}
+                                        </div>
+                                        {keywords.length > 0 && (
+                                            <div className="mt-3 p-3 bg-blue-50 rounded-lg border border-blue-200">
+                                                <p className="text-xs font-medium text-blue-900 mb-1">選択中: {keywords.length}個</p>
+                                                <div className="flex flex-wrap gap-1">
+                                                    {keywords.map((kw, i) => (
+                                                        <span key={i} className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded text-xs">
+                                                            {kw}
+                                                        </span>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            })()}
+                        </div>
+                    )}
+
+                    {/* Keywords - キーワードモードかつキーワードセット未選択時のみ表示 */}
+                    {(contentSourceMode === 'keyword' || contentSourceMode === 'both') && !selectedKeywordSetId && (
                         <KeywordManager
                             keywords={keywords}
                             inputValue={inputValue}
@@ -985,7 +1038,17 @@ export const AIGenerator: React.FC = () => {
                     {/* Generate Button */}
                     <button
                         onClick={handleStartGeneration}
-                        disabled={isGenerating || isAutoGenerating || (!selectedTitleSetId && keywords.length === 0 && !inputValue.trim())}
+                        disabled={
+                            isGenerating ||
+                            isAutoGenerating ||
+                            (
+                                contentSourceMode === 'title'
+                                    ? (!selectedTitleSetId || !selectedTitle)
+                                    : contentSourceMode === 'both'
+                                        ? (!selectedTitleSetId || !selectedTitle || (keywords.length === 0 && !inputValue.trim()))
+                                    : (keywords.length === 0 && !inputValue.trim())
+                            )
+                        }
                         className="w-full btn-primary flex items-center justify-center space-x-2"
                     >
                         {isGenerating || isAutoGenerating ? (
@@ -1001,9 +1064,19 @@ export const AIGenerator: React.FC = () => {
                         )}
                     </button>
 
-                    {!selectedTitleSetId && keywords.length === 0 && (
+                    {contentSourceMode === 'keyword' && keywords.length === 0 && (
                         <p className="text-sm text-gray-500 text-center">
-                            キーワードを追加するか、タイトルセットを選択してください
+                            キーワードを追加してください
+                        </p>
+                    )}
+                    {contentSourceMode === 'title' && (!selectedTitleSetId || !selectedTitle) && (
+                        <p className="text-sm text-gray-500 text-center">
+                            タイトルセットとタイトルを選択してください
+                        </p>
+                    )}
+                    {contentSourceMode === 'both' && (!selectedTitleSetId || !selectedTitle || (keywords.length === 0 && !inputValue.trim())) && (
+                        <p className="text-sm text-gray-500 text-center">
+                            タイトルセット/タイトルの選択とキーワード入力の両方が必要です
                         </p>
                     )}
                 </div>

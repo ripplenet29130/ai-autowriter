@@ -137,6 +137,8 @@ export interface ScheduleSettings {
 export interface ScheduleSetting {
   id?: string;
   ai_config_id: string;
+  ai_provider_override?: string;
+  ai_model_override?: string;
   wp_config_id: string;
   post_time: string;
   frequency: string;
@@ -158,8 +160,8 @@ export interface ScheduleSetting {
   generation_mode?: 'keyword' | 'title' | 'both';
   enable_fact_check?: boolean; // 繝輔ぃ繧ｯ繝医メ繧ｧ繝・け譛牙柑蛹・
   fact_check_note?: string; // [[]]縺ｧ蝗ｲ繧繝√ぉ繝・け蜆ｪ蜈育ｮ・園
-  ab_test_enabled?: boolean;
   image_generation_enabled?: boolean;
+  images_per_article?: number;
 }
 
 export interface TitleSuggestion {

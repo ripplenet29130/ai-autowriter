@@ -14,9 +14,10 @@ interface StepIndicatorProps {
 }
 
 const steps = [
-    { step: 1, label: 'タイトル', icon: Type, description: '魅力的な案の選定' },
-    { step: 2, label: 'アウトライン', icon: Layout, description: '構成の設計' },
-    { step: 3, label: '本文生成', icon: FileText, description: 'AI執筆完了' }
+    { step: 1, label: 'リサーチ', icon: Search, description: '競合と検索意図の把握' },
+    { step: 2, label: 'タイトル', icon: Type, description: '見出し方針の決定' },
+    { step: 3, label: '構成', icon: Layout, description: '見出しと流れの設計' },
+    { step: 4, label: '本文生成', icon: FileText, description: 'AI執筆完了' }
 ];
 
 /**

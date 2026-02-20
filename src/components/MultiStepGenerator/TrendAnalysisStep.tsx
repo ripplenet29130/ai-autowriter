@@ -7,6 +7,7 @@ interface TrendAnalysisStepProps {
   isLoading: boolean;
   onNext: () => void;
   onBack: () => void;
+  nextLabel?: string;
   keywordPreferences: Record<string, import('../../types').KeywordPreference>;
   onKeywordToggle: (keyword: string) => void;
   onAddKeyword: (keyword: string, preference: import('../../types').KeywordPreference) => void;
@@ -17,6 +18,7 @@ export const TrendAnalysisStep: React.FC<TrendAnalysisStepProps> = ({
   isLoading,
   onNext,
   onBack,
+  nextLabel,
   keywordPreferences,
   onKeywordToggle,
   onAddKeyword,
@@ -242,7 +244,7 @@ export const TrendAnalysisStep: React.FC<TrendAnalysisStepProps> = ({
           className="bg-gray-900 hover:bg-black text-white px-10 py-4 rounded-full font-black shadow-xl hover:shadow-2xl flex items-center space-x-3 transform hover:scale-105 active:scale-95 transition-all"
         >
           <Sparkles className="w-5 h-5 text-yellow-400" />
-          <span>タイトル生成へ進む</span>
+          <span>{nextLabel || 'タイトル生成へ進む'}</span>
           <ArrowRight className="w-5 h-5" />
         </button>
       </div>

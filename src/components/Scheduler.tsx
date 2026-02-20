@@ -30,6 +30,19 @@ const DEFAULT_CHATWORK_TEMPLATE = `いつもお世話になっております。
 
 今後ともよろしくお願いいたします。`;
 
+const getProviderModelOptions = (provider: string): string[] => {
+  if (provider === 'gemini') {
+    return ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.0-flash'];
+  }
+  if (provider === 'openai') {
+    return ['gpt-5.2', 'gpt-5-mini', 'gpt-4.1', 'gpt-4o-mini'];
+  }
+  if (provider === 'claude') {
+    return ['claude-4-5-sonnet-20250929', 'claude-4-5-opus-20251124', 'claude-4-5-haiku-20251015', 'claude-3-5-sonnet-latest'];
+  }
+  return [];
+};
+
 export const Scheduler: React.FC = () => {
   const { aiConfigs, wordPressConfigs, keywordSets, titleSets, promptSets, loadKeywordSets, loadTitleSets, loadPromptSets } = useAppStore();
   const [schedules, setSchedules] = useState<ScheduleSetting[]>([]);
@@ -41,10 +54,15 @@ export const Scheduler: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [editingSchedule, setEditingSchedule] = useState<ScheduleSetting | null>(null);
   const [isPromptManagerOpen, setIsPromptManagerOpen] = useState(false);
+  const [useDefaultAiConfig, setUseDefaultAiConfig] = useState(true);
+  const [selectedAiProvider, setSelectedAiProvider] = useState('');
+  const [selectedAiModel, setSelectedAiModel] = useState('');
 
   // Form state
   const [formData, setFormData] = useState({
     ai_config_id: '',
+    ai_provider_override: '',
+    ai_model_override: '',
     wp_config_id: '',
     generation_mode: 'keyword' as 'keyword' | 'title' | 'both',
     keyword: '',
@@ -63,8 +81,8 @@ export const Scheduler: React.FC = () => {
     status: true,
     enable_fact_check: false,
     fact_check_note: '',
-    ab_test_enabled: false,
-    image_generation_enabled: true,
+    image_generation_enabled: false,
+    images_per_article: 0,
   });
 
   const timeOptions = useMemo(() => {
@@ -84,6 +102,47 @@ export const Scheduler: React.FC = () => {
     return options;
   }, [formData.post_time]);
 
+  const activeAiConfig = useMemo(
+    () => aiConfigs.find((config) => config.isActive) || aiConfigs[0],
+    [aiConfigs]
+  );
+
+  const aiProviderOptions = useMemo(() => {
+    return Array.from(new Set(aiConfigs.map((config) => config.provider)));
+  }, [aiConfigs]);
+
+  const aiModelOptions = useMemo(() => {
+    if (!selectedAiProvider) {
+      return [];
+    }
+
+    const models = [...getProviderModelOptions(selectedAiProvider)];
+    if (selectedAiModel && !models.includes(selectedAiModel)) {
+      models.push(selectedAiModel);
+    }
+
+    return models.map((model) => ({
+      provider: selectedAiProvider,
+      model
+    }));
+  }, [selectedAiProvider, selectedAiModel]);
+
+  const formatAiProvider = (provider: string) => (
+    provider === 'openai' ? 'OpenAI' :
+      provider === 'claude' ? 'Anthropic Claude' :
+        provider === 'gemini' ? 'Google Gemini' : provider
+  );
+
+  const getModelTierLabel = (model: string): string => {
+    if (['gemini-2.5-pro', 'claude-4-5-opus-20251124', 'gpt-5.2', 'gpt-5'].includes(model)) {
+      return '高品質・高単価';
+    }
+    if (['gemini-2.5-flash', 'claude-4-5-sonnet-20250929', 'claude-3-5-sonnet-latest', 'gpt-4.1', 'gpt-4o'].includes(model)) {
+      return 'バランス';
+    }
+    return '低価格・高速';
+  };
+
   // Load schedules and keyword sets on mount
   useEffect(() => {
     loadSchedules();
@@ -92,6 +151,84 @@ export const Scheduler: React.FC = () => {
     loadPromptSets();
     loadFactCheckSettings();
   }, []);
+
+  useEffect(() => {
+    if (aiConfigs.length === 0) return;
+    const base = activeAiConfig || aiConfigs[0];
+    if (!base) return;
+
+    if (!selectedAiProvider) setSelectedAiProvider(base.provider);
+    if (!selectedAiModel) setSelectedAiModel(base.model);
+
+    if (!formData.ai_config_id && base.id) {
+      setFormData((prev) => ({ ...prev, ai_config_id: base.id || '' }));
+    }
+  }, [aiConfigs, activeAiConfig, selectedAiProvider, selectedAiModel, formData.ai_config_id]);
+
+  useEffect(() => {
+    if (aiConfigs.length === 0) return;
+
+    const base = activeAiConfig || aiConfigs[0];
+    if (!base) return;
+
+    if (useDefaultAiConfig) {
+      if (base.id) {
+        setFormData((prev) => {
+          const next = {
+            ai_config_id: base.id || '',
+            ai_provider_override: '',
+            ai_model_override: '',
+          };
+          if (
+            prev.ai_config_id === next.ai_config_id &&
+            prev.ai_provider_override === next.ai_provider_override &&
+            prev.ai_model_override === next.ai_model_override
+          ) {
+            return prev;
+          }
+          return { ...prev, ...next };
+        });
+      }
+      if (selectedAiProvider !== base.provider) {
+        setSelectedAiProvider(base.provider);
+      }
+      if (selectedAiModel !== base.model) {
+        setSelectedAiModel(base.model);
+      }
+      return;
+    }
+
+    if (!selectedAiProvider) return;
+
+    if (!selectedAiModel) {
+      const firstModel = getProviderModelOptions(selectedAiProvider)[0] || '';
+      if (firstModel) {
+        setSelectedAiModel(firstModel);
+      }
+      return;
+    }
+
+    const byProvider = aiConfigs.find((c) => c.provider === selectedAiProvider);
+    const target = byProvider || activeAiConfig || aiConfigs[0];
+    if (!target) return;
+
+    setFormData((prev) => {
+      const next = {
+        ai_config_id: target.id || prev.ai_config_id,
+        ai_provider_override: selectedAiProvider,
+        ai_model_override: selectedAiModel,
+      };
+
+      if (
+        prev.ai_config_id === next.ai_config_id &&
+        prev.ai_provider_override === next.ai_provider_override &&
+        prev.ai_model_override === next.ai_model_override
+      ) {
+        return prev;
+      }
+      return { ...prev, ...next };
+    });
+  }, [useDefaultAiConfig, aiConfigs, activeAiConfig, selectedAiProvider, selectedAiModel]);
 
   const loadFactCheckSettings = async () => {
     if (!supabase) {
@@ -170,31 +307,41 @@ export const Scheduler: React.FC = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
+    const submitData = {
+      ...formData,
+      ai_provider_override: useDefaultAiConfig ? '' : selectedAiProvider,
+      ai_model_override: useDefaultAiConfig ? '' : selectedAiModel,
+    };
+
     // Validation
-    if (!formData.ai_config_id) {
+    if (!submitData.ai_config_id) {
       toast.error('AI設定を選択してください');
       return;
     }
-    if (!formData.wp_config_id) {
+    if (!useDefaultAiConfig && (!submitData.ai_provider_override || !submitData.ai_model_override)) {
+      toast.error('AIモデルを選択してください');
+      return;
+    }
+    if (!submitData.wp_config_id) {
       toast.error('WordPress設定を選択してください');
       return;
     }
-    const minute = Number(formData.post_time.split(':')[1]);
+    const minute = Number(submitData.post_time.split(':')[1]);
     if (!Number.isFinite(minute) || minute % 10 !== 0) {
       toast.error('投稿時刻は10分単位で選択してください');
       return;
     }
 
     // Validate based on generation mode
-    if (formData.generation_mode === 'keyword' || formData.generation_mode === 'both') {
-      if (!formData.keyword.trim()) {
+    if (submitData.generation_mode === 'keyword' || submitData.generation_mode === 'both') {
+      if (!submitData.keyword.trim()) {
         toast.error('キーワードセットを選択してください');
         return;
       }
     }
 
-    if (formData.generation_mode === 'title' || formData.generation_mode === 'both') {
-      if (!formData.title_set_id) {
+    if (submitData.generation_mode === 'title' || submitData.generation_mode === 'both') {
+      if (!submitData.title_set_id) {
         toast.error('タイトルセットを選択してください');
         return;
       }
@@ -204,10 +351,10 @@ export const Scheduler: React.FC = () => {
       setLoading(true);
 
       if (editingSchedule) {
-        await scheduleService.updateSchedule(editingSchedule.id!, formData);
+        await scheduleService.updateSchedule(editingSchedule.id!, submitData);
         toast.success('スケジュールを更新しました');
       } else {
-        await scheduleService.createSchedule(formData);
+        await scheduleService.createSchedule(submitData);
         toast.success('スケジュールを作成しました');
       }
 
@@ -222,9 +369,26 @@ export const Scheduler: React.FC = () => {
   };
 
   const handleEdit = (schedule: ScheduleSetting) => {
+    const selectedConfig = aiConfigs.find((config) => config.id === schedule.ai_config_id);
+    const hasAiOverride = Boolean(schedule.ai_provider_override || schedule.ai_model_override);
+    const isUsingDefault = !hasAiOverride && Boolean(activeAiConfig?.id && schedule.ai_config_id === activeAiConfig.id);
+    const overrideProvider = schedule.ai_provider_override || selectedConfig?.provider || activeAiConfig?.provider || '';
+    const fallbackModels = getProviderModelOptions(overrideProvider);
+    const overrideModel = schedule.ai_model_override
+      || selectedConfig?.model
+      || activeAiConfig?.model
+      || fallbackModels[0]
+      || '';
+
+    setUseDefaultAiConfig(isUsingDefault);
+    setSelectedAiProvider(overrideProvider);
+    setSelectedAiModel(overrideModel);
+
     setEditingSchedule(schedule);
     setFormData({
       ai_config_id: schedule.ai_config_id,
+      ai_provider_override: schedule.ai_provider_override || '',
+      ai_model_override: schedule.ai_model_override || '',
       wp_config_id: schedule.wp_config_id,
       generation_mode: (schedule as any).generation_mode || 'keyword',
       keyword: schedule.keyword,
@@ -243,8 +407,8 @@ export const Scheduler: React.FC = () => {
       status: schedule.status,
       enable_fact_check: schedule.enable_fact_check || false,
       fact_check_note: schedule.fact_check_note || '',
-      ab_test_enabled: schedule.ab_test_enabled || false,
-      image_generation_enabled: schedule.image_generation_enabled ?? true,
+      image_generation_enabled: schedule.image_generation_enabled ?? false,
+      images_per_article: schedule.images_per_article ?? 0,
     });
     // Scroll to top to show the form
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -310,8 +474,13 @@ export const Scheduler: React.FC = () => {
   };
 
   const resetForm = () => {
+    setUseDefaultAiConfig(true);
+    setSelectedAiProvider(activeAiConfig?.provider || '');
+    setSelectedAiModel(activeAiConfig?.model || '');
     setFormData({
-      ai_config_id: '',
+      ai_config_id: activeAiConfig?.id || '',
+      ai_provider_override: '',
+      ai_model_override: '',
       wp_config_id: '',
       generation_mode: 'keyword',
       keyword: '',
@@ -330,8 +499,8 @@ export const Scheduler: React.FC = () => {
       status: true,
       enable_fact_check: false,
       fact_check_note: '',
-      ab_test_enabled: false,
-      image_generation_enabled: true,
+      image_generation_enabled: false,
+      images_per_article: 0,
     });
     setEditingSchedule(null);
   };
@@ -350,10 +519,43 @@ export const Scheduler: React.FC = () => {
     return `${label} (${config.model})`;
   };
 
+  const getScheduleAIName = (schedule: ScheduleSetting) => {
+    if (schedule.ai_provider_override && schedule.ai_model_override) {
+      return `${formatAiProvider(schedule.ai_provider_override)} (${schedule.ai_model_override})`;
+    }
+    return getAIName(schedule.ai_config_id);
+  };
+
   const getPromptSetName = (promptSetId?: string) => {
     if (!promptSetId) return null;
     const ps = promptSets.find(p => p.id === promptSetId);
     return ps ? ps.name : null;
+  };
+
+  const handleRestoreKeyword = async (scheduleId: string, keyword: string) => {
+    if (!confirm(`「${keyword}」を未使用に戻しますか？`)) return;
+    try {
+      await scheduleService.restoreKeyword(scheduleId, keyword);
+      const refreshed = await scheduleService.getUsedKeywords(scheduleId);
+      setUsedKeywordsMap((prev) => ({ ...prev, [scheduleId]: refreshed }));
+      toast.success(`キーワードを復活しました: ${keyword}`);
+    } catch (error: any) {
+      console.error('Failed to restore keyword:', error);
+      toast.error(`キーワードの復活に失敗しました: ${error.message || 'Unknown error'}`);
+    }
+  };
+
+  const handleResetUsedKeywords = async (scheduleId: string, keywords: string[]) => {
+    if (!confirm('このスケジュールのキーワード消化状態をすべて解除しますか？')) return;
+    try {
+      await scheduleService.resetUsedKeywords(scheduleId, keywords);
+      const refreshed = await scheduleService.getUsedKeywords(scheduleId);
+      setUsedKeywordsMap((prev) => ({ ...prev, [scheduleId]: refreshed }));
+      toast.success('キーワード消化を解除しました');
+    } catch (error: any) {
+      console.error('Failed to reset used keywords:', error);
+      toast.error(`キーワード消化の解除に失敗しました: ${error.message || 'Unknown error'}`);
+    }
   };
 
   const getNextExecutionDate = (schedule: ScheduleSetting): Date | null => {
@@ -450,60 +652,97 @@ export const Scheduler: React.FC = () => {
         </h3>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* AI設定 */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                AI設定 <span className="text-red-500">*</span>
+            <div className="md:col-span-2">
+              <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+                <input
+                  type="checkbox"
+                  id="use_default_ai_config"
+                  checked={useDefaultAiConfig}
+                  onChange={(e) => setUseDefaultAiConfig(e.target.checked)}
+                  disabled={loading}
+                />
+                デフォルト（AI設定のアクティブ構成）を使用
               </label>
-              <select
-                value={formData.ai_config_id}
-                onChange={(e) => setFormData({ ...formData, ai_config_id: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                required
-              >
-                <option value="">選択してください</option>
-                {aiConfigs.map((config) => {
-                  const label = config.provider === 'openai' ? 'OpenAI' :
-                    config.provider === 'claude' ? 'Anthropic Claude' :
-                      config.provider === 'gemini' ? 'Google Gemini' : config.provider;
-                  return (
-                    <option key={config.id} value={config.id || ''}>
-                      {label} ({config.model}){config.isActive ? ' (アクティブ)' : ''}
-                    </option>
-                  );
-                })}
-              </select>
-              {aiConfigs.length === 0 && (
-                <p className="text-xs text-red-500 mt-1">
-                  登録されたAI設定がありません。「AI設定」から設定してください。
-                </p>
-              )}
             </div>
-
-            {/* WordPress設定 */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                WordPress設定 <span className="text-red-500">*</span>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                生成に使用するAI
               </label>
               <select
-                value={formData.wp_config_id}
-                onChange={(e) => setFormData({ ...formData, wp_config_id: e.target.value })}
+                value={selectedAiProvider}
+                onChange={(e) => {
+                  const provider = e.target.value;
+                  setSelectedAiProvider(provider);
+                  const firstModel = getProviderModelOptions(provider)[0] || '';
+                  setSelectedAiModel(firstModel);
+                }}
+                disabled={loading || useDefaultAiConfig}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                required
               >
-                <option value="">選択してください</option>
-                {activeWordPressConfigs.map((config) => (
-                  <option key={config.id} value={config.id}>
-                    {config.name} ({config.url})
+                {aiConfigs.length === 0 && <option value="">AI設定がありません</option>}
+                {aiProviderOptions.map((provider) => (
+                  <option key={provider} value={provider}>
+                    {formatAiProvider(provider)}
                   </option>
                 ))}
               </select>
-              {activeWordPressConfigs.length === 0 && (
-                <p className="text-xs text-red-500 mt-1">
-                  有効なWordPress設定がありません。「WordPress設定」から有効化してください。
-                </p>
-              )}
             </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                生成に使用するモデル
+              </label>
+              <select
+                value={selectedAiModel}
+                onChange={(e) => {
+                  setSelectedAiModel(e.target.value || '');
+                }}
+                disabled={loading || useDefaultAiConfig}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              >
+                {aiModelOptions.length === 0 && <option value="">モデルがありません</option>}
+                {aiModelOptions.map((item) => (
+                  <option key={`${item.provider}::${item.model}`} value={item.model}>
+                    {`${item.model}（${getModelTierLabel(item.model)}）`}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <p className="text-xs text-gray-500 md:col-span-2">
+              {useDefaultAiConfig
+                ? 'AI設定でアクティブなAI/モデルをそのまま使います'
+                : 'この画面のスケジュール実行時のみ、AIとモデルを上書きして使います'}
+            </p>
+            {aiConfigs.length === 0 && (
+              <p className="text-xs text-red-500 md:col-span-2">
+                登録されたAI設定がありません。「AI設定」から設定してください。
+              </p>
+            )}
+          </div>
+
+          {/* WordPress設定（1段下） */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              WordPress設定 <span className="text-red-500">*</span>
+            </label>
+            <select
+              value={formData.wp_config_id}
+              onChange={(e) => setFormData({ ...formData, wp_config_id: e.target.value })}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              required
+            >
+              <option value="">選択してください</option>
+              {activeWordPressConfigs.map((config) => (
+                <option key={config.id} value={config.id}>
+                  {config.name} ({config.url})
+                </option>
+              ))}
+            </select>
+            {activeWordPressConfigs.length === 0 && (
+              <p className="text-xs text-red-500 mt-1">
+                有効なWordPress設定がありません。「WordPress設定」から有効化してください。
+              </p>
+            )}
           </div>
 
           {/* プロンプトセット選択 (Independent Row) */}
@@ -669,23 +908,57 @@ export const Scheduler: React.FC = () => {
                 );
               })()}
             </div>
-          )}       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          )}       <div className="grid grid-cols-1 gap-4">
             {/* 目標文字数 */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
                 目標文字数
               </label>
-              <select
+              <div className="flex gap-2 mb-2">
+                <button
+                  type="button"
+                  onClick={() => setFormData({ ...formData, target_word_count: 1000 })}
+                  className={`px-3 py-2 text-sm rounded-md border transition-colors ${formData.target_word_count === 1000
+                    ? 'bg-purple-600 text-white border-purple-600'
+                    : 'bg-white text-gray-700 border-gray-300 hover:border-purple-400'
+                    }`}
+                >
+                  1,000字
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFormData({ ...formData, target_word_count: 2000 })}
+                  className={`px-3 py-2 text-sm rounded-md border transition-colors ${formData.target_word_count === 2000
+                    ? 'bg-purple-600 text-white border-purple-600'
+                    : 'bg-white text-gray-700 border-gray-300 hover:border-purple-400'
+                    }`}
+                >
+                  2,000字
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFormData({ ...formData, target_word_count: 4000 })}
+                  className={`px-3 py-2 text-sm rounded-md border transition-colors ${formData.target_word_count === 4000
+                    ? 'bg-purple-600 text-white border-purple-600'
+                    : 'bg-white text-gray-700 border-gray-300 hover:border-purple-400'
+                    }`}
+                >
+                  4,000字
+                </button>
+              </div>
+              <input
+                type="number"
                 value={formData.target_word_count}
-                onChange={(e) => setFormData({ ...formData, target_word_count: parseInt(e.target.value) })}
+                onChange={(e) => setFormData({ ...formData, target_word_count: parseInt(e.target.value, 10) || 2000 })}
+                min="500"
+                max="10000"
+                step="100"
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              >
-                <option value="1000">1000文字 (サクサク読める短編)</option>
-                <option value="2000">2000文字 (標準的な記事)</option>
-                <option value="3000">3000文字 (しっかり解説)</option>
-                <option value="5000">5000文字 (網羅的な長文)</option>
-                <option value="10000">10000文字 (超長文・完全版)</option>
-              </select>
+                placeholder="カスタム文字数を入力"
+              />
+              <p className="text-xs text-gray-500 mt-1">
+                プリセットを選択するか、カスタム文字数を入力してください
+              </p>
             </div>
 
             {/* 文体（トーン） */}
@@ -856,26 +1129,12 @@ export const Scheduler: React.FC = () => {
             )}
           </div>
 
-          {/* ABテスト設定 */}
-          <div className="flex items-center space-x-2">
-            <input
-              type="checkbox"
-              id="ab_test_enabled"
-              checked={formData.ab_test_enabled || false}
-              onChange={(e) => setFormData({ ...formData, ab_test_enabled: e.target.checked })}
-              className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-            />
-            <label htmlFor="ab_test_enabled" className="text-sm font-medium text-gray-700">
-              ABテスト（見出し比較）を有効化
-            </label>
-          </div>
-
           {/* 画像生成設定 */}
           <div className="flex items-center space-x-2">
             <input
               type="checkbox"
               id="image_generation_enabled"
-              checked={formData.image_generation_enabled ?? true}
+              checked={formData.image_generation_enabled ?? false}
               onChange={(e) => setFormData({ ...formData, image_generation_enabled: e.target.checked })}
               className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
             />
@@ -883,6 +1142,27 @@ export const Scheduler: React.FC = () => {
               画像生成を有効化（スケジュール単位）
             </label>
           </div>
+          {(formData.image_generation_enabled ?? false) && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                記事あたりの画像枚数 ({formData.images_per_article ?? 0}枚)
+              </label>
+              <input
+                type="range"
+                min="0"
+                max="10"
+                step="1"
+                value={formData.images_per_article ?? 0}
+                onChange={(e) => setFormData({ ...formData, images_per_article: parseInt(e.target.value, 10) || 0 })}
+                className="w-full"
+              />
+              <div className="flex justify-between text-xs text-gray-500 mt-1">
+                <span>0 (無効)</span>
+                <span>5枚</span>
+                <span>10枚</span>
+              </div>
+            </div>
+          )}
 
           {/* スケジュール有効化 */}
           <div className="flex items-center space-x-2">
@@ -948,141 +1228,131 @@ export const Scheduler: React.FC = () => {
                     className={`border rounded-xl p-6 shadow-md transition-all ${schedule.status ? 'bg-white border-emerald-300 ring-1 ring-emerald-100 hover:shadow-lg' : 'bg-gray-50 border-gray-200'
                       }`}
                   >
-                    <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-6">
-                      <div className="flex flex-col md:flex-row md:items-center md:space-x-6 space-y-4 md:space-y-0 flex-1 min-w-0">
-
-                        {/* Time Block - Fixed width to ensure stability */}
-                        {/* WordPress & AI Info - allowing expansion */}
-                        <div className="flex flex-wrap gap-4 items-center flex-1 min-w-0">
-                          {/* WordPress */}
-                          <div className="flex items-center space-x-3 min-w-0">
-                            <div className="w-10 h-10 rounded-full bg-white border border-gray-100 flex items-center justify-center shadow-sm flex-shrink-0">
-                              <Globe className="w-5 h-5 text-blue-500" />
-                            </div>
-                            <div className="min-w-0 flex-1">
-                              <div className="text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-0.5">Target Site</div>
-                              <div className="text-base font-bold text-gray-900 leading-tight whitespace-nowrap overflow-hidden text-ellipsis max-w-[200px]" title={getWordPressName(schedule.wp_config_id)}>
-                                {getWordPressName(schedule.wp_config_id)}
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* AI Model */}
-                          <div className="flex items-center space-x-3 min-w-0">
-                            <div className="w-10 h-10 rounded-full bg-white border border-gray-100 flex items-center justify-center shadow-sm flex-shrink-0">
-                              <Tag className="w-5 h-5 text-purple-500" />
-                            </div>
-                            <div className="min-w-0 flex-1">
-                              <div className="text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-0.5">AI Model</div>
-                              <div className="text-sm font-bold text-gray-900 leading-tight whitespace-nowrap max-w-[140px] truncate">
-                                {getAIName(schedule.ai_config_id).split('(')[0]}
-                              </div>
-                            </div>
-                          </div>
+                    {/* Row 1: Time & Actions */}
+                    <div className="flex items-center justify-between mb-4">
+                      {/* Time Block */}
+                      <div className="flex items-center space-x-4 min-w-[200px] flex-shrink-0">
+                        <div className={`p-3 rounded-xl shadow-sm ${schedule.status ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-400'}`}>
+                          <Clock className="w-6 h-6" />
                         </div>
-
-                        {/* Divider (Desktop) */}
-                        <div className="hidden md:block w-px h-12 bg-gray-200"></div>
-
-                        {/* WordPress & AI Info - allowing expansion */}
-                        {/* Time Block - Fixed width to ensure stability */}
-                        <div className="flex items-center space-x-4 min-w-[200px] flex-shrink-0">
-                          <div className={`p-4 rounded-xl shadow-sm ${schedule.status ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-400'}`}>
-                            <Clock className="w-8 h-8" />
+                        <div>
+                          <div className="flex items-baseline gap-2">
+                            <span className="text-2xl font-bold text-gray-900 tracking-tight leading-none">
+                              {schedule.post_time}
+                            </span>
+                            <span className="text-xs font-semibold text-gray-500">
+                              /{schedule.frequency}
+                            </span>
                           </div>
-                          <div>
-                            <div className="flex items-baseline gap-2">
-                              <span className="text-3xl font-bold text-gray-900 tracking-tight leading-none">
-                                {schedule.post_time}
-                              </span>
-                              <span className="text-sm font-semibold text-gray-500">
-                                /{schedule.frequency}
+                          <div className="flex items-center gap-2 mt-1">
+                            <span
+                              className={`px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide rounded border ${schedule.status
+                                ? 'bg-green-50 text-green-700 border-green-200'
+                                : 'bg-gray-50 text-gray-500 border-gray-200'
+                                }`}
+                            >
+                              {schedule.status ? 'Active' : 'Stopped'}
+                            </span>
+                            <span className="text-xs text-gray-400">
+                              {schedule.post_status === 'publish' ? '公開' : '下書き'}
+                            </span>
+                          </div>
+                          {/* Last Execution Time */}
+                          {schedule.id && lastExecutionMap[schedule.id] && (
+                            <div className="mt-1 flex items-center text-[10px] text-gray-400">
+                              <span className="font-bold mr-1">Last:</span>
+                              <span>{new Date(lastExecutionMap[schedule.id]!).toLocaleString('ja-JP', {
+                                month: 'numeric',
+                                day: 'numeric',
+                                hour: '2-digit',
+                                minute: '2-digit'
+                              })}</span>
+                            </div>
+                          )}
+                          {schedule.status && (
+                            <div className="mt-0.5 flex items-center text-[10px] text-blue-600">
+                              <span className="font-bold mr-1">Next:</span>
+                              <span>
+                                {nextRunAt
+                                  ? nextRunAt.toLocaleString('ja-JP', {
+                                    month: 'numeric',
+                                    day: 'numeric',
+                                    hour: '2-digit',
+                                    minute: '2-digit'
+                                  })
+                                  : '予定なし'}
                               </span>
                             </div>
-                            <div className="flex items-center gap-2 mt-1.5">
-                              <span
-                                className={`px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide rounded border ${schedule.status
-                                  ? 'bg-green-50 text-green-700 border-green-200'
-                                  : 'bg-gray-50 text-gray-500 border-gray-200'
-                                  }`}
-                              >
-                                {schedule.status ? 'Active' : 'Stopped'}
-                              </span>
-                              <span className="text-xs text-gray-400">
-                                {schedule.post_status === 'publish' ? '公開' : '下書き'}
-                              </span>
-                            </div>
-                            {/* Last Execution Time */}
-                            {schedule.id && lastExecutionMap[schedule.id] && (
-                              <div className="mt-2 flex items-center text-[10px] text-gray-400">
-                                <span className="font-bold mr-1">Last Run:</span>
-                                <span>{new Date(lastExecutionMap[schedule.id]!).toLocaleString('ja-JP', {
-                                  month: 'numeric',
-                                  day: 'numeric',
-                                  hour: '2-digit',
-                                  minute: '2-digit'
-                                })}</span>
-                              </div>
-                            )}
-                            {schedule.status && (
-                              <div className="mt-1.5 flex items-center text-[10px] text-blue-600">
-                                <span className="font-bold mr-1">Next Run:</span>
-                                <span>
-                                  {nextRunAt
-                                    ? nextRunAt.toLocaleString('ja-JP', {
-                                      year: 'numeric',
-                                      month: 'numeric',
-                                      day: 'numeric',
-                                      hour: '2-digit',
-                                      minute: '2-digit'
-                                    })
-                                    : '予定なし'}
-                                </span>
-                              </div>
-                            )}
-                          </div>
+                          )}
                         </div>
-
-                        {/* Divider (Desktop) removed from here */}
-
-                        {/* Additional Info Block removed from here */}
-
                       </div>
 
-                      <div className="flex items-center space-x-2 lg:ml-2 border-t lg:border-t-0 lg:border-l border-gray-100 pt-4 lg:pt-0 lg:pl-4 flex-shrink-0">
-                        {/* Action Buttons */}
+                      {/* Action Buttons */}
+                      <div className="flex items-center space-x-1">
                         <button
                           onClick={() => handleToggleStatus(schedule)}
-                          className={`p-2.5 rounded-lg transition-colors border ${schedule.status
+                          className={`p-2 rounded-lg transition-colors border ${schedule.status
                             ? 'text-green-600 border-green-200 hover:bg-green-50'
                             : 'text-gray-400 border-gray-200 hover:bg-gray-100'
                             }`}
                           title={schedule.status ? '無効にする' : '有効にする'}
                         >
-                          <Power className="w-5 h-5" />
+                          <Power className="w-4 h-4" />
                         </button>
                         <button
                           onClick={() => handleRunNow(schedule.id!)}
                           disabled={loading}
-                          className="p-2.5 text-blue-600 border border-blue-200 hover:bg-blue-50 rounded-lg transition-colors disabled:opacity-50"
+                          className="p-2 text-blue-600 border border-blue-200 hover:bg-blue-50 rounded-lg transition-colors disabled:opacity-50"
                           title="今すぐ実行"
                         >
-                          <Play className="w-5 h-5 fill-current" />
+                          <Play className="w-4 h-4 fill-current" />
                         </button>
                         <button
                           onClick={() => handleEdit(schedule)}
-                          className="p-2.5 text-gray-500 border border-gray-200 hover:text-blue-600 hover:bg-blue-50 hover:border-blue-200 rounded-lg transition-colors"
+                          className="p-2 text-gray-500 border border-gray-200 hover:text-blue-600 hover:bg-blue-50 hover:border-blue-200 rounded-lg transition-colors"
                           title="編集"
                         >
-                          <Edit2 className="w-5 h-5" />
+                          <Edit2 className="w-4 h-4" />
                         </button>
                         <button
                           onClick={() => handleDelete(schedule.id!)}
-                          className="p-2.5 text-gray-400 border border-gray-200 hover:text-red-600 hover:bg-red-50 hover:border-red-200 rounded-lg transition-colors"
+                          className="p-2 text-gray-400 border border-gray-200 hover:text-red-600 hover:bg-red-50 hover:border-red-200 rounded-lg transition-colors"
                           title="削除"
                         >
-                          <Trash2 className="w-5 h-5" />
+                          <Trash2 className="w-4 h-4" />
                         </button>
+                      </div>
+                    </div>
+
+                    {/* Row 2: Target Site & AI Model (2 lines) */}
+                    <div className="space-y-3 pt-3 border-t border-gray-100">
+                      {/* Target Site */}
+                      <div className="flex items-center space-x-3">
+                        <div className="w-8 h-8 rounded-full bg-white border border-gray-100 flex items-center justify-center shadow-sm flex-shrink-0">
+                          <Globe className="w-4 h-4 text-blue-500" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-0.5">Target Site</div>
+                          <div className="text-sm font-bold text-gray-900 leading-tight whitespace-nowrap overflow-hidden text-ellipsis" title={getWordPressName(schedule.wp_config_id)}>
+                            {getWordPressName(schedule.wp_config_id)}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* AI Model */}
+                      <div className="flex items-center space-x-3">
+                        <div className="w-8 h-8 rounded-full bg-white border border-gray-100 flex items-center justify-center shadow-sm flex-shrink-0">
+                          <Tag className="w-4 h-4 text-purple-500" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-0.5">AI Model</div>
+                          <div
+                            className="text-sm font-bold text-gray-900 leading-tight whitespace-nowrap truncate"
+                            title={getScheduleAIName(schedule)}
+                          >
+                            {getScheduleAIName(schedule)}
+                          </div>
+                        </div>
                       </div>
                     </div>
 
@@ -1127,11 +1397,13 @@ export const Scheduler: React.FC = () => {
 
                         <div className="flex items-center space-x-2 text-sm">
                           <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Image:</span>
-                          <span className={`text-xs px-2 py-0.5 rounded border ${(schedule.image_generation_enabled ?? true)
+                          <span className={`text-xs px-2 py-0.5 rounded border ${(schedule.image_generation_enabled ?? false)
                             ? 'text-blue-700 bg-blue-50 border-blue-100'
                             : 'text-gray-600 bg-gray-50 border-gray-200'
                             }`}>
-                            {(schedule.image_generation_enabled ?? true) ? 'Enabled' : 'Disabled'}
+                            {(schedule.image_generation_enabled ?? false)
+                              ? `Enabled (${schedule.images_per_article ?? 0}枚)`
+                              : 'Disabled'}
                           </span>
                         </div>
 
@@ -1159,27 +1431,45 @@ export const Scheduler: React.FC = () => {
                           <Tag className="w-4 h-4 mr-2 text-blue-500" />
                           ターゲットキーワード ({keywordsList.length})
                         </h4>
-                        <span className="text-xs text-gray-500">
-                          {usedList.length} / {keywordsList.length} 消化済み
-                        </span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-gray-500">
+                            {usedList.length} / {keywordsList.length} 消化済み
+                          </span>
+                          {schedule.id && usedList.length > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => void handleResetUsedKeywords(schedule.id!, keywordsList)}
+                              className="text-xs px-2 py-1 rounded border border-amber-200 text-amber-700 bg-amber-50 hover:bg-amber-100 transition-colors"
+                              title="キーワード消化を一括解除"
+                            >
+                              解除
+                            </button>
+                          )}
+                        </div>
                       </div>
                       <div className="flex flex-wrap gap-2">
                         {keywordsList.map((k, i) => {
                           const isUsed = usedList.includes(k);
                           return (
-                            <span
+                            <button
+                              type="button"
                               key={i}
+                              onClick={() => {
+                                if (isUsed && schedule.id) {
+                                  void handleRestoreKeyword(schedule.id, k);
+                                }
+                              }}
                               className={`
                             px-2.5 py-1 rounded text-xs font-medium transition-colors border select-none
                             ${isUsed
-                                  ? 'bg-gray-100 text-gray-400 border-gray-200 decoration-gray-400 line-through'
+                                  ? 'bg-gray-100 text-gray-400 border-gray-200 decoration-gray-400 line-through cursor-pointer hover:bg-amber-50 hover:text-amber-700 hover:border-amber-200'
                                   : 'bg-white text-gray-700 border-blue-200 shadow-sm hover:border-blue-400 hover:text-blue-600'
                                 }
                           `}
-                              title={isUsed ? '記事作成済み' : '未作成'}
+                              title={isUsed ? 'クリックで未使用に戻す' : '未作成'}
                             >
                               {k}
-                            </span>
+                            </button>
                           );
                         })}
                         {keywordsList.length === 0 && (

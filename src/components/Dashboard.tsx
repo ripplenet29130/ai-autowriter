@@ -213,9 +213,23 @@ export const Dashboard: React.FC = () => {
   const aiNameById = (aiConfigId: string) => {
     const config = aiConfigs.find((item) => item.id === aiConfigId);
     if (!config) return '未設定AI';
-    if (config.provider === 'openai') return 'OpenAI';
-    if (config.provider === 'claude') return 'Claude';
-    return 'Gemini';
+    if (config.provider === 'openai') return `OpenAI (${config.model})`;
+    if (config.provider === 'claude') return `Claude (${config.model})`;
+    return `Gemini (${config.model})`;
+  };
+
+  const aiNameBySchedule = (schedule: ScheduleSetting) => {
+    if (schedule.ai_provider_override && schedule.ai_model_override) {
+      const providerName = schedule.ai_provider_override === 'openai'
+        ? 'OpenAI'
+        : schedule.ai_provider_override === 'claude'
+          ? 'Claude'
+          : schedule.ai_provider_override === 'gemini'
+            ? 'Gemini'
+            : schedule.ai_provider_override;
+      return `${providerName} (${schedule.ai_model_override})`;
+    }
+    return aiNameById(schedule.ai_config_id);
   };
 
   const openSchedulerEditor = (scheduleId?: string) => {
@@ -328,7 +342,7 @@ export const Dashboard: React.FC = () => {
                             {keywordInfo.primary}
                             {keywordInfo.restCount > 0 ? ` +${keywordInfo.restCount}件` : ''}
                           </div>
-                          <div className="text-xs text-gray-500">{aiNameById(schedule.ai_config_id)}</div>
+                          <div className="text-xs text-gray-500">{aiNameBySchedule(schedule)}</div>
                         </div>
                       </div>
                     </div>

@@ -56,6 +56,7 @@ export const MultiStepGenerator: React.FC<MultiStepGeneratorProps> = ({
     reorderSections,
     updateArticle,
     previousStep,
+    goToStep,
     keywordPreferences,
     toggleKeywordPreference,
     addKeywordPreference,
@@ -63,11 +64,18 @@ export const MultiStepGenerator: React.FC<MultiStepGeneratorProps> = ({
 
   const [hasStarted, setHasStarted] = useState(false);
   const [localSelectedTitle, setLocalSelectedTitle] = useState<string | null>(selectedTitle || null);
-  const shouldSkipTitleSelection = Boolean((localSelectedTitle || '').trim());
+  const shouldAutoSkipTitleSelection = Boolean((selectedTitle || '').trim());
 
   const completedSteps: GenerationStep[] = stepResults
     .filter((r) => r.status === 'completed')
     .map((r) => r.step);
+  const visualCompletedSteps: GenerationStep[] = (() => {
+    const stepSet = new Set<GenerationStep>(completedSteps);
+    if (shouldAutoSkipTitleSelection && (currentStep >= 3 || stepSet.has(3) || stepSet.has(4))) {
+      stepSet.add(2);
+    }
+    return Array.from(stepSet.values()) as GenerationStep[];
+  })();
 
   useEffect(() => {
     if (!hasStarted) {
@@ -81,6 +89,12 @@ export const MultiStepGenerator: React.FC<MultiStepGeneratorProps> = ({
   useEffect(() => {
     setLocalSelectedTitle(selectedTitle || null);
   }, [selectedTitle]);
+
+  useEffect(() => {
+    if (shouldAutoSkipTitleSelection && currentStep === 2) {
+      goToStep(3);
+    }
+  }, [shouldAutoSkipTitleSelection, currentStep, goToStep]);
 
   const handleStep1 = async () => {
     if (trendData) return;
@@ -161,25 +175,21 @@ export const MultiStepGenerator: React.FC<MultiStepGeneratorProps> = ({
           <TrendAnalysisStep
             trendData={trendData}
             isLoading={isGenerating}
-            onNext={() => void (shouldSkipTitleSelection ? handleStep3Generate() : handleStep2Generate())}
+            onNext={() => void (shouldAutoSkipTitleSelection ? handleStep3Generate() : handleStep2Generate())}
             onBack={onBack}
+            nextLabel={shouldAutoSkipTitleSelection ? '見出し作成へ進む' : 'タイトル生成へ進む'}
             keywordPreferences={keywordPreferences}
             onKeywordToggle={toggleKeywordPreference}
             onAddKeyword={addKeywordPreference}
           />
         );
       case 2:
-        if (shouldSkipTitleSelection) {
+        if (shouldAutoSkipTitleSelection) {
           return (
-            <TrendAnalysisStep
-              trendData={trendData}
-              isLoading={isGenerating}
-              onNext={() => void handleStep3Generate()}
-              onBack={onBack}
-              keywordPreferences={keywordPreferences}
-              onKeywordToggle={toggleKeywordPreference}
-              onAddKeyword={addKeywordPreference}
-            />
+            <div className="flex flex-col items-center justify-center py-16">
+              <div className="w-12 h-12 border-4 border-purple-200 border-t-purple-600 rounded-full animate-spin mb-4" />
+              <p className="text-lg font-medium text-gray-900">構成作成へ移動中...</p>
+            </div>
           );
         }
 
@@ -208,7 +218,7 @@ export const MultiStepGenerator: React.FC<MultiStepGeneratorProps> = ({
             onRemoveSection={removeSection}
             onReorderSections={reorderSections}
             onNext={() => void handleStep4Generate()}
-            onBack={previousStep}
+            onBack={shouldAutoSkipTitleSelection ? () => goToStep(1) : previousStep}
           />
         );
       case 4:
@@ -246,10 +256,8 @@ export const MultiStepGenerator: React.FC<MultiStepGeneratorProps> = ({
       </div>
 
       <StepIndicator
-        currentStep={(currentStep === 1 ? 1 : currentStep === 2 ? 1 : currentStep === 3 ? 2 : 3) as any}
-        completedSteps={completedSteps
-          .map((s) => (s === 2 ? 1 : s === 3 ? 2 : s === 4 ? 3 : 0))
-          .filter((s) => s > 0) as any}
+        currentStep={currentStep}
+        completedSteps={visualCompletedSteps}
       />
 
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">{renderCurrentStep()}</div>

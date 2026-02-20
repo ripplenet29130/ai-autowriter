@@ -2,58 +2,136 @@ import { supabase } from './supabaseClient';
 import { ScheduleSetting } from '../types';
 
 class ScheduleService {
-    private extractMissingColumn(error: any): string | null {
-        const message = String(error?.message || '');
-        const match = message.match(/Could not find the '([^']+)' column/i);
-        return match?.[1] || null;
+    private readonly maxSchemaRetryCount = 48;
+    private readonly schemaOptionalColumns = [
+        'ai_provider_override',
+        'ai_model_override',
+        'image_generation_enabled',
+        'images_per_article',
+        'chatwork_message_template',
+        'keyword_set_id',
+        'title_set_id',
+        'generation_mode',
+        'enable_fact_check',
+        'fact_check_note',
+    ] as const;
+
+    private getErrorText(error: any): string {
+        return [
+            String(error?.message || ''),
+            String(error?.details || ''),
+            String(error?.hint || ''),
+            String(error?.error_description || ''),
+        ].join(' | ');
     }
 
-    /**
-     * スケジュールを新規作成
-     */
+    private extractMissingColumn(error: any): string | null {
+        const message = this.getErrorText(error);
+        const patterns = [
+            /Could not find the '([^']+)' column/i,
+            /column ["']([^"']+)["'] of relation ["'][^"']+["'] does not exist/i,
+            /column ["']?([a-zA-Z0-9_]+)["']? does not exist/i,
+            /record ["'][^"']+["'] has no field ["']([^"']+)["']/i,
+            /schema cache.*column ["']([^"']+)["']/i,
+        ];
+
+        for (const pattern of patterns) {
+            const match = message.match(pattern);
+            if (match?.[1]) return match[1];
+        }
+        return null;
+    }
+
+    private isSchemaMismatchError(error: any): boolean {
+        const text = this.getErrorText(error).toLowerCase();
+        return text.includes('schema cache')
+            || (text.includes('column') && text.includes('does not exist'))
+            || text.includes('could not find the');
+    }
+
+    private dropFirstOptionalColumn(payload: Record<string, any>): string | null {
+        for (const column of this.schemaOptionalColumns) {
+            if (Object.prototype.hasOwnProperty.call(payload, column)) {
+                delete payload[column];
+                return column;
+            }
+        }
+        return null;
+    }
+
     async createSchedule(schedule: Omit<ScheduleSetting, 'id' | 'created_at' | 'updated_at'>): Promise<ScheduleSetting> {
         if (!supabase) {
             throw new Error('Supabase is not initialized');
         }
 
-        const { data, error } = await supabase
-            .from('schedule_settings')
-            .insert({
-                ai_config_id: schedule.ai_config_id,
-                wp_config_id: schedule.wp_config_id,
-                post_time: schedule.post_time,
-                frequency: schedule.frequency,
-                status: schedule.status,
-                keyword: schedule.keyword,
-                related_keywords: schedule.related_keywords,
-                post_status: schedule.post_status,
-                start_date: schedule.start_date || null,
-                end_date: schedule.end_date || null,
-                chatwork_room_id: schedule.chatwork_room_id || null,
-                prompt_set_id: schedule.prompt_set_id || null,
-                target_word_count: schedule.target_word_count,
-                writing_tone: schedule.writing_tone,
-                keyword_set_id: schedule.keyword_set_id || null,
-                title_set_id: schedule.title_set_id || null,
-                generation_mode: schedule.generation_mode || 'keyword',
-                enable_fact_check: schedule.enable_fact_check || false,
-                fact_check_note: schedule.fact_check_note || null,
-                image_generation_enabled: schedule.image_generation_enabled ?? true,
-            })
-            .select()
-            .single();
+        let insertPayload: Record<string, any> = {
+            ai_config_id: schedule.ai_config_id,
+            ai_provider_override: schedule.ai_provider_override || null,
+            ai_model_override: schedule.ai_model_override || null,
+            wp_config_id: schedule.wp_config_id,
+            post_time: schedule.post_time,
+            frequency: schedule.frequency,
+            status: schedule.status,
+            keyword: schedule.keyword,
+            related_keywords: schedule.related_keywords,
+            post_status: schedule.post_status,
+            start_date: schedule.start_date || null,
+            end_date: schedule.end_date || null,
+            chatwork_room_id: schedule.chatwork_room_id || null,
+            prompt_set_id: schedule.prompt_set_id || null,
+            target_word_count: schedule.target_word_count,
+            writing_tone: schedule.writing_tone,
+            keyword_set_id: schedule.keyword_set_id || null,
+            title_set_id: schedule.title_set_id || null,
+            generation_mode: schedule.generation_mode || 'keyword',
+            enable_fact_check: schedule.enable_fact_check || false,
+            fact_check_note: schedule.fact_check_note || null,
+            image_generation_enabled: schedule.image_generation_enabled ?? false,
+            images_per_article: schedule.images_per_article ?? 0,
+        };
 
-        if (error) {
+        const maxRetries = Math.max(this.maxSchemaRetryCount, Object.keys(insertPayload).length + 2);
+        for (let i = 0; i < maxRetries; i += 1) {
+            if (Object.keys(insertPayload).length === 0) {
+                throw new Error('スケジュールの作成に失敗しました: 送信可能なカラムがありません。DBスキーマを更新してください。');
+            }
+
+            const { data, error } = await supabase
+                .from('schedule_settings')
+                .insert(insertPayload)
+                .select()
+                .single();
+
+            if (!error) {
+                return data;
+            }
+
+            const missingColumn = this.extractMissingColumn(error);
+            if (missingColumn && Object.prototype.hasOwnProperty.call(insertPayload, missingColumn)) {
+                console.warn(`createSchedule: retrying without unknown column "${missingColumn}"`);
+                const nextPayload = { ...insertPayload };
+                delete nextPayload[missingColumn];
+                insertPayload = nextPayload;
+                continue;
+            }
+
+            if (this.isSchemaMismatchError(error)) {
+                const nextPayload = { ...insertPayload };
+                const dropped = this.dropFirstOptionalColumn(nextPayload);
+                if (dropped) {
+                    console.warn(`createSchedule: schema mismatch fallback dropped optional column "${dropped}"`);
+                    insertPayload = nextPayload;
+                    continue;
+                }
+            }
+
             console.error('Error creating schedule:', error);
-            throw new Error(`スケジュールの作成に失敗しました: ${error.message}`);
+            throw new Error(`スケジュールの作成に失敗しました: ${this.getErrorText(error)}`);
         }
 
-        return data;
+        throw new Error('スケジュールの作成に失敗しました: DBスキーマが古い可能性があります。マイグレーションを適用してください。');
     }
 
-    /**
-     * 全スケジュールを取得
-     */
     async getSchedules(): Promise<ScheduleSetting[]> {
         if (!supabase) {
             console.error('getSchedules: Supabase is not initialized');
@@ -64,7 +142,6 @@ class ScheduleService {
         const { data, error } = await supabase
             .from('schedule_settings')
             .select('*');
-        // .order('created_at', { ascending: false });
 
         if (error) {
             console.error('getSchedules: Error fetching schedules:', error);
@@ -75,9 +152,6 @@ class ScheduleService {
         return data || [];
     }
 
-    /**
-     * 特定のスケジュールを取得
-     */
     async getScheduleById(id: string): Promise<ScheduleSetting | null> {
         if (!supabase) {
             throw new Error('Supabase is not initialized');
@@ -97,15 +171,11 @@ class ScheduleService {
         return data;
     }
 
-    /**
-     * スケジュールを更新
-     */
     async updateSchedule(id: string, updates: Partial<ScheduleSetting>): Promise<ScheduleSetting> {
         if (!supabase) {
             throw new Error('Supabase is not initialized');
         }
 
-        // Clean up date and uuid fields
         const cleanUpdates = { ...updates };
         if (cleanUpdates.start_date === '') cleanUpdates.start_date = null as any;
         if (cleanUpdates.end_date === '') cleanUpdates.end_date = null as any;
@@ -113,11 +183,17 @@ class ScheduleService {
         if (cleanUpdates.chatwork_room_id === '') cleanUpdates.chatwork_room_id = null as any;
         if (cleanUpdates.keyword_set_id === '') cleanUpdates.keyword_set_id = null as any;
         if (cleanUpdates.title_set_id === '') cleanUpdates.title_set_id = null as any;
-
+        if (cleanUpdates.ai_provider_override === '') cleanUpdates.ai_provider_override = null as any;
+        if (cleanUpdates.ai_model_override === '') cleanUpdates.ai_model_override = null as any;
 
         let updatePayload: Record<string, any> = { ...cleanUpdates };
 
-        for (let i = 0; i < 3; i += 1) {
+        const maxRetries = Math.max(this.maxSchemaRetryCount, Object.keys(updatePayload).length + 2);
+        for (let i = 0; i < maxRetries; i += 1) {
+            if (Object.keys(updatePayload).length === 0) {
+                throw new Error('スケジュールの更新に失敗しました: 更新可能なカラムがありません。DBスキーマを更新してください。');
+            }
+
             const { data, error } = await supabase
                 .from('schedule_settings')
                 .update(updatePayload)
@@ -130,23 +206,31 @@ class ScheduleService {
             }
 
             const missingColumn = this.extractMissingColumn(error);
-            if (!missingColumn || !Object.prototype.hasOwnProperty.call(updatePayload, missingColumn)) {
-                console.error('Error updating schedule:', error);
-                throw new Error(`スケジュールの更新に失敗しました: ${error.message}`);
+            if (missingColumn && Object.prototype.hasOwnProperty.call(updatePayload, missingColumn)) {
+                console.warn(`updateSchedule: retrying without unknown column "${missingColumn}"`);
+                const nextPayload = { ...updatePayload };
+                delete nextPayload[missingColumn];
+                updatePayload = nextPayload;
+                continue;
             }
 
-            console.warn(`updateSchedule: retrying without unknown column "${missingColumn}"`);
-            const nextPayload = { ...updatePayload };
-            delete nextPayload[missingColumn];
-            updatePayload = nextPayload;
+            if (this.isSchemaMismatchError(error)) {
+                const nextPayload = { ...updatePayload };
+                const dropped = this.dropFirstOptionalColumn(nextPayload);
+                if (dropped) {
+                    console.warn(`updateSchedule: schema mismatch fallback dropped optional column "${dropped}"`);
+                    updatePayload = nextPayload;
+                    continue;
+                }
+            }
+
+            console.error('Error updating schedule:', error);
+            throw new Error(`スケジュールの更新に失敗しました: ${this.getErrorText(error)}`);
         }
 
-        throw new Error('スケジュールの更新に失敗しました: schema mismatch');
+        throw new Error('スケジュールの更新に失敗しました: DBスキーマが古い可能性があります。マイグレーションを適用してください。');
     }
 
-    /**
-     * スケジュールを削除
-     */
     async deleteSchedule(id: string): Promise<void> {
         if (!supabase) {
             throw new Error('Supabase is not initialized');
@@ -163,21 +247,15 @@ class ScheduleService {
         }
     }
 
-    /**
-     * スケジュールのステータスを切り替え
-     */
     async toggleScheduleStatus(id: string): Promise<ScheduleSetting> {
         const schedule = await this.getScheduleById(id);
         if (!schedule) {
-            throw new Error('スケジュールが見つかりません');
+            throw new Error('対象のスケジュールが見つかりません');
         }
 
         return this.updateSchedule(id, { status: !schedule.status });
     }
 
-    /**
-     * WordPress設定IDに紐づくスケジュールを取得
-     */
     async getSchedulesByWpConfigId(wpConfigId: string): Promise<ScheduleSetting[]> {
         if (!supabase) {
             throw new Error('Supabase is not initialized');
@@ -197,9 +275,6 @@ class ScheduleService {
         return data || [];
     }
 
-    /**
-     * AI設定IDに紐づくスケジュールを取得
-     */
     async getSchedulesByAiConfigId(aiConfigId: string): Promise<ScheduleSetting[]> {
         if (!supabase) {
             throw new Error('Supabase is not initialized');
@@ -218,9 +293,7 @@ class ScheduleService {
 
         return data || [];
     }
-    /**
-     * 特定のスケジュールで使用済みのキーワードを取得
-     */
+
     async getUsedKeywords(scheduleId: string): Promise<string[]> {
         if (!supabase) {
             throw new Error('Supabase is not initialized');
@@ -233,16 +306,55 @@ class ScheduleService {
 
         if (error) {
             console.error('Error fetching used keywords:', error);
-            // エラーでもUIを壊さないために空配列を返す
             return [];
         }
 
-        return data.map(item => item.keyword_used);
+        return (data || []).map((item: any) => item.keyword_used);
     }
 
-    /**
-     * 特定のスケジュールで使用済みのタイトルを取得
-     */
+    async restoreKeyword(scheduleId: string, keyword: string): Promise<void> {
+        if (!supabase) {
+            throw new Error('Supabase is not initialized');
+        }
+
+        const normalized = String(keyword || '').trim();
+        if (!normalized) return;
+
+        const { error } = await supabase
+            .from('execution_history')
+            .delete()
+            .eq('schedule_id', scheduleId)
+            .eq('keyword_used', normalized);
+
+        if (error) {
+            console.error('Error restoring keyword:', error);
+            throw new Error(`キーワード復活に失敗しました: ${error.message}`);
+        }
+    }
+
+    async resetUsedKeywords(scheduleId: string, keywords: string[]): Promise<void> {
+        if (!supabase) {
+            throw new Error('Supabase is not initialized');
+        }
+
+        const targets = (keywords || [])
+            .map((k) => String(k || '').trim())
+            .filter((k) => k.length > 0);
+
+        if (targets.length === 0) return;
+
+        const { error } = await supabase
+            .from('execution_history')
+            .delete()
+            .eq('schedule_id', scheduleId)
+            .in('keyword_used', targets);
+
+        if (error) {
+            console.error('Error resetting used keywords:', error);
+            throw new Error(`キーワード消化の解除に失敗しました: ${error.message}`);
+        }
+    }
+
     async getUsedTitles(scheduleId: string): Promise<string[]> {
         if (!supabase) {
             throw new Error('Supabase is not initialized');
@@ -258,12 +370,9 @@ class ScheduleService {
             return [];
         }
 
-        return data.map(item => item.article_title);
+        return (data || []).map((item: any) => item.article_title);
     }
 
-    /**
-     * 特定のスケジュールの最終実行日時を取得
-     */
     async getLastExecution(scheduleId: string): Promise<string | null> {
         if (!supabase) {
             throw new Error('Supabase is not initialized');

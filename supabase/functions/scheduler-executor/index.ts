@@ -3,9 +3,9 @@ import { DEFAULT_TARGET_WORD_COUNT } from '../../../src/shared/generationPolicy.
 import {
   countGeneratedChars,
   generateArticleFromOutlineWithSharedCore,
-  generateOutlineWithSharedCore,
+  generateOutlineWithAutoModeStyle,
 } from '../../../src/shared/articleGenerationCore.ts';
-import { scoreGenerationRegression } from '../../../src/shared/generationRegressionScoring.ts';
+import { generateTitleSuggestionsWithSharedCore } from '../../../src/shared/titleGenerationCore.ts';
 import {
   applyFactCheckCorrections,
   extractFactsFromContent,
@@ -44,6 +44,8 @@ interface Schedule {
   id: string;
   user_id?: string;
   ai_config_id: string;
+  ai_provider_override?: string;
+  ai_model_override?: string;
   wp_config_id: string;
   post_time: string;
   frequency: string;
@@ -60,8 +62,8 @@ interface Schedule {
   title_set_id?: string;
   generation_mode?: 'keyword' | 'title' | 'both';
   keyword_set_id?: string;
-  ab_test_enabled?: boolean;
   image_generation_enabled?: boolean;
+  images_per_article?: number;
 }
 
 function parseJstDate(input: string): Date | null {
@@ -98,8 +100,40 @@ interface AIConfig {
   model: string;
   temperature: number;
   max_tokens: number;
+  is_active?: boolean;
   image_enabled?: boolean;
   images_per_article?: number;
+}
+
+type WritingTone = 'professional' | 'casual' | 'technical' | 'friendly';
+
+const INVALID_GEMINI_MODELS = new Set([
+  'gemini-1.0-pro',
+  'gemini-1.5-pro-latest',
+  'gemini-3.0-pro',
+  'gemini-3.0-flash',
+]);
+
+function normalizeAiConfig(config: AIConfig): AIConfig {
+  const provider = String(config.provider || '').toLowerCase();
+  if (provider !== 'gemini') return config;
+  if (!INVALID_GEMINI_MODELS.has(String(config.model || ''))) return config;
+  return { ...config, model: 'gemini-2.5-flash' };
+}
+
+function resolveWritingTone(value: unknown): WritingTone {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (
+    normalized === 'professional' ||
+    normalized === 'casual' ||
+    normalized === 'technical' ||
+    normalized === 'friendly'
+  ) {
+    return normalized;
+  }
+  if (normalized === 'desu_masu') return 'friendly';
+  if (normalized === 'da_dearu') return 'professional';
+  return 'professional';
 }
 
 type ModelRate = { input: number; output: number };
@@ -137,7 +171,8 @@ Deno.serve(async (req: Request) => {
 
     // 蜃ｦ逅・Ο繧ｸ繝・け繧帝撼蜷梧悄髢｢謨ｰ縺ｨ縺励※螳夂ｾｩ・医ヰ繝・け繧ｰ繝ｩ繧ｦ繝ｳ繝牙ｮ溯｡檎畑・・
     const processSchedules = async () => {
-      console.log('Scheduler execution started:', new Date().toISOString());
+      const schedulerStartTime = Date.now();
+      console.log('Scheduler execution started:', new Date(schedulerStartTime).toISOString());
       const stats = {
         totalActive: 0,
         considered: 0,
@@ -155,16 +190,17 @@ Deno.serve(async (req: Request) => {
         .from('ai_configs')
         .select('*')
         .order('is_active', { ascending: false })
-        .order('created_at', { ascending: false })
-        .limit(1);
+        .order('created_at', { ascending: false });
 
       if (aiError || !aiConfigs || aiConfigs.length === 0) {
         console.error('No AI config found:', aiError);
         return stats;
       }
 
-      const aiConfig: AIConfig = aiConfigs[0];
-      console.log('Using AI config:', aiConfig.provider, aiConfig.model);
+      const normalizedAiConfigs = (aiConfigs as AIConfig[]).map((config) => normalizeAiConfig(config));
+      const activeAiConfig = normalizedAiConfigs.find((config) => config.is_active) || normalizedAiConfigs[0];
+      const aiConfigMap = new Map(normalizedAiConfigs.map((config) => [config.id, config]));
+      console.log('Default active AI config:', activeAiConfig.provider, activeAiConfig.model);
 
       // 1.5 蜷・ｨｮAPI繝医・繧ｯ繝ｳ繝ｻ繧ｭ繝ｼ縺ｮ蜿門ｾ・
       let chatworkApiToken: string | null = null;
@@ -173,6 +209,7 @@ Deno.serve(async (req: Request) => {
       let searchEngineId: string | null = null;
       let imageCostUsdPerImage = 0.04;
       let maxPostsPerSitePerRun = 1;
+      let maxTotalPostsPerRun = 1;
 
       const { data: appSettings, error: appSettingsError } = await supabase
         .from('app_settings')
@@ -183,7 +220,8 @@ Deno.serve(async (req: Request) => {
           'google_custom_search_api_key',
           'google_custom_search_engine_id',
           'image_cost_usd_per_image',
-          'scheduler_max_posts_per_run'
+          'scheduler_max_posts_per_run',
+          'scheduler_max_total_posts_per_run'
         ]);
 
       if (appSettingsError) {
@@ -206,6 +244,12 @@ Deno.serve(async (req: Request) => {
             const n = Number(setting.value);
             if (Number.isFinite(n) && n > 0) {
               maxPostsPerSitePerRun = Math.floor(n);
+            }
+          }
+          if (setting.key === 'scheduler_max_total_posts_per_run') {
+            const n = Number(setting.value);
+            if (Number.isFinite(n) && n > 0) {
+              maxTotalPostsPerRun = Math.floor(n);
             }
           }
         });
@@ -273,11 +317,16 @@ Deno.serve(async (req: Request) => {
         }
 
         if (!forceExecute && maxPostsPerSitePerRun > 0) {
-          const recentExecutionCount = await countExecutionsForWpConfigWithinMinutes(supabase, wpConfig.id, 2);
+          const siteThrottleMinutes = 1;
+          const recentExecutionCount = await countExecutionsForWpConfigWithinMinutes(
+            supabase,
+            wpConfig.id,
+            siteThrottleMinutes
+          );
           if (recentExecutionCount >= maxPostsPerSitePerRun) {
             stats.skipped += 1;
             console.log(
-              `Skipping schedule ${scheduleSetting.id}: site throttle active for ${wpConfig.id} (executions in last 2 min: ${recentExecutionCount}, limit per site: ${maxPostsPerSitePerRun})`
+              `Skipping schedule ${scheduleSetting.id}: site throttle active for ${wpConfig.id} (executions in last ${siteThrottleMinutes} min: ${recentExecutionCount}, limit per site: ${maxPostsPerSitePerRun})`
             );
             continue;
           }
@@ -295,32 +344,55 @@ Deno.serve(async (req: Request) => {
 
         // Force execution guard: avoid duplicate posts from repeated manual triggers.
         if (forceExecute && shouldExecute && !allowDuplicateForce) {
-          const recentlyExecuted = await wasExecutedWithinMinutes(scheduleSetting.id, supabase, 10);
+          const recentlyExecuted = await wasExecutedWithinMinutes(scheduleSetting.id, supabase, 1);
           if (recentlyExecuted) {
             shouldExecute = false;
-            console.log(`Skipping force execution for ${wpConfig.name}: executed within last 10 minutes`);
+            console.log(`Skipping force execution for ${wpConfig.name}: executed within last 1 minute`);
           }
         }
 
         if (shouldExecute) {
+          if (!forceExecute && stats.executed >= maxTotalPostsPerRun) {
+            stats.skipped += 1;
+            console.log(
+              `Skipping schedule ${scheduleSetting.id}: max total posts per run reached (${maxTotalPostsPerRun})`
+            );
+            continue;
+          }
+
           console.log(`Executing schedule for ${wpConfig.name}`);
 
-          let effectiveAiConfig = aiConfig;
-          if (scheduleSetting.ai_config_id) {
-            const { data: specificAiConfig } = await supabase
-              .from('ai_configs')
-              .select('*')
-              .eq('id', scheduleSetting.ai_config_id)
-              .single();
+          // Prefer schedule-specific AI config. Fall back to the active config.
+          const requestedAiConfigId = scheduleSetting.ai_config_id;
+          const requestedAiConfig = requestedAiConfigId ? aiConfigMap.get(requestedAiConfigId) : null;
+          const baseAiConfig = requestedAiConfig || activeAiConfig;
+          const overrideProvider = String(scheduleSetting.ai_provider_override || '').trim().toLowerCase();
+          const overrideModel = String(scheduleSetting.ai_model_override || '').trim();
+          let effectiveAiConfig = baseAiConfig;
 
-            if (specificAiConfig) {
-              effectiveAiConfig = specificAiConfig as AIConfig;
-              console.log(`Using schedule-specific AI config: ${effectiveAiConfig.provider} (${effectiveAiConfig.model})`);
-            } else {
-              console.error(`Defined AI Config ID ${scheduleSetting.ai_config_id} not found.`);
-              stats.failed += 1;
-              continue;
-            }
+          if (requestedAiConfig) {
+            console.log(
+              `Using schedule AI config: ${baseAiConfig.provider} (${baseAiConfig.model}) [${baseAiConfig.id}]`
+            );
+          } else if (requestedAiConfigId) {
+            console.warn(
+              `Schedule AI config not found (${requestedAiConfigId}). Falling back to active config ${activeAiConfig.id}`
+            );
+          } else {
+            console.log(`No schedule AI config specified. Using active config ${activeAiConfig.id}`);
+          }
+
+          if ((overrideProvider && !overrideModel) || (!overrideProvider && overrideModel)) {
+            console.warn(`Ignoring incomplete AI override for schedule ${scheduleSetting.id}: provider="${overrideProvider}" model="${overrideModel}"`);
+          } else if (overrideProvider && overrideModel) {
+            effectiveAiConfig = normalizeAiConfig({
+              ...baseAiConfig,
+              provider: overrideProvider,
+              model: overrideModel,
+            });
+            console.log(
+              `Applying schedule model override: ${effectiveAiConfig.provider} (${effectiveAiConfig.model}) [auth from ${baseAiConfig.id}]`
+            );
           }
 
           try {
@@ -333,7 +405,8 @@ Deno.serve(async (req: Request) => {
               serpApiKey,
               googleApiKey,
               searchEngineId,
-              imageCostUsdPerImage
+              imageCostUsdPerImage,
+              schedulerStartTime
             );
             stats.executed += 1;
             executedWpConfigIds.add(wpConfig.id);
@@ -349,19 +422,45 @@ Deno.serve(async (req: Request) => {
       return stats;
     };
 
-    const stats = await processSchedules();
+    // 4. Background Execution Logic using EdgeRuntime.waitUntil
+    // This allows returning a response immediately while processing continues in the background.
+    // Critical for preventing 504 Gateway Timeouts on long-running tasks.
+    const processPromise = processSchedules().catch((err) => {
+      console.error('Background processing error:', err);
+    });
 
-    // 蜊ｳ蠎ｧ縺ｫ謌仙粥繝ｬ繧ｹ繝昴Φ繧ｹ繧定ｿ斐☆
-    return new Response(
-      JSON.stringify({
-        success: true,
-        mode: forceExecute ? 'force' : 'scheduled',
-        message: 'Scheduler processing completed.',
-        timestamp: new Date().toISOString(),
-        stats
-      }),
-      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    );
+    if (forceExecute) {
+      console.log('Starting background execution for Force Run');
+      // Supabase Edge Functions / Deno Deploy specific API
+      // @ts-ignore
+      EdgeRuntime.waitUntil(processPromise);
+
+      return new Response(
+        JSON.stringify({
+          success: true,
+          mode: 'background',
+          message: 'Request accepted. Processing started in background. Please check Execution History for results.',
+          timestamp: new Date().toISOString(),
+        }),
+        { status: 202, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    } else {
+      // For cron triggers, we can just await it (platform handles timeout differently)
+      // OR use waitUntil as well to be safe. Let's use await for cron to get logs in the same invocation if possible,
+      // but consistent behavior is better. Let's use waitUntil for everything to be safe.
+      // @ts-ignore
+      EdgeRuntime.waitUntil(processPromise);
+
+      return new Response(
+        JSON.stringify({
+          success: true,
+          mode: 'background',
+          message: 'Scheduled processing started in background.',
+          timestamp: new Date().toISOString(),
+        }),
+        { status: 202, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
 
   } catch (error: any) {
     console.error('Scheduler handler error:', error);
@@ -426,9 +525,8 @@ async function shouldExecuteNow(
   console.log(`[Freq Check] ${normalizedFreq}, Hours since: ${hoursSinceLastExecution.toFixed(1)}, Last day: ${lastExecutedDate}, Today: ${currentDate}`);
 
   if (normalizedFreq === 'daily') {
-    // Testing-friendly behavior: allow another daily run after 10 minutes.
-    // This still blocks back-to-back duplicates within the same schedule window.
-    if (hoursSinceLastExecution >= (10 / 60)) {
+    // Strict daily behavior in JST: execute only when the date has changed.
+    if (lastExecutedDate !== currentDate) {
       return true;
     }
   } else if (normalizedFreq === 'weekly' && hoursSinceLastExecution >= 24 * 6) {
@@ -511,14 +609,13 @@ function estimateExecutionCostBreakdown(params: {
   provider: string;
   model: string;
   generatedChars: number;
-  abTestEnabled: boolean;
   competitorResearchUsed: boolean;
   factCheckItemsChecked: number;
   imagesGenerated: number;
   imageUnitCostUsd: number;
 }) {
   const rate = resolveAiModelRate(params.provider, params.model);
-  const generationMultiplier = params.abTestEnabled ? 2 : 1;
+  const generationMultiplier = 1;
 
   // Rough token estimate assumptions for JP content:
   // 1000 chars ~= input 300 tokens + output 700 tokens.
@@ -645,9 +742,9 @@ async function callAI(
     const data = await response.json();
     const text = Array.isArray(data?.content)
       ? data.content
-          .map((part: any) => (typeof part?.text === 'string' ? part.text : ''))
-          .join('\n')
-          .trim()
+        .map((part: any) => (typeof part?.text === 'string' ? part.text : ''))
+        .join('\n')
+        .trim()
       : '';
     if (!text) throw new Error('Claude API returned empty content');
     return text;
@@ -678,9 +775,9 @@ async function callAI(
     const parts = data?.candidates?.[0]?.content?.parts;
     const text = Array.isArray(parts)
       ? parts
-          .map((part: any) => (typeof part?.text === 'string' ? part.text : ''))
-          .join('\n')
-          .trim()
+        .map((part: any) => (typeof part?.text === 'string' ? part.text : ''))
+        .join('\n')
+        .trim()
       : '';
     if (!text) throw new Error('Gemini API returned empty content');
     return text;
@@ -689,7 +786,246 @@ async function callAI(
   throw new Error(`Unsupported AI provider: ${aiConfig.provider}`);
 }
 
-// 繧ｹ繧ｱ繧ｸ繝･繝ｼ繝ｫ螳溯｡鯉ｼ医・繝ｫ繝√せ繝・ャ繝礼函謌千沿・・
+// === 改修2: 関連キーワード抽出ヘルパー ===
+
+// 競合データから関連キーワードを抽出
+function extractRelatedKeywordsFromCompetitorData(
+  competitorData: any,
+  mainKeyword: string,
+  limit: number = 5
+): string[] {
+  if (!competitorData?.articles || competitorData.articles.length === 0) return [];
+
+  const wordFrequency = new Map<string, number>();
+  const mainKeywordLower = mainKeyword.toLowerCase();
+
+  for (const article of competitorData.articles) {
+    // 見出しからキーワードを抽出
+    const headings: string[] = article.headings || [];
+    for (const heading of headings) {
+      // 見出しを単語に分割して頻度カウント
+      const words = heading
+        .replace(/[【】「」『』（）()\[\]]/g, ' ')
+        .split(/[\s　,、・]+/)
+        .map((w: string) => w.trim())
+        .filter((w: string) => w.length >= 2 && w.length <= 20);
+
+      for (const word of words) {
+        if (word.toLowerCase() === mainKeywordLower) continue;
+        wordFrequency.set(word, (wordFrequency.get(word) || 0) + 1);
+      }
+    }
+
+    // metaDescriptionからもキーワードを抽出
+    if (article.metaDescription) {
+      const descWords = article.metaDescription
+        .replace(/[【】「」『』（）()\[\]。、！？]/g, ' ')
+        .split(/[\s　,]+/)
+        .map((w: string) => w.trim())
+        .filter((w: string) => w.length >= 2 && w.length <= 15);
+
+      for (const word of descWords) {
+        if (word.toLowerCase() === mainKeywordLower) continue;
+        wordFrequency.set(word, (wordFrequency.get(word) || 0) + 1);
+      }
+    }
+  }
+
+  // 出現頻度でソートし、上位を返す
+  return Array.from(wordFrequency.entries())
+    .filter(([, count]) => count >= 2) // 2回以上出現したもののみ
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit)
+    .map(([word]) => word);
+}
+
+function extractCompetitorHeadings(competitorData: any, limit: number = 15): string[] {
+  if (!competitorData?.articles || competitorData.articles.length === 0) return [];
+
+  const headings: string[] = [];
+  const seen = new Set<string>();
+
+  for (const article of competitorData.articles) {
+    const articleHeadings = Array.isArray(article?.headings) ? article.headings : [];
+
+    for (const heading of articleHeadings) {
+      const normalized = String(heading || '')
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+      if (!normalized || normalized.length < 3 || normalized.length > 120) continue;
+      const key = normalized.toLowerCase();
+      if (seen.has(key)) continue;
+
+      seen.add(key);
+      headings.push(normalized);
+      if (headings.length >= limit) return headings;
+    }
+  }
+
+  return headings;
+}
+
+// Google Custom Search APIで関連キーワードを取得
+async function fetchRelatedKeywordsViaCustomSearch(
+  keyword: string,
+  googleApiKey: string,
+  searchEngineId: string
+): Promise<string[]> {
+  try {
+    const url = `https://www.googleapis.com/customsearch/v1?key=${googleApiKey}&cx=${searchEngineId}&q=${encodeURIComponent(keyword)}&gl=jp&hl=ja&num=5`;
+    const res = await fetch(url);
+    if (!res.ok) return [];
+    const data = await res.json();
+    const items = data.items || [];
+
+    const keywords = new Set<string>();
+    for (const item of items) {
+      // タイトルとスニペットからキーワードを抽出
+      const text = `${item.title || ''} ${item.snippet || ''}`;
+      const words = text
+        .replace(/[【】「」『』（）()\[\]。、！？…]/g, ' ')
+        .split(/[\s　,]+/)
+        .map((w: string) => w.trim())
+        .filter((w: string) =>
+          w.length >= 2 &&
+          w.length <= 15 &&
+          w.toLowerCase() !== keyword.toLowerCase()
+        );
+      words.forEach((w: string) => keywords.add(w));
+    }
+
+    return Array.from(keywords).slice(0, 8);
+  } catch (err) {
+    console.warn('Google Custom Search keyword extraction failed:', err);
+    return [];
+  }
+}
+
+// === 改修4: AIタイトル生成ヘルパー（自動生成モード準拠） ===
+
+async function generateTitleWithAI(
+  keyword: string,
+  relatedKeywords: string[],
+  competitorTitles: string[],
+  aiConfig: AIConfig,
+  competitorData?: any
+): Promise<string> {
+  const TITLE_MIN_LENGTH = 24;
+  const TITLE_MAX_LENGTH = 68;
+
+  const normalizeTitle = (raw: string): string => {
+    let cleaned = String(raw || '').trim()
+      .replace(/^タイトル[:：]\s*/i, '')
+      .replace(/^["']|["']$/g, '');
+
+    // Remove leading/trailing brackets ONLY if they wrap the entire string
+    if (/^[「『【].*[」』】]$/.test(cleaned)) {
+      cleaned = cleaned.replace(/^[「『【]|([」』】])$/g, '');
+    }
+
+    // Fix unbalanced brackets at start (common AI artifact: "2026】" -> "2026")
+    cleaned = cleaned.replace(/^[^【]*】/, '');
+
+    return cleaned.replace(/\s+/g, ' ').trim();
+  };
+
+  const includesKeyword = (title: string, baseKeyword: string): boolean => {
+    const compactTitle = title.replace(/\s+/g, '');
+    const compactKeyword = baseKeyword.replace(/\s+/g, '');
+    if (compactKeyword && compactTitle.includes(compactKeyword)) return true;
+
+    const keywordTokens = baseKeyword
+      .split(/\s+/)
+      .map((t) => t.trim())
+      .filter((t) => t.length >= 2);
+    return keywordTokens.some((token) => compactTitle.includes(token));
+  };
+
+  const isGenericTitleOnly = (title: string, currentYear: number): boolean => {
+    const normalized = title.replace(/\s+/g, '');
+    const genericPattern = new RegExp(`^(?:${currentYear}年)?(?:最新版|最新|まとめ|完全版)$`);
+    return genericPattern.test(normalized);
+  };
+
+  const isValidSeoTitle = (title: string, baseKeyword: string, currentYear: number): boolean => {
+    const compactTitle = title.replace(/\s+/g, '');
+    const compactKeyword = baseKeyword.replace(/\s+/g, '');
+    const hasRedundantPattern = /(選び方|おすすめ|比較|評判|費用|ポイント)の\1/.test(compactTitle);
+    const repeatsWholeKeyword = compactKeyword.length >= 4 && compactTitle.includes(`${compactKeyword}の${compactKeyword}`);
+
+    if (!title) return false;
+    if (title.length < TITLE_MIN_LENGTH || title.length > TITLE_MAX_LENGTH) return false;
+    if (!includesKeyword(title, baseKeyword)) return false;
+    if (isGenericTitleOnly(title, currentYear)) return false;
+    if (hasRedundantPattern || repeatsWholeKeyword) return false;
+    if (/完全ガイド[｜|]\s*失敗しない選び方と費用比較/.test(title)) return false;
+    const hasFreshness = new RegExp(`${currentYear}年|最新版|最新`).test(title);
+    const hasReaderValue = /(選び方|比較|ポイント|費用|効果|注意点|評判|おすすめ|解説|ガイド|始め方)/.test(title);
+    if (!hasFreshness && !hasReaderValue) return false;
+    return true;
+  };
+
+  const buildFallbackTitle = (baseKeyword: string, currentYear: number): string => {
+    const compactKeyword = baseKeyword.replace(/\s+/g, ' ').trim();
+    const candidates = [
+      `${currentYear}年版 ${compactKeyword}の選び方｜後悔しない比較ポイント`,
+      `${currentYear}年最新 ${compactKeyword}を選ぶコツと注意点`,
+      `${compactKeyword}で迷わないための基礎知識と比較の視点（${currentYear}年版）`,
+      `${currentYear}年 ${compactKeyword}の評判と費用を整理する`,
+      `${compactKeyword}の比較ポイントを解説｜自分に合う選び方`,
+      `${currentYear}年版 ${compactKeyword}を始める前に知るべきこと`,
+    ];
+    const valid = candidates.filter((c) => c.length >= TITLE_MIN_LENGTH && c.length <= TITLE_MAX_LENGTH);
+    if (valid.length > 0) {
+      const randomIndex = Math.floor(Math.random() * valid.length);
+      return valid[randomIndex];
+    }
+    return `${currentYear}年版 ${compactKeyword}の選び方`;
+  };
+
+  const currentYear = new Date().getFullYear();
+  const competitorInputs = Array.isArray(competitorData?.articles) && competitorData.articles.length > 0
+    ? competitorData.articles
+      .slice(0, 6)
+      .map((article: any) => ({
+        title: String(article?.title || '').trim(),
+        headings: Array.isArray(article?.headings) ? article.headings.slice(0, 6) : [],
+      }))
+      .filter((item: any) => item.title.length > 0)
+    : competitorTitles
+      .slice(0, 6)
+      .map((title: string) => ({ title: String(title || '').trim() }))
+      .filter((item: any) => item.title.length > 0);
+
+  try {
+    const suggestions = await generateTitleSuggestionsWithSharedCore({
+      keyword,
+      relatedKeywords,
+      competitors: competitorInputs,
+      count: 6,
+      callAI: (prompt, maxTokens) => callAI(prompt, aiConfig, Math.max(600, maxTokens)),
+    });
+
+    for (const candidate of suggestions) {
+      const title = normalizeTitle(candidate.title);
+      if (!title) continue;
+      if (isValidSeoTitle(title, keyword, currentYear)) {
+        return title;
+      }
+      console.warn(`AI title rejected by validator: ${title}`);
+    }
+  } catch (err) {
+    console.warn('Shared title core failed, fallback title will be used:', err);
+  }
+
+  const fallbackTitle = buildFallbackTitle(keyword, currentYear);
+  console.warn(`Using fallback title: ${fallbackTitle}`);
+  return fallbackTitle;
+}
+
+// スケジュール実行（マルチステップ生成版）
 async function executeSchedule(
   schedule: Schedule,
   wpConfig: WordPressConfig,
@@ -699,7 +1035,8 @@ async function executeSchedule(
   serpApiKey: string | null,
   googleApiKey: string | null,
   searchEngineId: string | null,
-  imageCostUsdPerImage: number
+  imageCostUsdPerImage: number,
+  schedulerStartTime: number
 ) {
   // 1. 逕滓・繝｢繝ｼ繝峨↓蝓ｺ縺･縺・※繧ｿ繝ｼ繧ｲ繝・ヨ・医く繝ｼ繝ｯ繝ｼ繝峨∪縺溘・繧ｿ繧､繝医Ν・峨ｒ豎ｺ螳・
   let keyword = '';
@@ -728,8 +1065,8 @@ async function executeSchedule(
       throw new Error('有効なタイトルセットが見つかりません');
     }
   } else if (mode === 'both') {
-    // 荳｡譁ｹ菴ｿ逕ｨ縺ｮ蝣ｴ蜷茨ｼ壻ｻ雁屓縺ｯ邁｡譏鍋噪縺ｫ50%縺ｮ遒ｺ邇・〒繧ｿ繧､繝医Ν縲・0%縺ｧ繧ｭ繝ｼ繝ｯ繝ｼ繝峨→縺吶ｋ
-    const useTitle = Math.random() < 0.5;
+    // 両方モード: ランダムではなく決定的にタイトル優先、なければキーワードを使用。
+    const useTitle = Boolean(schedule.title_set_id);
 
     if (useTitle && schedule.title_set_id) {
       const { data: titleSet } = await supabase
@@ -781,7 +1118,7 @@ async function executeSchedule(
   let competitorData: any = null;
   if (serpApiKey) {
     try {
-      competitorData = await conductCompetitorResearch(keyword, serpApiKey, 5);
+      competitorData = await conductCompetitorResearchWithFallback(keyword, serpApiKey, 5);
       console.log(`Competitor research completed. Found ${competitorData.articles.length} articles`);
     } catch (researchError) {
       console.warn('Competitor research failed, proceeding without it:', researchError);
@@ -790,54 +1127,459 @@ async function executeSchedule(
     console.log('SerpAPI key not found. Skipping competitor research.');
   }
 
-  console.log(`Generating outline for: ${keyword}`);
+  // === 改修2: トレンド分析（関連キーワード取得） ===
+  console.log(`Enriching keywords for: ${keyword}`);
   const targetWordCount = schedule.target_word_count || DEFAULT_TARGET_WORD_COUNT;
-  const writingTone = schedule.writing_tone || 'desu_masu';
+  const writingTone = resolveWritingTone(schedule.writing_tone);
   const keywordArray = (schedule.keyword || '').split(',').map((k: string) => k.trim()).filter((k: string) => k);
-  const sectionKeywords = Array.from(new Set([keyword, ...keywordArray])).filter(Boolean);
-  const competitorHeadings = competitorData?.articles?.flatMap((a: any) => a.headings || []).slice(0, 15) || [];
 
+  // 関連キーワードを競合データ + Google Custom Search から収集
+  let relatedKeywords: string[] = [];
+
+  if (competitorData) {
+    const competitorKeywords = extractRelatedKeywordsFromCompetitorData(competitorData, keyword, 5);
+    relatedKeywords.push(...competitorKeywords);
+    console.log(`Extracted ${competitorKeywords.length} related keywords from competitor data`);
+  }
+
+  if (googleApiKey && searchEngineId) {
+    try {
+      const searchKeywords = await fetchRelatedKeywordsViaCustomSearch(keyword, googleApiKey, searchEngineId);
+      relatedKeywords.push(...searchKeywords);
+      console.log(`Fetched ${searchKeywords.length} related keywords from Google Custom Search`);
+    } catch (err) {
+      console.warn('Google Custom Search failed:', err);
+    }
+  }
+
+  // Keep keywords compact to avoid over-constraining each section.
+  // Use normalized dedupe so near-duplicates do not force unnatural repetition.
+  const sectionKeywordCandidates = [keyword, ...keywordArray, ...relatedKeywords]
+    .map((k) => String(k || '').trim())
+    .filter(Boolean);
+  const sectionKeywords: string[] = [];
+  const seenSectionKeywordNormalized = new Set<string>();
+  for (const candidate of sectionKeywordCandidates) {
+    const normalized = candidate.replace(/\s+/g, '').toLowerCase();
+    if (!normalized || seenSectionKeywordNormalized.has(normalized)) continue;
+    seenSectionKeywordNormalized.add(normalized);
+    sectionKeywords.push(candidate);
+    if (sectionKeywords.length >= 3) break;
+  }
+  console.log(`Final section keywords: ${sectionKeywords.join(', ')}`);
+  const competitorHeadings = extractCompetitorHeadings(competitorData, 15);
+  if (competitorHeadings.length > 0) {
+    console.log(`Extracted ${competitorHeadings.length} competitor headings for outline context`);
+  }
+
+  // === 改修4: AIタイトル生成 ===
+  if (!fixedTitle) {
+    const competitorTitles = (competitorData?.articles || []).map((a: any) => a.title).filter(Boolean);
+    const generatedTitle = await generateTitleWithAI(keyword, relatedKeywords, competitorTitles, aiConfig, competitorData);
+    fixedTitle = generatedTitle;
+    console.log(`AI-generated title: ${fixedTitle}`);
+  }
+
+  console.log(`Generating outline for: ${keyword}`);
   const runGeneration = async () => {
-    const outline = await generateOutlineWithSharedCore({
+    console.log('Generating outline with AI generator style...');
+    const instructionParts: string[] = [];
+    const customInstructionText = customInstructions.trim();
+    if (customInstructionText) instructionParts.push(customInstructionText);
+    if (relatedKeywords.length > 0) {
+      instructionParts.push(`関連キーワード候補: ${relatedKeywords.slice(0, 8).join('、')}`);
+    }
+    const effectiveCustomInstructions = instructionParts.join('\n\n').trim() || undefined;
+
+    const outline = await generateOutlineWithAutoModeStyle({
       keyword,
       targetWordCount,
       fixedTitle,
-      customInstructions,
+      customInstructions: effectiveCustomInstructions,
       competitorHeadings,
+      relatedKeywords,
+      tone: writingTone,
       callAI: (prompt, maxTokens) => callAI(prompt, aiConfig, maxTokens)
     });
+
     const generationResult = await generateArticleFromOutlineWithSharedCore({
       outline,
       keywords: sectionKeywords,
       tone: writingTone,
       targetWordCount,
-      customInstructions,
+      customInstructions: effectiveCustomInstructions,
       defaultMaxTokens: aiConfig.max_tokens || 2000,
-      qualityRetryCount: 1,
+      qualityRetryCount: 3,
       callAI: (prompt, maxTokens) => callAI(prompt, aiConfig, maxTokens)
     });
+
     return { outline, generationResult };
   };
 
-  const runAbTest = schedule.ab_test_enabled === true;
-  const scheduleImageGenerationEnabled = schedule.image_generation_enabled !== false;
-  const [schedulerRun, manualRun] = await Promise.all([
-    runGeneration(),
-    runAbTest ? runGeneration() : Promise.resolve(null)
-  ]);
-
+  const scheduleImageGenerationEnabled = schedule.image_generation_enabled === true;
+  const scheduleImagesPerArticle = Math.max(
+    0,
+    Math.min(10, Number.isFinite(Number(schedule.images_per_article)) ? Number(schedule.images_per_article) : Number(aiConfig.images_per_article ?? 0))
+  );
+  const schedulerRun = await runGeneration();
   const outline = schedulerRun.outline;
   const generationResult = schedulerRun.generationResult;
-  let regressionScores: ReturnType<typeof scoreGenerationRegression> | null = null;
-  if (manualRun) {
-    regressionScores = scoreGenerationRegression(manualRun.generationResult.fullContent, generationResult.fullContent);
-    console.log(`AB regression completed: overall=${regressionScores.overallScore}, structure=${regressionScores.structureSimilarity}, overlap=${regressionScores.overlapRate}`);
+
+  // === プログラム的クリーンアップ（確実に実行） ===
+  function cleanupContentArtifacts(content: string, articleTitle: string): string {
+    let text = String(content || '');
+
+    // 1. 見出しからコロンを除去（半角・全角両方）
+    // 末尾だけでなく、文中にある場合もスペースに置換（例: "AGA：特徴" -> "AGA 特徴"）
+    text = text.replace(/^(#{1,6}\s+.+?)[：:](.+)$/gm, '$1 $2').replace(/^(#{1,6}\s+.+?)[：:]\s*$/gm, '$1');
+
+    // 1.5 見出しの番号を除去（例: "## 1. 導入" -> "## 導入"）
+    text = text.replace(/^(#{1,6}\s+)\d+[\.．]\s*(.+)$/gm, '$1$2');
+
+    // 2. 本文冒頭にタイトルが含まれていたら除去 (強化版)
+    const lines = text.split('\n');
+    const firstNonEmpty = lines.findIndex(l => l.trim().length > 0);
+    if (firstNonEmpty !== -1) {
+      const firstLine = lines[firstNonEmpty].trim();
+      const normalize = (s: string) => s.replace(/[^\w\u3040-\u30ff\u3400-\u9fff\u4e00-\u9faf]/g, '').toLowerCase(); // 記号除去
+
+      const normalizedFirst = normalize(firstLine);
+      const normalizedTitle = normalize(articleTitle);
+
+      // タイトルそのもの、またはタイトル＋要約などのパターンを除去
+      // "20代のAGA" vs "20代AGA" -> normalization removes symbols but not particles.
+      // 簡易的な包含チェック
+      if (normalizedFirst.length > 0 && normalizedTitle.length > 0) {
+        if (normalizedFirst === normalizedTitle ||
+          normalizedFirst.startsWith(normalizedTitle) ||
+          normalizedTitle.startsWith(normalizedFirst) ||
+          (normalizedFirst.includes(normalizedTitle) && firstLine.length < articleTitle.length * 2) ||
+          (normalizedFirst.includes('要約') && normalizedFirst.includes(normalizedTitle.substring(0, Math.min(10, normalizedTitle.length))))
+        ) {
+          lines.splice(firstNonEmpty, 1);
+          text = lines.join('\n');
+        }
+      }
+    }
+
+    // 3. 空の見出し削除（見出しの直後に別の見出しが来るパターン）
+    text = text.replace(/^(#{1,6}\s+.+)\n+(?=#{1,6}\s+)/gm, (match, heading) => {
+      // 見出しの直後にまた見出し → この見出しは中身がないので削除
+      console.log('Removed empty heading:', heading.trim());
+      return '';
+    });
+
+    // 4. 「まとめ：」「結論：」プレフィックスの除去
+    text = text.replace(/^(まとめ|結論|総括)[：:]\s*/gm, '');
+
+    // 5. 連続する空行を2行まで制限
+    text = text.replace(/\n{3,}/g, '\n\n');
+
+    return text.trim();
+  }
+
+  // AIによる記事推敲（構造を維持しつつ読みやすさ向上）
+  async function refineContentWithAI(
+    content: string,
+    title: string,
+    keyword: string,
+    aiConfig: AIConfig
+  ): Promise<string> {
+    if (!content || content.length < 100) return content;
+
+    console.log('Refining content with AI...');
+
+    const prompt = `
+あなたはプロの編集者です。以下のブログ記事の原稿を推敲してください。
+
+【絶対に守るルール】
+- 記事の構成（見出しの順番、セクション数）は一切変えないでください
+- すべての ## や ### の見出し行はそのまま残してください（削除・統合禁止）
+- 見出しのMarkdown記法（## や ###）は絶対に削除しないでください
+- 文章の意味や情報は変えないでください
+
+【やってほしいこと】
+1. 長い段落（3文以上続く部分）を意味の区切りで分割し、空行を入れて読みやすくする
+2. 箇条書きの前後に空行を入れる
+3. 文章の接続が不自然な箇所を軽く整える（意味は変えない）
+
+【原稿】
+${content}
+
+【出力】
+修正後のMarkdownのみを出力してください。コードブロックで囲まないでください。
+`.trim();
+
+    try {
+      const result = await callAI(prompt, aiConfig, 4000);
+      // 安全チェック: ## が元の記事にあるのに結果にない場合は採用しない
+      const originalH2Count = (content.match(/^##\s+/gm) || []).length;
+      const resultH2Count = (result.match(/^##\s+/gm) || []).length;
+      if (originalH2Count > 0 && resultH2Count === 0) {
+        console.warn('AI refinement stripped all headings, discarding result');
+        return content;
+      }
+
+      const originalNonSummaryHeadingCount = countNonSummaryHeadings(content);
+      const resultNonSummaryHeadingCount = countNonSummaryHeadings(result);
+      if (
+        originalNonSummaryHeadingCount >= 2 &&
+        resultNonSummaryHeadingCount < Math.max(2, originalNonSummaryHeadingCount - 1)
+      ) {
+        console.warn(
+          `AI refinement removed too many headings (before=${originalNonSummaryHeadingCount}, after=${resultNonSummaryHeadingCount}), discarding result`
+        );
+        return content;
+      }
+      return result;
+    } catch (error) {
+      console.warn('AI refinement failed, returning original content:', error);
+      return content;
+    }
+  }
+
+  type HeadingSection = {
+    lineIndex: number;
+    level: number;
+    title: string;
+    bodySnippet: string;
+  };
+
+  function normalizeHeadingComparableText(text: string): string {
+    return String(text || '')
+      .toLowerCase()
+      .replace(/[「」『』【】"'`]/g, '')
+      .replace(/[｜|:：\-‐‑–—]/g, '')
+      .replace(/\s+/g, '')
+      .trim();
+  }
+
+  function isSummaryHeadingText(text: string): boolean {
+    return /^(まとめ|おわりに|最後に|結論|総括|summary|conclusion)$/i.test(String(text || '').trim());
+  }
+
+  function extractHeadingSections(content: string): HeadingSection[] {
+    const lines = String(content || '').split('\n');
+    const headingRows: Array<{ lineIndex: number; level: number; title: string }> = [];
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = String(lines[i] || '').trim();
+      const match = line.match(/^(#{2,3})\s+(.+)$/);
+      if (!match) continue;
+      headingRows.push({
+        lineIndex: i,
+        level: match[1].length,
+        title: String(match[2] || '').trim(),
+      });
+    }
+
+    return headingRows.map((row, idx) => {
+      const nextHeadingIndex = idx + 1 < headingRows.length ? headingRows[idx + 1].lineIndex : lines.length;
+      const body = lines
+        .slice(row.lineIndex + 1, nextHeadingIndex)
+        .join(' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      return {
+        lineIndex: row.lineIndex,
+        level: row.level,
+        title: row.title,
+        bodySnippet: body.slice(0, 220),
+      };
+    });
+  }
+
+  function extractJsonArrayFromText(text: string): string | null {
+    const trimmed = String(text || '').trim();
+    if (!trimmed) return null;
+
+    const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    if (fenced?.[1]) return fenced[1].trim();
+
+    const start = trimmed.indexOf('[');
+    const end = trimmed.lastIndexOf(']');
+    if (start !== -1 && end !== -1 && end > start) {
+      return trimmed.slice(start, end + 1);
+    }
+    return null;
+  }
+
+  function sanitizeRegeneratedHeading(raw: string): string {
+    let text = String(raw || '')
+      .replace(/^#{1,6}\s+/, '')
+      .replace(/^[\d０-９]+[\.．、)\]]\s*/, '')
+      .replace(/[：:]\s*$/, '')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
+
+    if (text.length > 40) {
+      const parts = text.split(/[｜|:：]/).map((p) => p.trim()).filter(Boolean);
+      const compact = parts.find((p) => p.length >= 8 && p.length <= 40);
+      if (compact) text = compact;
+      if (text.length > 40) text = text.slice(0, 40).trim();
+    }
+
+    return text;
+  }
+
+  async function regenerateHeadingsWithAI(
+    content: string,
+    title: string,
+    keyword: string,
+    aiConfig: AIConfig
+  ): Promise<string> {
+    const sections = extractHeadingSections(content);
+    if (sections.length < 2) return content;
+
+    const targetSections = sections.filter((section) => !isSummaryHeadingText(section.title));
+    if (targetSections.length === 0) return content;
+
+    console.log(`Regenerating headings with AI (${targetSections.length} headings)...`);
+
+    const sectionLines = targetSections
+      .map((section, index) => {
+        const snippet = section.bodySnippet ? `\n本文要約: ${section.bodySnippet}` : '';
+        return `${index + 1}. H${section.level}: ${section.title}${snippet}`;
+      })
+      .join('\n\n');
+
+    const prompt = `
+あなたは日本語SEO記事の編集者です。次の見出しを、本文内容に沿って自然な表現へ修正してください。
+
+【絶対条件】
+- 見出しの順番は変えない
+- 見出し数は変えない
+- 各見出しのH2/H3レベルは維持する
+- 本文は一切変更しない（見出し文言のみ変更）
+- 記事タイトルの焼き直し（例: 「記事タイトル - 〇〇」）は禁止
+- 「完全ガイド｜失敗しない選び方と費用比較」のような定型語尾は禁止
+- キーワード羅列だけの見出しは禁止
+- 見出しは6〜36文字を目安にする
+
+【記事タイトル】
+${title}
+
+【主キーワード】
+${keyword}
+
+【対象見出し】
+${sectionLines}
+
+【出力形式】
+JSON配列のみ（説明文は不要）。要素数は ${targetSections.length} 固定。
+各要素は {"level": 2 or 3, "title": "..."}。
+`.trim();
+
+    try {
+      const result = await callAI(prompt, aiConfig, 1400);
+      const jsonText = extractJsonArrayFromText(result);
+      if (!jsonText) {
+        console.warn('Heading regeneration skipped: AI result did not contain JSON array');
+        return content;
+      }
+
+      const parsed = JSON.parse(jsonText);
+      if (!Array.isArray(parsed) || parsed.length !== targetSections.length) {
+        console.warn(
+          `Heading regeneration skipped: invalid JSON length (expected=${targetSections.length}, actual=${Array.isArray(parsed) ? parsed.length : 'non-array'})`
+        );
+        return content;
+      }
+
+      const normalizedTitle = normalizeHeadingComparableText(title);
+      const lines = content.split('\n');
+      let updated = 0;
+
+      for (let i = 0; i < targetSections.length; i++) {
+        const original = targetSections[i];
+        const candidate = parsed[i] || {};
+        const candidateLevel = Number(candidate.level);
+        const candidateTitle = sanitizeRegeneratedHeading(String(candidate.title || ''));
+        if (!candidateTitle) continue;
+        if (candidateTitle.length < 6) continue;
+        if (Number.isFinite(candidateLevel) && candidateLevel !== original.level) continue;
+
+        const normalizedCandidate = normalizeHeadingComparableText(candidateTitle);
+        if (!normalizedCandidate) continue;
+        if (normalizedTitle && (normalizedCandidate === normalizedTitle || normalizedCandidate.startsWith(normalizedTitle))) continue;
+        if (/完全ガイド[｜|]\s*失敗しない選び方と費用比較/.test(candidateTitle)) continue;
+
+        if (normalizeHeadingComparableText(candidateTitle) === normalizeHeadingComparableText(original.title)) continue;
+        lines[original.lineIndex] = `${'#'.repeat(original.level)} ${candidateTitle}`;
+        updated++;
+      }
+
+      if (updated === 0) {
+        console.log('Heading regeneration produced no valid updates');
+        return content;
+      }
+
+      console.log(`Heading regeneration applied (${updated} headings updated)`);
+      return lines.join('\n');
+    } catch (error) {
+      console.warn('Heading regeneration failed, using original headings:', error);
+      return content;
+    }
   }
 
   let fullContent = generationResult.fullContent;
+  const baseGeneratedContent = generationResult.fullContent;
   const articleTitle = outline.title;
 
   console.log(`Word count check: target=${targetWordCount}, current=${countGeneratedChars(fullContent)}, initial=${generationResult.wordCount}`);
+
+  // === Step 1: プログラム的クリーンアップ（確実・高速） ===
+  fullContent = cleanupContentArtifacts(fullContent, articleTitle);
+  console.log('Deterministic cleanup applied');
+
+  // === Step 2: AIによる推敲（読みやすさ向上のみ） ===
+  // タイムアウト対策: 処理開始から120秒以上経過していたらスキップ
+  const elapsedMs = Date.now() - schedulerStartTime;
+  const REFINEMENT_TIME_LIMIT_MS = 120_000; // 2分
+  if (elapsedMs < REFINEMENT_TIME_LIMIT_MS) {
+    try {
+      const refinedContent = await refineContentWithAI(fullContent, articleTitle, keyword, aiConfig);
+      if (refinedContent && refinedContent.length > 500) {
+        fullContent = refinedContent;
+        console.log('Content refined successfully');
+      }
+    } catch (refineError) {
+      console.warn('Refinement step skipped due to error:', refineError);
+    }
+  } else {
+    console.log(`Skipping AI refinement to avoid timeout (elapsed: ${Math.round(elapsedMs / 1000)}s)`);
+  }
+
+  // === Step 3: 見出しのみAI再生成（自然さ改善） ===
+  const elapsedForHeadingMs = Date.now() - schedulerStartTime;
+  const HEADING_REGEN_TIME_LIMIT_MS = 150_000; // 2.5分
+  if (elapsedForHeadingMs < HEADING_REGEN_TIME_LIMIT_MS) {
+    try {
+      const headingCountBeforeRegeneration = countNonSummaryHeadings(fullContent);
+      const regeneratedHeadingContent = await regenerateHeadingsWithAI(fullContent, articleTitle, keyword, aiConfig);
+      if (regeneratedHeadingContent && regeneratedHeadingContent.length > 500) {
+        const headingCountAfterRegeneration = countNonSummaryHeadings(regeneratedHeadingContent);
+        if (
+          headingCountBeforeRegeneration >= 2 &&
+          headingCountAfterRegeneration < Math.max(2, headingCountBeforeRegeneration - 1)
+        ) {
+          console.warn(
+            `Skipping regenerated headings because heading count dropped too much (before=${headingCountBeforeRegeneration}, after=${headingCountAfterRegeneration})`
+          );
+        } else {
+          fullContent = regeneratedHeadingContent;
+        }
+      }
+    } catch (headingError) {
+      console.warn('Heading regeneration step skipped due to error:', headingError);
+    }
+  } else {
+    console.log(`Skipping heading regeneration to avoid timeout (elapsed: ${Math.round(elapsedForHeadingMs / 1000)}s)`);
+  }
+
+  // === Step 4: 再度クリーンアップ（AI推敲・見出し再生成で再混入した場合の保険） ===
+  fullContent = cleanupContentArtifacts(fullContent, articleTitle);
+
   // 4.6 繝輔ぃ繧ｯ繝医メ繧ｧ繝・け螳溯｡後→譚｡莉ｶ蛻・ｲ・
   let finalPostStatus = schedule.post_status || 'draft';
   let factCheckReport = null;
@@ -892,22 +1634,22 @@ async function executeSchedule(
         }
 
         if (factCheckSettings?.enabled && factCheckSettings?.perplexity_api_key) {
-        // 險倅ｺ九°繧峨ヵ繧｡繧ｯ繝域ュ蝣ｱ繧呈歓蜃ｺ
-        const factsToCheck = await extractFactsFromContent(fullContent, (schedule as any).fact_check_note);
-        const maxItems = factCheckSettings.max_items_to_check || 10;
-        const itemsToCheck = factsToCheck.slice(0, maxItems);
-        factCheckItemsChecked = itemsToCheck.length;
+          // 險倅ｺ九°繧峨ヵ繧｡繧ｯ繝域ュ蝣ｱ繧呈歓蜃ｺ
+          const factsToCheck = await extractFactsFromContent(fullContent, (schedule as any).fact_check_note);
+          const maxItems = factCheckSettings.max_items_to_check || 10;
+          const itemsToCheck = factsToCheck.slice(0, maxItems);
+          factCheckItemsChecked = itemsToCheck.length;
 
-        console.log(`Found ${factsToCheck.length} facts, checking top ${itemsToCheck.length} in batches`);
+          console.log(`Found ${factsToCheck.length} facts, checking top ${itemsToCheck.length} in batches`);
 
-        // バッチ検証実行（5件ずつ）
-        let factCheckResults = await verifyFactsBatch(
-          itemsToCheck,
-          factCheckSettings.perplexity_api_key,
-          keyword,
-          factCheckSettings.model_name || 'sonar',
-          5
-        );
+          // バッチ検証実行（5件ずつ）
+          let factCheckResults = await verifyFactsBatch(
+            itemsToCheck,
+            factCheckSettings.perplexity_api_key,
+            keyword,
+            factCheckSettings.model_name || 'sonar',
+            5
+          );
 
           // 重大な誤りをカウント
           const criticalIssues = factCheckResults.filter(r =>
@@ -918,65 +1660,77 @@ async function executeSchedule(
             (r.verdict === 'incorrect' && r.confidence < 70)
           ).length;
 
-        console.log(`Fact-check completed: ${criticalIssues} critical, ${minorIssues} minor issues`);
+          console.log(`Fact-check completed: ${criticalIssues} critical, ${minorIssues} minor issues`);
 
-        if (factCheckSettings.auto_fix_enabled && (criticalIssues > 0 || minorIssues > 0)) {
-          console.log('Auto-fix mode enabled. Applying AI corrections...');
-          const fixedContent = await applyFactCheckCorrections(
-            fullContent,
-            factCheckResults,
-            factCheckSettings.perplexity_api_key,
-            keyword,
-            factCheckSettings.model_name || 'sonar'
-          );
-
-          if (fixedContent && fixedContent.trim().length > 0) {
-            fullContent = fixedContent;
-            const recheckFacts = await extractFactsFromContent(fullContent, (schedule as any).fact_check_note);
-            const recheckItems = recheckFacts.slice(0, maxItems);
-            factCheckResults = await verifyFactsBatch(
-              recheckItems,
+          if (factCheckSettings.auto_fix_enabled && (criticalIssues > 0 || minorIssues > 0)) {
+            console.log('Auto-fix mode enabled. Applying AI corrections...');
+            const headingCountBeforeAutoFix = countNonSummaryHeadings(fullContent);
+            const fixedContent = await applyFactCheckCorrections(
+              fullContent,
+              factCheckResults,
               factCheckSettings.perplexity_api_key,
               keyword,
-              factCheckSettings.model_name || 'sonar',
-              5
+              factCheckSettings.model_name || 'sonar'
             );
 
-            const reCritical = factCheckResults.filter(r =>
-              r.verdict === 'incorrect' && r.confidence >= 70
-            ).length;
-            const reMinor = factCheckResults.filter(r =>
-              r.verdict === 'partially_correct' ||
-              (r.verdict === 'incorrect' && r.confidence < 70)
-            ).length;
-            console.log(`Re-check after auto-fix: ${reCritical} critical, ${reMinor} minor issues`);
-          } else {
-            console.warn('Auto-fix returned empty content. Keeping original content.');
+            if (fixedContent && fixedContent.trim().length > 0) {
+              const normalizedFixedContent = normalizeGeneratedContentForPublishing(fixedContent, articleTitle);
+              const headingCountAfterAutoFix = countNonSummaryHeadings(normalizedFixedContent);
+              if (
+                headingCountBeforeAutoFix >= 2 &&
+                headingCountAfterAutoFix < Math.max(2, headingCountBeforeAutoFix - 1)
+              ) {
+                console.warn(
+                  `Auto-fix removed too many headings (before=${headingCountBeforeAutoFix}, after=${headingCountAfterAutoFix}). Keeping pre-fix content.`
+                );
+              } else {
+                fullContent = normalizedFixedContent;
+              }
+              const recheckFacts = await extractFactsFromContent(fullContent, (schedule as any).fact_check_note);
+              const recheckItems = recheckFacts.slice(0, maxItems);
+              factCheckResults = await verifyFactsBatch(
+                recheckItems,
+                factCheckSettings.perplexity_api_key,
+                keyword,
+                factCheckSettings.model_name || 'sonar',
+                5
+              );
+
+              const reCritical = factCheckResults.filter(r =>
+                r.verdict === 'incorrect' && r.confidence >= 70
+              ).length;
+              const reMinor = factCheckResults.filter(r =>
+                r.verdict === 'partially_correct' ||
+                (r.verdict === 'incorrect' && r.confidence < 70)
+              ).length;
+              console.log(`Re-check after auto-fix: ${reCritical} critical, ${reMinor} minor issues`);
+            } else {
+              console.warn('Auto-fix returned empty content. Keeping original content.');
+            }
           }
-        }
 
-        // 条件分岐: 重大な誤りがあれば強制的に下書き
-        const criticalIssuesAfterFix = factCheckResults.filter(r =>
-          r.verdict === 'incorrect' && r.confidence >= 70
-        ).length;
-        const minorIssuesAfterFix = factCheckResults.filter(r =>
-          r.verdict === 'partially_correct' ||
-          (r.verdict === 'incorrect' && r.confidence < 70)
-        ).length;
+          // 条件分岐: 重大な誤りがあれば強制的に下書き
+          const criticalIssuesAfterFix = factCheckResults.filter(r =>
+            r.verdict === 'incorrect' && r.confidence >= 70
+          ).length;
+          const minorIssuesAfterFix = factCheckResults.filter(r =>
+            r.verdict === 'partially_correct' ||
+            (r.verdict === 'incorrect' && r.confidence < 70)
+          ).length;
 
-        if (criticalIssuesAfterFix > 0) {
-          console.log(`Critical errors found (${criticalIssuesAfterFix}). Forcing draft status.`);
-          finalPostStatus = 'draft';
-        }
+          if (criticalIssuesAfterFix > 0) {
+            console.log(`Critical errors found (${criticalIssuesAfterFix}). Forcing draft status.`);
+            finalPostStatus = 'draft';
+          }
 
           // 結果を保存
           const { data: savedReport } = await supabase.from('fact_check_results').insert({
-          schedule_id: schedule.id,
-          checked_items: factCheckResults,
-          total_checked: itemsToCheck.length,
-          issues_found: criticalIssuesAfterFix + minorIssuesAfterFix,
-          critical_issues: criticalIssuesAfterFix
-        }).select().single();
+            schedule_id: schedule.id,
+            checked_items: factCheckResults,
+            total_checked: itemsToCheck.length,
+            issues_found: criticalIssuesAfterFix + minorIssuesAfterFix,
+            critical_issues: criticalIssuesAfterFix
+          }).select().single();
 
           factCheckReport = savedReport;
         } else {
@@ -991,22 +1745,67 @@ async function executeSchedule(
 
   // 4.7 [[]]險俶ｳ輔・繧ｯ繝ｪ繝ｼ繝ｳ繧｢繝・・
   fullContent = fullContent.replace(/\[\[(.+?)\]\]/g, '$1');
+  const contentBeforeNormalization = fullContent;
+  fullContent = normalizeGeneratedContentForPublishing(fullContent, articleTitle);
+  if (contentBeforeNormalization !== fullContent) {
+    console.log('Normalized generated content structure before publishing');
+  }
 
-  // 5. WordPress縺ｫ謚慕ｨｿ・域擅莉ｶ蛻・ｲ仙ｾ後・繧ｹ繝・・繧ｿ繧ｹ繧剃ｽｿ逕ｨ・・
+  // 保険: 途中処理で見出しが大きく欠落した場合は、生成直後の見出し構造へフォールバックする
+  const baselineNormalizedContent = normalizeGeneratedContentForPublishing(baseGeneratedContent, articleTitle);
+  const baselineHeadingCount = countNonSummaryHeadings(baselineNormalizedContent);
+  const finalHeadingCount = countNonSummaryHeadings(fullContent);
+  if (
+    baselineHeadingCount >= 2 &&
+    finalHeadingCount < Math.max(2, baselineHeadingCount - 1)
+  ) {
+    console.warn(
+      `Final content lost too many headings (baseline=${baselineHeadingCount}, final=${finalHeadingCount}). Restoring baseline heading structure.`
+    );
+    fullContent = baselineNormalizedContent;
+  }
+
+  // 5. WordPress投稿（失敗時も記事スナップショットを保存）
+  let postId: string | null = null;
+  let publishErrorMessage: string | null = null;
+  let publishedAtIso: string | null = null;
+
   console.log(`Publishing to WordPress: ${articleTitle} (Status: ${finalPostStatus})`);
-  const postId = await publishToWordPress(
-    wpConfig,
-    articleTitle,
-    fullContent,
-    finalPostStatus
-  );
-  console.log(`Published: Post ID ${postId}`);
+  try {
+    postId = await publishToWordPress(
+      wpConfig,
+      articleTitle,
+      fullContent,
+      finalPostStatus
+    );
+    publishedAtIso = new Date().toISOString();
+    console.log(`Published: Post ID ${postId}`);
+  } catch (publishError: any) {
+    publishErrorMessage = publishError?.message || String(publishError);
+    console.error('WordPress publish failed:', publishError);
+  }
 
-  // 5.5 Chatwork騾夂衍 (髱槫酔譛溘〒螳溯｡後＠縲√お繝ｩ繝ｼ縺ｧ繧ゅΓ繧､繝ｳ蜃ｦ逅・・豁｢繧√↑縺・
-  if (schedule.chatwork_room_id && chatworkApiToken) {
+  const articleSnapshotStatus: 'draft' | 'published' | 'failed' = postId
+    ? (finalPostStatus === 'publish' ? 'published' : 'draft')
+    : 'failed';
+
+  await saveGeneratedArticleSnapshot(supabase, {
+    title: articleTitle,
+    content: fullContent,
+    keywords: sectionKeywords,
+    status: articleSnapshotStatus,
+    tone: writingTone,
+    aiConfig,
+    wpConfig,
+    postId,
+    publishedAt: publishedAtIso,
+  });
+
+  // 5.5 Chatwork通知（投稿成功時のみ）
+  if (postId && schedule.chatwork_room_id && chatworkApiToken) {
     console.log(`Sending Chatwork notification to rooms: ${schedule.chatwork_room_id}`);
     try {
-      const postUrl = `${wpConfig.url}/?p=${postId}`; // 邁｡譏鍋噪縺ｪURL逕滓・
+      const postUrl = `${wpConfig.url}/?p=${postId}`; // 簡易URL
       await sendChatworkNotifications(
         chatworkApiToken,
         schedule.chatwork_room_id,
@@ -1018,7 +1817,7 @@ async function executeSchedule(
       );
     } catch (cwError) {
       console.error('Chatwork notification failed:', cwError);
-      // 騾夂衍螟ｱ謨励・蜈ｨ菴薙・繧ｨ繝ｩ繝ｼ縺ｫ縺ｯ縺励↑縺・
+      // 通知失敗は全体失敗にしない
     }
   }
 
@@ -1026,10 +1825,9 @@ async function executeSchedule(
     provider: aiConfig.provider,
     model: aiConfig.model,
     generatedChars: countGeneratedChars(fullContent),
-    abTestEnabled: runAbTest,
     competitorResearchUsed: Boolean(competitorData?.articles?.length),
     factCheckItemsChecked,
-    imagesGenerated: scheduleImageGenerationEnabled && aiConfig.image_enabled ? (aiConfig.images_per_article ?? 0) : 0,
+    imagesGenerated: scheduleImageGenerationEnabled && aiConfig.image_enabled ? scheduleImagesPerArticle : 0,
     imageUnitCostUsd: imageCostUsdPerImage,
   });
 
@@ -1037,15 +1835,16 @@ async function executeSchedule(
   const { data: executionHistory, error: executionHistoryError } = await supabase
     .from('execution_history')
     .insert({
-    schedule_id: schedule.id,
-    wordpress_config_id: wpConfig.id,
-    executed_at: new Date().toISOString(),
-    keyword_used: keyword,
-    article_title: articleTitle,
-    wordpress_post_id: postId,
-    status: 'success',
-    cost_breakdown: costBreakdown,
-    estimated_cost_usd: costBreakdown.total_estimated_usd,
+      schedule_id: schedule.id,
+      wordpress_config_id: wpConfig.id,
+      executed_at: new Date().toISOString(),
+      keyword_used: keyword,
+      article_title: articleTitle,
+      wordpress_post_id: postId ?? '',
+      status: postId ? 'success' : 'failed',
+      error_message: postId ? null : (publishErrorMessage || 'WordPress publish failed'),
+      cost_breakdown: costBreakdown,
+      estimated_cost_usd: costBreakdown.total_estimated_usd,
     })
     .select('id')
     .single();
@@ -1054,26 +1853,8 @@ async function executeSchedule(
     console.error('Failed to save execution history:', executionHistoryError);
   }
 
-  if (runAbTest && regressionScores) {
-    const { error: regressionError } = await supabase
-      .from('generation_regression_results')
-      .insert({
-        schedule_id: schedule.id,
-        execution_history_id: executionHistory?.id ?? null,
-        user_id: schedule.user_id ?? null,
-        keyword,
-        article_title: articleTitle,
-        target_word_count: targetWordCount,
-        writing_tone: writingTone,
-        baseline_mode: 'manual',
-        candidate_mode: 'scheduler',
-        metrics: regressionScores,
-        overall_score: regressionScores.overallScore
-      });
-
-    if (regressionError) {
-      console.error('Failed to save AB regression result:', regressionError);
-    }
+  if (!postId) {
+    throw new Error(`WordPress publish failed: ${publishErrorMessage || 'Unknown error'}`);
   }
 
   return {
@@ -1102,12 +1883,13 @@ async function selectUnusedKeyword(
 
   if (availableKeywords.length === 0) {
     console.log('All keywords used, resetting list');
-    // 繝ｩ繝ｳ繝繝縺ｫ驕ｸ謚・
+    // 全件使用後はリスト先頭から再開
     if (allKeywords.length === 0) return null;
-    return allKeywords[Math.floor(Math.random() * allKeywords.length)];
+    return allKeywords[0];
   }
 
-  return availableKeywords[Math.floor(Math.random() * availableKeywords.length)];
+  // リスト順: 未使用の先頭を選ぶ
+  return availableKeywords[0];
 }
 
 // 譛ｪ菴ｿ逕ｨ繧ｿ繧､繝医Ν繧帝∈謚・
@@ -1128,10 +1910,11 @@ async function selectUnusedTitle(
   if (availableTitles.length === 0) {
     console.log('All titles used, resetting list');
     if (allTitles.length === 0) return null;
-    return allTitles[Math.floor(Math.random() * allTitles.length)];
+    return allTitles[0];
   }
 
-  return availableTitles[Math.floor(Math.random() * availableTitles.length)];
+  // リスト順: 未使用の先頭を選ぶ
+  return availableTitles[0];
 }
 
 // 繧ｫ繝・ざ繝ｪ繝ｼID繧偵せ繝ｩ繝・げ縺ｾ縺溘・蜷榊燕縺九ｉ蜿門ｾ・
@@ -1188,21 +1971,550 @@ async function getCategoryIdBySlugOrName(
 }
 
 // WordPress謚慕ｨｿ
+function splitLongParagraphForReadability(text: string): string[] {
+  const normalized = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!normalized) return [];
+
+  const sentences = normalized
+    .split(/(?<=[。！？!?])\s*/g)
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  if (sentences.length <= 2) return [normalized];
+
+  const chunks: string[] = [];
+  let buffer: string[] = [];
+  let charCount = 0;
+
+  for (const sentence of sentences) {
+    buffer.push(sentence);
+    charCount += sentence.length;
+
+    if (buffer.length >= 2 || charCount >= 140) {
+      chunks.push(buffer.join(''));
+      buffer = [];
+      charCount = 0;
+    }
+  }
+
+  if (buffer.length > 0) {
+    chunks.push(buffer.join(''));
+  }
+
+  return chunks.length > 0 ? chunks : [normalized];
+}
+
+function renderBufferedBlock(lines: string[]): string[] {
+  const cleaned = (lines || [])
+    .map((line) => String(line || '').trim())
+    .filter((line) => line.length > 0);
+  if (cleaned.length === 0) return [];
+
+  const isUnorderedList = cleaned.every((line) => /^[-*+]\s+/.test(line));
+  if (isUnorderedList) {
+    const items = cleaned
+      .map((line) => line.replace(/^[-*+]\s+/, '').trim())
+      .filter(Boolean)
+      .map((item) => `<li>${item}</li>`)
+      .join('\n');
+    return [`<ul>\n${items}\n</ul>`];
+  }
+
+  const isOrderedList = cleaned.every((line) => /^\d+[.)]\s+/.test(line));
+  if (isOrderedList) {
+    const items = cleaned
+      .map((line) => line.replace(/^\d+[.)]\s+/, '').trim())
+      .filter(Boolean)
+      .map((item) => `<li>${item}</li>`)
+      .join('\n');
+    return [`<ol>\n${items}\n</ol>`];
+  }
+
+  const merged = cleaned.join(' ').replace(/\s+/g, ' ').trim();
+  return splitLongParagraphForReadability(merged).map((paragraph) => `<p>${paragraph}</p>`);
+}
+
+function wrapPlainTextBlocksWithParagraphs(text: string): string {
+  const lines = String(text || '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .split('\n');
+
+  const output: string[] = [];
+  let buffer: string[] = [];
+
+  const flushBuffer = () => {
+    const rendered = renderBufferedBlock(buffer);
+    if (rendered.length > 0) {
+      output.push(...rendered);
+    }
+    buffer = [];
+  };
+
+  for (const rawLine of lines) {
+    const line = String(rawLine || '').trim();
+    if (!line) {
+      flushBuffer();
+      continue;
+    }
+
+    if (/^<h[1-6][^>]*>[\s\S]*<\/h[1-6]>$/i.test(line)) {
+      flushBuffer();
+      output.push(line);
+      continue;
+    }
+
+    if (/^<(ul|ol|li|p|blockquote|pre|table)\b/i.test(line)) {
+      flushBuffer();
+      output.push(line);
+      continue;
+    }
+
+    buffer.push(line);
+  }
+
+  flushBuffer();
+  return output.join('\n\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
 function formatContentForWordPress(rawContent: string): string {
-  const text = String(rawContent ?? '');
-  // If content already includes HTML tags, keep as-is.
-  if (/<\/?[a-z][\s\S]*>/i.test(text)) {
+  let text = String(rawContent ?? '');
+
+  // Markdown headings -> HTML headings (常に変換)
+  text = text
+    .replace(/^\s*######\s+(.+)$/gm, '<h6>$1</h6>')
+    .replace(/^\s*#####\s+(.+)$/gm, '<h5>$1</h5>')
+    .replace(/^\s*####\s+(.+)$/gm, '<h4>$1</h4>')
+    .replace(/^\s*###\s+(.+)$/gm, '<h3>$1</h3>')
+    .replace(/^\s*##\s+(.+)$/gm, '<h2>$1</h2>')
+    .replace(/^\s*#\s+(.+)$/gm, '<h1>$1</h1>');
+
+  // 既にHTMLタグが含まれている場合、emphasis変換はスキップ
+  if (/<\/?[a-z][\s\S]*>/i.test(rawContent)) {
     return text;
   }
 
-  return text
-    // Markdown headings -> HTML headings
-    .replace(/^######\s+(.+)$/gm, '<h6>$1</h6>')
-    .replace(/^#####\s+(.+)$/gm, '<h5>$1</h5>')
-    .replace(/^####\s+(.+)$/gm, '<h4>$1</h4>')
-    .replace(/^###\s+(.+)$/gm, '<h3>$1</h3>')
-    .replace(/^##\s+(.+)$/gm, '<h2>$1</h2>')
-    .replace(/^#\s+(.+)$/gm, '<h1>$1</h1>');
+  // Markdown emphasis -> HTML
+  text = text
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g, '<em>$1</em>');
+
+  // 本文を段落化して、詰まって見える問題を防ぐ
+  return wrapPlainTextBlocksWithParagraphs(text);
+}
+
+function normalizeComparableText(value: string): string {
+  return String(value || '')
+    .replace(/^#{1,6}\s+/, '')
+    .replace(/^<h[1-6][^>]*>/i, '')
+    .replace(/<\/h[1-6]>$/i, '')
+    .replace(/（要約）|\(要約\)|【要約】/g, '')
+    .replace(/^[Tt]itle[:：]\s*/, '')
+    .toLowerCase()
+    .replace(/[\s\u3000]/g, '')
+    .replace(/[「」『』【】"'`]/g, '')
+    .replace(/[：:]/g, '')
+    .trim();
+}
+
+function extractHeadingText(line: string): string {
+  const trimmed = String(line || '').trim();
+  const markdown = trimmed.match(/^#{1,6}\s+(.+)$/);
+  if (markdown?.[1]) return markdown[1].trim();
+  const html = trimmed.match(/^<h[1-6][^>]*>([\s\S]*?)<\/h[1-6]>$/i);
+  if (html?.[1]) return html[1].replace(/<[^>]+>/g, '').trim();
+  return trimmed;
+}
+
+function isHeadingLine(line: string): boolean {
+  const trimmed = String(line || '').trim();
+  return /^#{1,6}\s+.+$/.test(trimmed) || /^<h[1-6][^>]*>[\s\S]*<\/h[1-6]>$/i.test(trimmed);
+}
+
+function findNextNonEmptyLineIndex(lines: string[], startIndex: number): number {
+  for (let i = startIndex; i < lines.length; i++) {
+    if (String(lines[i] || '').trim()) return i;
+  }
+  return -1;
+}
+
+function isLikelyBodyLine(line: string): boolean {
+  const text = String(line || '').trim();
+  if (!text) return false;
+  if (isHeadingLine(text)) return false;
+  if (/^[-*+]\s|^\d+[.)]\s|^[・●■]\s?/.test(text)) return true;
+  return text.length >= 20 || /[。！？.!?、]/.test(text);
+}
+
+function looksLikeStandaloneHeadingLine(line: string): boolean {
+  const text = String(line || '').trim();
+  if (!text) return false;
+  if (isHeadingLine(text)) return false;
+  if (/^[-*+]\s|^\d+[.)]\s|^[・●■]\s?/.test(text)) return false;
+  if (/^https?:\/\//i.test(text)) return false;
+  if (text.length < 5 || text.length > 90) return false;
+  if (/[。.]$/.test(text)) return false;
+  return /[A-Za-z0-9\u3040-\u30ff\u3400-\u9fff]/.test(text);
+}
+
+function isSummaryHeadingText(text: string): boolean {
+  const normalized = normalizeComparableText(text);
+  if (!normalized) return false;
+  const tokens = ['まとめ', '総まとめ', '結論', '総括', 'おわりに', '最後に', 'summary', 'conclusion'];
+  return tokens.some((token) => normalized.includes(normalizeComparableText(token)));
+}
+
+function sanitizeHeadingLabel(text: string): string {
+  return String(text || '')
+    .replace(/^[\d０-９]+[\.．、:：)\]]\s*/, '')
+    .replace(/^[（(][\d０-９]+[）)]\s*/, '')
+    .replace(/[：:]\s*$/, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
+function expandSimpleH2Heading(title: string): string {
+  const current = sanitizeHeadingLabel(title);
+  if (!current || isSummaryHeadingText(current)) return current;
+  if (current.length >= 16) return current;
+
+  if (/進行度/.test(current)) return `${current}が期間と費用に与える影響`;
+  if (/種類|方法/.test(current)) return `${current}ごとの特徴・費用・継続しやすさ`;
+  if (/料金体系|費用|価格|相場/.test(current)) return `${current}の内訳と総額で比較するポイント`;
+  if (/基礎|前提|概要|とは/.test(current)) return `${current}と最初に押さえるべき比較軸`;
+  if (/注意|失敗|リスク/.test(current)) return `${current}を踏まえた失敗回避の判断基準`;
+  if (/ポイント|比較|選び方/.test(current)) return `${current}で押さえる判断ポイント`;
+  if (/^.+の.+$/.test(current)) return `${current}を見極める判断ポイント`;
+  return current;
+}
+
+function getHeadingLevel(line: string): number {
+  const trimmed = String(line || '').trim();
+  const markdown = trimmed.match(/^(#{1,6})\s+(.+)$/);
+  if (markdown?.[1]) return markdown[1].length;
+  const html = trimmed.match(/^<h([1-6])[^>]*>[\s\S]*<\/h[1-6]>$/i);
+  if (html?.[1]) return Number(html[1]);
+  return 0;
+}
+
+function rewriteHeadingLine(originalLine: string, level: number, title: string): string {
+  const safeLevel = Math.min(6, Math.max(1, Math.floor(level)));
+  const safeTitle = String(title || '').trim();
+  if (!safeTitle) return originalLine;
+
+  if (/^<h[1-6][^>]*>[\s\S]*<\/h[1-6]>$/i.test(String(originalLine || '').trim())) {
+    return `<h${safeLevel}>${safeTitle}</h${safeLevel}>`;
+  }
+  return `${'#'.repeat(safeLevel)} ${safeTitle}`;
+}
+
+function normalizeHeadingHierarchy(lines: string[]): string[] {
+  const output = [...lines];
+
+  for (let i = 0; i < output.length; i += 1) {
+    const rawLine = String(output[i] || '');
+    const trimmed = rawLine.trim();
+    if (!isHeadingLine(trimmed)) continue;
+
+    let level = getHeadingLevel(trimmed);
+    if (!Number.isFinite(level) || level <= 0) continue;
+
+    let title = sanitizeHeadingLabel(extractHeadingText(trimmed));
+    if (!title) continue;
+
+    // Keep published article structure flat: all section headings become H2.
+    if (level >= 2) {
+      level = 2;
+    }
+
+    if (!isSummaryHeadingText(title)) {
+      title = expandSimpleH2Heading(title);
+    }
+
+    output[i] = rewriteHeadingLine(rawLine, level, title);
+  }
+
+  return output;
+}
+
+function countNonSummaryHeadings(content: string): number {
+  const lines = String(content || '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .split('\n');
+
+  let count = 0;
+  for (const rawLine of lines) {
+    const trimmed = String(rawLine || '').trim();
+    if (!trimmed) continue;
+
+    let level = 0;
+    const markdownMatch = trimmed.match(/^(#{1,6})\s+.+$/);
+    if (markdownMatch?.[1]) {
+      level = markdownMatch[1].length;
+    } else {
+      const htmlMatch = trimmed.match(/^<h([1-6])[^>]*>[\s\S]*<\/h[1-6]>$/i);
+      if (htmlMatch?.[1]) {
+        level = Number(htmlMatch[1]);
+      }
+    }
+
+    if (!Number.isFinite(level) || level < 2) continue;
+    const headingText = extractHeadingText(trimmed);
+    if (!headingText || isSummaryHeadingText(headingText)) continue;
+    count += 1;
+  }
+
+  return count;
+}
+
+function removeDuplicateSummarySections(lines: string[]): string[] {
+  const headingRows: Array<{ start: number; end: number; headingText: string; bodyLength: number }> = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const text = String(lines[i] || '').trim();
+    if (!isHeadingLine(text)) continue;
+
+    let nextHeading = lines.length;
+    for (let j = i + 1; j < lines.length; j++) {
+      const nextText = String(lines[j] || '').trim();
+      if (isHeadingLine(nextText)) {
+        nextHeading = j;
+        break;
+      }
+    }
+
+    const bodyLength = lines
+      .slice(i + 1, nextHeading)
+      .join(' ')
+      .replace(/\s+/g, '')
+      .length;
+
+    headingRows.push({
+      start: i,
+      end: nextHeading,
+      headingText: extractHeadingText(text),
+      bodyLength,
+    });
+  }
+
+  const summaryRows = headingRows.filter((row) => isSummaryHeadingText(row.headingText));
+  if (summaryRows.length <= 1) return lines;
+
+  const keepRow = summaryRows
+    .slice()
+    .sort((a, b) => b.bodyLength - a.bodyLength)[0];
+  const removeRanges = summaryRows
+    .filter((row) => row.start !== keepRow.start)
+    .map((row) => ({ start: row.start, end: row.end }));
+
+  if (removeRanges.length === 0) return lines;
+
+  const filtered = lines.filter((_, index) => {
+    return !removeRanges.some((range) => index >= range.start && index < range.end);
+  });
+
+  console.log(`Removed duplicate summary sections: ${removeRanges.length} removed`);
+  return filtered;
+}
+
+function shouldRemoveLeadingTitleLine(line: string, articleTitle: string): boolean {
+  const raw = extractHeadingText(line);
+  if (!raw) return false;
+
+  const looksHeadingLike = isHeadingLine(line) || (
+    raw.length <= 80 &&
+    !/[。！？.!?]$/.test(raw) &&
+    /[A-Za-z0-9\u3040-\u30ff\u3400-\u9fff]/.test(raw)
+  );
+  if (!looksHeadingLike) return false;
+
+  const normalizedLine = normalizeComparableText(raw);
+  const normalizedTitle = normalizeComparableText(articleTitle);
+  if (!normalizedLine || !normalizedTitle) return false;
+
+  const withoutSummary = normalizeComparableText(raw.replace(/（要約）|\(要約\)|【要約】|要約$/g, ''));
+  if (normalizedLine === normalizedTitle) return true;
+  if (withoutSummary === normalizedTitle) return true;
+  if (normalizedLine.startsWith(normalizedTitle) || normalizedTitle.startsWith(normalizedLine)) return true;
+
+  const hasSummarySuffix = /(（要約）|\(要約\)|【要約】|要約$)/.test(raw);
+  if (hasSummarySuffix && (normalizedLine.includes(normalizedTitle) || withoutSummary.includes(normalizedTitle))) {
+    return true;
+  }
+
+  // Fuzzy near-duplicate check
+  const minComparable = Math.min(normalizedLine.length, normalizedTitle.length);
+  if (minComparable >= 10) {
+    let commonPrefixLen = 0;
+    while (
+      commonPrefixLen < minComparable &&
+      normalizedLine[commonPrefixLen] === normalizedTitle[commonPrefixLen]
+    ) {
+      commonPrefixLen += 1;
+    }
+    const prefixRate = commonPrefixLen / Math.max(1, minComparable);
+    if (prefixRate >= 0.72) return true;
+  }
+  return false;
+}
+
+function normalizeGeneratedContentForPublishing(rawContent: string, articleTitle: string): string {
+  let text = String(rawContent ?? '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .replace(/\uFEFF/g, '')
+    .trim();
+
+  if (!text) return '';
+  let lines = text.split('\n');
+
+  // In WordPress, post title is handled separately; drop accidental leading H1 in body.
+  const firstHeadingIndex = findNextNonEmptyLineIndex(lines, 0);
+  if (firstHeadingIndex !== -1 && getHeadingLevel(lines[firstHeadingIndex]) === 1) {
+    lines.splice(firstHeadingIndex, 1);
+  }
+
+  const firstLineIndex = findNextNonEmptyLineIndex(lines, 0);
+  if (firstLineIndex !== -1 && shouldRemoveLeadingTitleLine(lines[firstLineIndex], articleTitle)) {
+    lines.splice(firstLineIndex, 1);
+  }
+  for (let pass = 0; pass < 2; pass += 1) {
+    const idx = findNextNonEmptyLineIndex(lines, 0);
+    if (idx === -1) break;
+    if (!shouldRemoveLeadingTitleLine(lines[idx], articleTitle)) break;
+    lines.splice(idx, 1);
+  }
+
+  for (let i = 0; i < lines.length; i++) {
+    const current = String(lines[i] || '').trim();
+    if (!looksLikeStandaloneHeadingLine(current)) continue;
+
+    const nextIndex = findNextNonEmptyLineIndex(lines, i + 1);
+    if (nextIndex === -1) continue;
+    const next = String(lines[nextIndex] || '').trim();
+    if (isHeadingLine(next)) continue;
+    if (!isLikelyBodyLine(next)) continue;
+
+    const normalizedHeading = expandSimpleH2Heading(current) || sanitizeHeadingLabel(current) || current;
+    lines[i] = `## ${normalizedHeading}`;
+  }
+
+  lines = normalizeHeadingHierarchy(lines);
+  lines = removeDuplicateSummarySections(lines);
+
+  const withoutEmptyHeadings: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const rawLine = String(lines[i] || '');
+    const trimmed = rawLine.trim();
+    if (!trimmed) {
+      withoutEmptyHeadings.push(rawLine);
+      continue;
+    }
+
+    if (!isHeadingLine(trimmed)) {
+      withoutEmptyHeadings.push(rawLine);
+      continue;
+    }
+
+    const nextIndex = findNextNonEmptyLineIndex(lines, i + 1);
+    if (nextIndex === -1) continue;
+    const next = String(lines[nextIndex] || '').trim();
+    if (isHeadingLine(next)) continue;
+
+    withoutEmptyHeadings.push(rawLine);
+  }
+
+  lines = withoutEmptyHeadings;
+  lines = normalizeHeadingHierarchy(lines);
+  lines = removeDuplicateSummarySections(lines);
+  let cleaned = lines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+
+  const postLines = cleaned.split('\n');
+  const postFirstHeadingIndex = findNextNonEmptyLineIndex(postLines, 0);
+  if (postFirstHeadingIndex !== -1 && getHeadingLevel(postLines[postFirstHeadingIndex]) === 1) {
+    postLines.splice(postFirstHeadingIndex, 1);
+  }
+  const postFirstLineIndex = findNextNonEmptyLineIndex(postLines, 0);
+  if (postFirstLineIndex !== -1 && shouldRemoveLeadingTitleLine(postLines[postFirstLineIndex], articleTitle)) {
+    postLines.splice(postFirstLineIndex, 1);
+  }
+  cleaned = postLines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+
+  return cleaned;
+}
+
+function extractExcerpt(content: string, maxLength = 180): string {
+  const plain = String(content || '')
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/\*\*/g, '')
+    .replace(/\*/g, '')
+    .replace(/!\[[^\]]*]\([^)]+\)/g, '')
+    .replace(/\[[^\]]+]\([^)]+\)/g, '$1')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (plain.length <= maxLength) return plain;
+  return `${plain.slice(0, maxLength)}...`;
+}
+
+function inferLengthCategory(charCount: number): 'short' | 'medium' | 'long' {
+  if (charCount < 1200) return 'short';
+  if (charCount < 2400) return 'medium';
+  return 'long';
+}
+
+async function saveGeneratedArticleSnapshot(
+  supabase: any,
+  params: {
+    title: string;
+    content: string;
+    keywords: string[];
+    status: 'draft' | 'published' | 'failed';
+    tone: WritingTone;
+    aiConfig: AIConfig;
+    wpConfig: WordPressConfig;
+    postId?: string | null;
+    publishedAt?: string | null;
+  }
+): Promise<string | null> {
+  const wordCount = countGeneratedChars(params.content);
+  const readingTime = Math.max(1, Math.round(wordCount / 500));
+
+  const payload = {
+    title: params.title,
+    content: params.content,
+    excerpt: extractExcerpt(params.content),
+    keywords: params.keywords,
+    category: params.wpConfig.category || '',
+    status: params.status,
+    tone: params.tone,
+    length: inferLengthCategory(wordCount),
+    ai_provider: params.aiConfig.provider || '',
+    ai_model: params.aiConfig.model || '',
+    published_at: params.publishedAt ?? null,
+    wordpress_post_id: params.postId ?? '',
+    wordpress_config_id: params.wpConfig.id,
+    reading_time: readingTime,
+    word_count: wordCount,
+    trend_data: {},
+  };
+
+  const { data, error } = await supabase
+    .from('articles')
+    .insert(payload)
+    .select('id')
+    .single();
+
+  if (error) {
+    console.error('Failed to save generated article snapshot:', error);
+    return null;
+  }
+
+  const articleId = data?.id ? String(data.id) : null;
+  if (articleId) {
+    console.log(`Saved generated article snapshot: ${articleId}`);
+  }
+  return articleId;
 }
 
 async function publishToWordPress(
@@ -1241,27 +2553,60 @@ async function publishToWordPress(
     }
   }
 
-  const response = await fetch(wpApiUrl, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Basic ${auth}`
-    },
-    body: JSON.stringify({
-      title,
-      content: formatContentForWordPress(content),
-      status,
-      categories: categoryIds
-    })
+  const requestBody = JSON.stringify({
+    title,
+    content: formatContentForWordPress(content),
+    status,
+    categories: categoryIds
   });
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`WordPress API error: ${response.status} - ${errorText}`);
+  const postWithEndpoint = async (
+    endpoint: string
+  ): Promise<{ ok: true; postId: string } | { ok: false; status: number; text: string }> => {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Basic ${auth}`
+      },
+      body: requestBody
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      return { ok: false, status: response.status, text };
+    }
+
+    const data = await response.json();
+    return { ok: true, postId: String(data.id) };
+  };
+
+  const primary = await postWithEndpoint(wpApiUrl);
+  if (primary.ok) {
+    return primary.postId;
   }
 
-  const data = await response.json();
-  return data.id.toString();
+  const primaryErrorText = String(primary.text || '');
+  const shouldFallbackToPosts = postType !== 'posts' && (
+    primary.status === 404 ||
+    /rest_no_route|invalid[_ ]post[_ ]type|post[_ ]type/i.test(primaryErrorText)
+  );
+
+  if (!shouldFallbackToPosts) {
+    throw new Error(`WordPress API error: ${primary.status} - ${primaryErrorText}`);
+  }
+
+  const fallbackUrl = `${config.url}/wp-json/wp/v2/posts`;
+  console.warn(`Primary post_type "${postType}" failed. Falling back to default posts endpoint: ${fallbackUrl}`);
+  const fallback = await postWithEndpoint(fallbackUrl);
+  if (fallback.ok) {
+    return fallback.postId;
+  }
+
+  throw new Error(
+    `WordPress API error on both endpoints. primary(${wpApiUrl}): ${primary.status} - ${primaryErrorText}; ` +
+    `fallback(${fallbackUrl}): ${fallback.status} - ${fallback.text}`
+  );
 }
 
 // Chatwork騾夂衍騾∽ｿ｡
@@ -1334,6 +2679,162 @@ async function sendChatworkNotifications(
   }
 }
 
+function isLikelyJwt(value: string): boolean {
+  const token = String(value || '').trim();
+  if (!token) return false;
+  const parts = token.split('.');
+  return parts.length === 3 && parts.every((part) => part.length > 0);
+}
+
+function trimForLog(text: string, maxLength: number): string {
+  const normalized = String(text || '').replace(/\s+/g, ' ').trim();
+  if (normalized.length <= maxLength) return normalized;
+  return `${normalized.slice(0, maxLength)}...`;
+}
+
+type KeyCandidate = { label: 'anon' | 'service'; value: string };
+type AuthAttempt = { name: string; headers: Record<string, string> };
+
+function buildCompetitorSearchAuthAttempts(anonKeyRaw: string | null, serviceRoleKeyRaw: string | null): AuthAttempt[] {
+  const candidates: KeyCandidate[] = [
+    { label: 'anon', value: String(anonKeyRaw || '').trim() },
+    { label: 'service', value: String(serviceRoleKeyRaw || '').trim() },
+  ].filter((candidate) => candidate.value.length > 0);
+
+  const apiCandidates = [
+    candidates.find((candidate) => candidate.label === 'service'),
+    candidates.find((candidate) => candidate.label === 'anon'),
+  ].filter(Boolean) as KeyCandidate[];
+
+  const jwtCandidates = candidates.filter((candidate) => isLikelyJwt(candidate.value));
+  const nonJwtCandidates = candidates.filter((candidate) => !isLikelyJwt(candidate.value));
+  const authCandidates = [...jwtCandidates, ...nonJwtCandidates];
+
+  const attempts: AuthAttempt[] = [];
+  const seen = new Set<string>();
+
+  const pushAttempt = (name: string, headers: Record<string, string>) => {
+    const fingerprint = `${name}:${Object.keys(headers).sort().join('|')}:${headers.apikey?.length ?? 0}:${headers.Authorization ? 1 : 0}`;
+    if (seen.has(fingerprint)) return;
+    seen.add(fingerprint);
+    attempts.push({ name, headers });
+  };
+
+  for (const apiCandidate of apiCandidates) {
+    for (const authCandidate of authCandidates) {
+      pushAttempt(
+        `auth-${authCandidate.label}-apikey-${apiCandidate.label}`,
+        {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authCandidate.value}`,
+          'apikey': apiCandidate.value,
+        }
+      );
+    }
+
+    for (const authCandidate of authCandidates) {
+      pushAttempt(
+        `auth-only-${authCandidate.label}`,
+        {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authCandidate.value}`,
+        }
+      );
+    }
+
+    pushAttempt(
+      `apikey-only-${apiCandidate.label}`,
+      {
+        'Content-Type': 'application/json',
+        'apikey': apiCandidate.value,
+      }
+    );
+  }
+
+  if (attempts.length === 0) {
+    attempts.push({
+      name: 'no-auth-header',
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  return attempts;
+}
+
+async function conductCompetitorResearchViaEdgeFunction(
+  keyword: string,
+  serpApiKey: string,
+  limit: number = 5
+) {
+  const supabaseUrl = Deno.env.get('SUPABASE_URL');
+  const anonKey = Deno.env.get('SUPABASE_ANON_KEY');
+  const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+
+  if (!supabaseUrl) {
+    throw new Error('SUPABASE_URL is missing');
+  }
+
+  if (!anonKey && !serviceRoleKey) {
+    throw new Error('SUPABASE_ANON_KEY or SUPABASE_SERVICE_ROLE_KEY is missing');
+  }
+
+  const endpoint = `${supabaseUrl}/functions/v1/competitor-search`;
+  const body = JSON.stringify({ keyword, limit, serpApiKey });
+  const attempts = buildCompetitorSearchAuthAttempts(anonKey, serviceRoleKey);
+  const errors: string[] = [];
+
+  for (const attempt of attempts) {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: attempt.headers,
+      body,
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      return {
+        articles: Array.isArray(data?.topArticles) ? data.topArticles : [],
+        averageLength: Number.isFinite(Number(data?.averageLength)) ? Number(data.averageLength) : 0,
+        commonTopics: Array.isArray(data?.commonTopics) ? data.commonTopics : [],
+      };
+    }
+
+    const text = await response.text();
+    const reason = `${attempt.name} -> ${response.status} ${trimForLog(text, 220)}`;
+    errors.push(reason);
+
+    // For deterministic request errors, fail fast.
+    if (response.status >= 400 && response.status < 500 && response.status !== 401 && response.status !== 403) {
+      throw new Error(`competitor-search error: ${reason}`);
+    }
+  }
+
+  throw new Error(
+    `competitor-search auth failed after ${attempts.length} attempts. ` +
+    `Details: ${errors.join(' | ')}. ` +
+    `If this persists, deploy competitor-search with verify_jwt disabled.`
+  );
+}
+
+async function conductCompetitorResearchWithFallback(
+  keyword: string,
+  serpApiKey: string,
+  limit: number = 5
+) {
+  try {
+    const deepResult = await conductCompetitorResearchViaEdgeFunction(keyword, serpApiKey, limit);
+    if (deepResult.articles.length > 0) {
+      console.log(`Deep competitor research completed via competitor-search (${deepResult.articles.length} articles)`);
+      return deepResult;
+    }
+    console.warn('competitor-search returned no articles. Falling back to inline scraper.');
+  } catch (error) {
+    console.warn('competitor-search failed. Falling back to inline scraper:', error);
+  }
+
+  return await conductCompetitorResearch(keyword, serpApiKey, limit);
+}
+
 // 遶ｶ蜷郁ｪｿ譟ｻ繝倥Ν繝代・髢｢謨ｰ・・erpAPI邨檎罰・・
 async function conductCompetitorResearch(keyword: string, serpApiKey: string, limit: number = 5) {
   const searchUrl = `https://serpapi.com/search.json?engine=google&q=${encodeURIComponent(keyword)}&api_key=${serpApiKey}&gl=jp&hl=ja&num=${limit}`;
@@ -1402,4 +2903,3 @@ async function conductCompetitorResearch(keyword: string, serpApiKey: string, li
     commonTopics: []
   };
 }
-

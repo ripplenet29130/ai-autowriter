@@ -286,7 +286,7 @@ export class MultiStepGenerationService {
             });
 
             // 隕句・縺励Ξ繝吶Ν縺ｫ蠢懊§縺溘・繝ｬ繝輔ぅ繝・け繧ｹ・磯壼ｸｸ縺ｯH2・・
-            const prefix = section.level === 1 ? '## ' : section.level === 2 ? '## ' : section.level === 3 ? '### ' : '#### ';
+            const prefix = '## ';
 
             // 譛ｬ譁・°繧牙・鬆ｭ縺ｮ驥崎､・＠縺溯ｦ句・縺励ユ繧ｭ繧ｹ繝医↑縺ｩ繧帝勁蜴ｻ・亥ｿｵ縺ｮ縺溘ａ・・
             let cleanContent = result.content.trim();
@@ -372,11 +372,11 @@ export class MultiStepGenerationService {
             onStepComplete?: (step: number, data: any) => void;
         }
     ): Promise<Article> {
-        // Step 1: 蛻・梵
+        // Step 1: トレンド分析
         const trendData = await this.analyzeTrends(keywords);
         options?.onStepComplete?.(1, trendData);
 
-        // Step 2: 繧ｿ繧､繝医Ν・・electedTitle謖・ｮ壽凾縺ｯ繧ｹ繧ｭ繝・・・・
+        // Step 2: タイトル生成（選択済みならスキップ）
         let selectedTitle: string;
         if (options?.selectedTitle) {
             selectedTitle = options.selectedTitle;
@@ -387,62 +387,39 @@ export class MultiStepGenerationService {
             options?.onStepComplete?.(2, titles);
         }
 
-        // Step 3: 繧｢繧ｦ繝医Λ繧､繝ｳ
-        const outline = await this.generateOutline(keywords, trendData, {
-            targetLength: options?.targetLength,
-            tone: options?.tone,
-            selectedTitle,
-            targetWordCount: options?.targetWordCount,
-            customInstructions: options?.customInstructions
-        });
+        // Step 3: アウトライン生成（対話モードと同じ経路）
+        const targetWordCount = options?.targetWordCount
+            || (options?.targetLength === 'short'
+                ? 1200
+                : options?.targetLength === 'long'
+                    ? 3000
+                    : 2000);
+
+        const outline = await this.generateOutline(
+            keywords,
+            trendData,
+            {
+                targetLength: options?.targetLength,
+                tone: options?.tone,
+                selectedTitle,
+                targetWordCount,
+                customInstructions: options?.customInstructions,
+            }
+        );
         options?.onStepComplete?.(3, outline);
 
-        // Step 4: 譛ｬ譁・
-        const sectionContents = new Map<string, string>();
-
-        await aiService.loadActiveConfig();
-        const activeAIConfig = aiService.getActiveConfig();
-        if (!activeAIConfig) {
-            throw new Error('AI configuration is not loaded');
-        }
-
-        const generationResult = await generateArticleFromOutlineWithSharedCore({
-            outline: {
-                title: outline.title,
-                sections: outline.sections.map((section) => ({
-                    title: section.title,
-                    level: section.level,
-                    description: section.description || '',
-                    isLead: !!section.isLead,
-                    estimatedWordCount: section.estimatedWordCount
-                }))
-            },
-            keywords,
+        // Step 4: 本文生成（対話モードと同じ経路）
+        const article = await this.generateArticleFromPreparedOutline(outline, {
             tone: options?.tone || 'professional',
-            targetWordCount: options?.targetWordCount,
+            targetWordCount,
             customInstructions: options?.customInstructions,
-            defaultMaxTokens: activeAIConfig.maxTokens || 2000,
-            callAI: (prompt, maxTokens) => aiService.generateRawText(prompt, maxTokens),
-            qualityRetryCount: 1
+            onProgress: undefined,
         });
+        options?.onStepComplete?.(4, article);
 
-        outline.sections.forEach((section, index) => {
-            const generated = generationResult.sectionsWithContent[index];
-            if (!generated) return;
-
-            const formatted = generated.isLead
-                ? generated.content
-                : `${generated.level === 2 ? '##' : '###'} ${generated.title}\n\n${generated.content}`;
-
-            sectionContents.set(section.id, formatted);
-            section.content = generated.content;
-            section.isGenerated = true;
-        });
-
-        const article = await this.assembleArticle(outline, sectionContents);
         article.tone = options?.tone || 'professional';
         article.length = options?.targetLength || 'medium';
-        article.targetWordCount = options?.targetWordCount;
+        article.targetWordCount = targetWordCount;
 
         // 逕ｻ蜒冗函謌仙・逅・ｒ霑ｽ蜉
         if (options?.imagesPerArticle && options.imagesPerArticle > 0) {
@@ -470,6 +447,87 @@ export class MultiStepGenerationService {
 
     private generateFallbackContent(section: OutlineSection): string {
         return `## ${section.title}\n\n${section.description || '詳細を執筆中です。'}`;
+    }
+
+    async generateArticleFromPreparedOutline(
+        outline: ArticleOutline,
+        options?: {
+            tone?: 'professional' | 'casual' | 'technical' | 'friendly';
+            targetWordCount?: number;
+            customInstructions?: string;
+            onProgress?: (section: OutlineSection, progress: number) => void;
+        }
+    ): Promise<Article> {
+        await aiService.loadActiveConfig();
+        const activeAIConfig = aiService.getActiveConfig();
+        if (!activeAIConfig) {
+            throw new Error('AI configuration is not loaded');
+        }
+
+        const keywords = Array.from(new Set([
+            outline.keyword,
+            ...(outline.trendData?.relatedKeywords || []),
+        ])).filter(Boolean).slice(0, 3);
+
+        const targetWordCount = options?.targetWordCount || outline.estimatedWordCount || 2000;
+
+        const sharedResult = await generateArticleFromOutlineWithSharedCore({
+            outline: {
+                title: outline.title,
+                sections: outline.sections.map((section) => ({
+                    title: section.title,
+                    level: 2,
+                    description: section.description || '',
+                    isLead: !!section.isLead,
+                    estimatedWordCount: section.estimatedWordCount || 250,
+                })),
+            },
+            keywords,
+            tone: options?.tone || 'professional',
+            targetWordCount,
+            customInstructions: options?.customInstructions,
+            defaultMaxTokens: activeAIConfig.maxTokens || 2000,
+            qualityRetryCount: 3,
+            callAI: (prompt, maxTokens) => aiService.generateRawText(prompt, maxTokens),
+            onSectionComplete: ({ index, total, section: completed }) => {
+                const target = outline.sections[index];
+                if (!target) return;
+                target.content = completed.content;
+                target.isGenerated = true;
+                if (options?.onProgress) {
+                    const progress = ((index + 1) / Math.max(1, total)) * 100;
+                    options.onProgress(target, progress);
+                }
+            }
+        });
+
+        const sectionContents = new Map<string, string>();
+        outline.sections.forEach((section, index) => {
+            const generated = sharedResult.sectionsWithContent[index];
+            if (!generated) return;
+
+            const formatted = generated.isLead
+                ? generated.content
+                : `## ${generated.title}\n\n${generated.content}`;
+
+            sectionContents.set(section.id, formatted);
+            section.content = generated.content;
+            section.isGenerated = true;
+            if (options?.onProgress) {
+                const progress = ((index + 1) / Math.max(1, outline.sections.length)) * 100;
+                options.onProgress(section, progress);
+            }
+        });
+
+        const article = await this.assembleArticle(outline, sectionContents);
+        // Shared core側で実施した最終整形（文字数調整・まとめ補完）を採用する
+        article.content = sharedResult.fullContent;
+        article.wordCount = sharedResult.wordCount;
+        article.excerpt = this.generateExcerpt(sharedResult.fullContent);
+        article.tone = options?.tone || 'professional';
+        article.targetWordCount = targetWordCount;
+        article.length = this.estimateLengthCategory(targetWordCount);
+        return article;
     }
 
     private generateExcerpt(content: string): string {

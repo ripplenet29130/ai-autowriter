@@ -233,12 +233,8 @@ export const AIConfigForm: React.FC<AIConfigFormProps> = ({
       case 'openai':
         return [
           { value: 'gpt-5.2', label: `GPT-5.2 (${tierLabel('gpt-5.2')})` },
-          { value: 'gpt-5', label: `GPT-5 (${tierLabel('gpt-5')})` },
           { value: 'gpt-5-mini', label: `GPT-5 mini (${tierLabel('gpt-5-mini')})` },
           { value: 'gpt-4.1', label: `GPT-4.1 (${tierLabel('gpt-4.1')})` },
-          { value: 'gpt-4.1-mini', label: `GPT-4.1 mini (${tierLabel('gpt-4.1-mini')})` },
-          { value: 'gpt-4.1-nano', label: `GPT-4.1 nano (${tierLabel('gpt-4.1-nano')})` },
-          { value: 'gpt-4o', label: `GPT-4o (${tierLabel('gpt-4o')})` },
           { value: 'gpt-4o-mini', label: `GPT-4o mini (${tierLabel('gpt-4o-mini')})` },
         ];
       case 'claude':

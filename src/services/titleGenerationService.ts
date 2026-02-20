@@ -1,6 +1,7 @@
 import { TrendAnalysisResult, TitleSuggestion, CompetitorArticle } from '../types';
 import { aiService } from './aiService';
 import { v4 as uuidv4 } from 'uuid';
+import { generateTitleSuggestionsWithSharedCore } from '../shared/titleGenerationCore';
 
 /**
  * タイトル生成サービス
@@ -53,49 +54,18 @@ export class TitleGenerationService {
 
       const filteredRelatedKeywords = trendAnalysis.relatedKeywords.filter(kw => !ngKeywords.includes(kw));
       const filteredHotTopics = trendAnalysis.hotTopics.filter(topic => !ngKeywords.some(ng => topic.includes(ng)));
+      const aiTitles = await generateTitleSuggestionsWithSharedCore({
+        keyword,
+        relatedKeywords: filteredRelatedKeywords,
+        hotTopics: filteredHotTopics,
+        competitors: competitors.map((c) => ({ title: c.title, headings: c.headings })),
+        count,
+        essentialKeywords,
+        ngKeywords,
+        callAI: (prompt, maxTokens) => aiService.generateRawText(prompt, maxTokens),
+      });
 
-      const prompt = `
-以下のキーワードと競合他社のタイトルを参考に、SEO的に強力で思わずクリックしたくなる魅力的なブログ記事のタイトル案を${count}件提案してください。
-
-【メインキーワード】
-${keyword}
-
-【関連キーワード/トピック（SEO強化）】
-${filteredRelatedKeywords.join('、')}
-${filteredHotTopics.join('、')}
-
-${essentialKeywords.length > 0 ? `
-【必須キーワード（必ずタイトルに含める）】
-${essentialKeywords.join('、')}
-` : ''}
-
-${ngKeywords.length > 0 ? `
-【NGキーワード（絶対に使用しない）】
-${ngKeywords.join('、')}
-` : ''}
-
-【競合他社のタイトルと構成】
-${competitors.length > 0 ? competitors.map(c => `- タイトル: ${c.title}${c.headings && c.headings.length > 0 ? `\n  (主な見出し: ${c.headings.slice(0, 5).join(', ')})` : ''}`).join('\n') : '（データなし）'}
-
-【重要指示】
-- 読者の悩みやニーズに刺さるキャッチーなタイトルにしてください。
-- 関連キーワードを自然に含めることで検索からの流入を最大化してください。
-- 競合他社と比較して独自性や優位性が感じられるようにしてください。
-- **毎回異なる視点や切り口（初心者向け、プロ向け、比較、解決策、リスト形式など）で提案し、マンネリ化を防いでください。**
-- タイトルは32文字以内が理想的です。
-- 各タイトル案に、なぜそのタイトルが良いのか、短くSEO的な根拠やクリック率向上の狙いを説明してください。
-- 出力フォーマットはJSON形式でお願いします：
-[
-  { "title": "タイトル案1", "reason": "そのタイトルの狙いとSEO的根拠" },
-  { "title": "タイトル案2", "reason": "そのタイトルの狙いとSEO的な根拠" },
-  ...
-]
-`;
-
-      const result = await aiService.generateCustomJson(prompt);
-      const aiTitles = Array.isArray(result) ? result : [];
-
-      return aiTitles.map(item => ({
+      return aiTitles.map((item) => ({
         id: uuidv4(),
         title: item.title || '',
         keyword: keyword,
@@ -119,19 +89,27 @@ ${competitors.length > 0 ? competitors.map(c => `- タイトル: ${c.title}${c.h
    * ルールベースでタイトル案を提示（AI失敗時のフォールバック）
    */
   private generateRuleBased(keyword: string, trendAnalysis: TrendAnalysisResult, count: number): TitleSuggestion[] {
+    const year = new Date().getFullYear();
     const templates = [
-      `【最新】${keyword}のおすすめスポット・楽しみ方完全ガイド`,
-      `${keyword}で絶対に外せない！観光のポイントと注意点`,
-      `${keyword}の魅力を徹底解説！日帰りでも楽しめるプラン`,
-      `初心者必見！${keyword}を効率よく巡るための基礎知識`,
-      `${keyword}の穴場はどこ？地元民が教える本当におすすめしたい場所`
+      `${year}年版 ${keyword}の選び方｜失敗しない比較ポイント`,
+      `${keyword}の基礎知識と注意点をわかりやすく解説`,
+      `${keyword}の費用・効果・継続のコツを整理`,
+      `${keyword}で後悔しないための判断基準`,
+      `${keyword}の比較ポイントを初心者向けに解説`,
+    ];
+    const descriptions = [
+      '比較軸を先に示し、検討段階での意思決定をしやすくする狙いです。',
+      '基礎情報を先に押さえたい読者向けに、理解負荷を下げる構成です。',
+      '費用と効果を同時に確認したい層の検索意図に合わせています。',
+      '失敗回避ニーズに応える切り口で、クリック動機を高めます。',
+      '初学者が選定時に迷いやすい点を補う意図で設計しています。',
     ];
 
-    return templates.slice(0, count).map(title => ({
+    return templates.slice(0, count).map((title, index) => ({
       id: uuidv4(),
       title,
       keyword: keyword,
-      description: '競合分析とトレンドに基づき作成された、安定した検索流入が期待できるタイトルです。',
+      description: descriptions[index] || '検索意図に沿った切り口でクリック率向上を狙います。',
       trendScore: trendAnalysis.trendScore,
       searchVolume: trendAnalysis.searchVolume,
       competition: trendAnalysis.competition,

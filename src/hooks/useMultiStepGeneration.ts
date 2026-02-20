@@ -251,14 +251,12 @@ export function useMultiStepGeneration() {
                 });
             };
 
-            const sectionContents = await multiStepGenerationService.generateSections(
+            const article = await multiStepGenerationService.generateArticleFromPreparedOutline(
                 outline,
-                { ...options, onProgress: internalOnProgress }
-            );
-
-            const article = await multiStepGenerationService.assembleArticle(
-                outline,
-                sectionContents
+                {
+                    ...options,
+                    onProgress: internalOnProgress
+                }
             );
 
             if (options?.targetWordCount) {
@@ -457,6 +455,13 @@ export function useMultiStepGeneration() {
         }));
     }, []);
 
+    const goToStep = useCallback((step: GenerationStep) => {
+        setState(prev => ({
+            ...prev,
+            currentStep: step
+        }));
+    }, []);
+
     const updateArticle = useCallback((updatedArticle: Article) => {
         setState(prev => ({
             ...prev,
@@ -479,6 +484,7 @@ export function useMultiStepGeneration() {
         reorderSections,
         nextStep,
         previousStep,
+        goToStep,
         reset,
         toggleKeywordPreference,
         addKeywordPreference
