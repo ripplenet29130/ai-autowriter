@@ -160,10 +160,6 @@ export interface ScheduleSetting {
   generation_mode?: 'keyword' | 'title' | 'both';
   enable_fact_check?: boolean; // 繝輔ぃ繧ｯ繝医メ繧ｧ繝・け譛牙柑蛹・
   fact_check_note?: string; // [[]]縺ｧ蝗ｲ繧繝√ぉ繝・け蜆ｪ蜈育ｮ・園
-  fact_check_auto_fix_enabled?: boolean;
-  fact_check_alert_chatwork_room_id?: string;
-  fact_check_notify_on_anomaly?: boolean;
-  fact_check_notify_on_every_run?: boolean;
   image_generation_enabled?: boolean;
   images_per_article?: number;
 }

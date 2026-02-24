@@ -1,0 +1,7 @@
+﻿Restore hints:
+1) Apply diffs:
+   git apply --reject --whitespace=nowarn working_tree.diff
+   git apply --reject --whitespace=nowarn staged.diff
+2) Or copy files back from:
+   files/
+   untracked/

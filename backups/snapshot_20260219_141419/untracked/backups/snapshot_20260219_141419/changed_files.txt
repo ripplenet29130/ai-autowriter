@@ -1,0 +1,17 @@
+﻿package.json
+package-lock.json
+src/components/AIConfig/AIConfigForm.tsx
+src/components/AIGenerator/index.tsx
+src/components/Dashboard.tsx
+src/components/Scheduler.tsx
+src/hooks/useMultiStepGeneration.ts
+src/services/multiStepGenerationService.ts
+src/services/scheduleService.ts
+src/shared/articleGenerationCore.ts
+src/shared/generationPrompts.ts
+src/shared/multiStepPromptTemplates.ts
+src/shared/outlineParser.ts
+src/shared/sectionGenerationPrompt.ts
+src/types/index.ts
+supabase/functions/scheduler/index.ts
+supabase/functions/scheduler-executor/index.ts

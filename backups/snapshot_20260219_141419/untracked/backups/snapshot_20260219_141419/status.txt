@@ -1,0 +1,32 @@
+﻿ M package-lock.json
+ M package.json
+ M src/components/AIConfig/AIConfigForm.tsx
+ M src/components/AIGenerator/index.tsx
+ M src/components/Dashboard.tsx
+ M src/components/Scheduler.tsx
+ M src/hooks/useMultiStepGeneration.ts
+ M src/services/multiStepGenerationService.ts
+ M src/services/scheduleService.ts
+ M src/shared/articleGenerationCore.ts
+ M src/shared/generationPrompts.ts
+ M src/shared/multiStepPromptTemplates.ts
+ M src/shared/outlineParser.ts
+ M src/shared/sectionGenerationPrompt.ts
+ M src/types/index.ts
+ M supabase/functions/scheduler-executor/index.ts
+ M supabase/functions/scheduler/index.ts
+?? backups/
+?? check_latest_article.js
+?? check_latest_article.ts
+?? check_latest_article_ascii.js
+?? supabase/migrations/20240101000000_remote_placeholder.sql
+?? supabase/migrations/20260115000001_remote_placeholder.sql
+?? supabase/migrations/20260115000002_remote_placeholder.sql
+?? supabase/migrations/20260116000000_remote_placeholder.sql
+?? supabase/migrations/20260116000001_remote_placeholder.sql
+?? supabase/migrations/20260119164500_remote_placeholder.sql
+?? supabase/migrations/20260119165700_remote_placeholder.sql
+?? supabase/migrations/20260122121500_remote_placeholder.sql
+?? supabase/migrations/20260122130000_remote_placeholder.sql
+?? supabase/migrations/20260217193000_add_images_per_article_to_schedule_settings.sql
+?? supabase/migrations/20260218090000_add_ai_model_overrides_to_schedule_settings.sql

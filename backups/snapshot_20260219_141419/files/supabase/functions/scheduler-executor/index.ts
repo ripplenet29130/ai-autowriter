@@ -5,7 +5,6 @@ import {
   generateArticleFromOutlineWithSharedCore,
   generateOutlineWithAutoModeStyle,
 } from '../../../src/shared/articleGenerationCore.ts';
-import { generateTitleSuggestionsWithSharedCore } from '../../../src/shared/titleGenerationCore.ts';
 import {
   applyFactCheckCorrections,
   extractFactsFromContent,
@@ -28,12 +27,6 @@ const parseNumber = (value: unknown, fallback: number): number => {
   const n = Number(value);
   return Number.isFinite(n) ? n : fallback;
 };
-
-const SCHEDULE_EXECUTION_LOCK_TTL_SECONDS = 20 * 60;
-const FALLBACK_SCHEDULE_ROW_LOCK_WINDOW_SECONDS = 8 * 60;
-let warnedMissingSchedulerLockRpc = false;
-let warnedUsingFallbackScheduleRowLock = false;
-let warnedSchedulerLockUnavailable = false;
 
 interface WordPressConfig {
   id: string;
@@ -68,28 +61,8 @@ interface Schedule {
   title_set_id?: string;
   generation_mode?: 'keyword' | 'title' | 'both';
   keyword_set_id?: string;
-  fact_check_auto_fix_enabled?: boolean;
-  fact_check_alert_chatwork_room_id?: string;
-  fact_check_notify_on_anomaly?: boolean;
-  fact_check_notify_on_every_run?: boolean;
   image_generation_enabled?: boolean;
   images_per_article?: number;
-}
-
-class KeywordExhaustedError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'KeywordExhaustedError';
-  }
-}
-
-function isKeywordExhaustedError(error: unknown): boolean {
-  return (
-    error instanceof KeywordExhaustedError ||
-    (typeof error === 'object' &&
-      error !== null &&
-      (error as any).name === 'KeywordExhaustedError')
-  );
 }
 
 function parseJstDate(input: string): Date | null {
@@ -367,7 +340,6 @@ Deno.serve(async (req: Request) => {
         }
 
         let shouldExecute = forceExecute || await shouldExecuteNow(timeToUse, currentTimeJST, scheduleSetting.frequency, scheduleSetting.id, supabase);
-        const bypassExecutionLock = forceExecute && allowDuplicateForce;
 
         // Force execution guard: avoid duplicate posts from repeated manual triggers.
         if (forceExecute && shouldExecute && !allowDuplicateForce) {
@@ -385,36 +357,6 @@ Deno.serve(async (req: Request) => {
               `Skipping schedule ${scheduleSetting.id}: max total posts per run reached (${maxTotalPostsPerRun})`
             );
             continue;
-          }
-
-          if (!bypassExecutionLock) {
-            const lockAcquired = await acquireScheduleExecutionLock(
-              supabase,
-              scheduleSetting.id,
-              wpConfig.id,
-              SCHEDULE_EXECUTION_LOCK_TTL_SECONDS
-            );
-            if (!lockAcquired) {
-              stats.skipped += 1;
-              console.log(`Skipping schedule ${scheduleSetting.id}: execution lock is active`);
-              continue;
-            }
-
-            if (!forceExecute) {
-              const shouldExecuteAfterLock = await shouldExecuteNow(
-                timeToUse,
-                currentTimeJST,
-                scheduleSetting.frequency,
-                scheduleSetting.id,
-                supabase
-              );
-
-              if (!shouldExecuteAfterLock) {
-                stats.skipped += 1;
-                console.log(`Skipping schedule ${scheduleSetting.id}: no longer eligible after lock acquisition`);
-                continue;
-              }
-            }
           }
 
           console.log(`Executing schedule for ${wpConfig.name}`);
@@ -468,13 +410,8 @@ Deno.serve(async (req: Request) => {
             stats.executed += 1;
             executedWpConfigIds.add(wpConfig.id);
           } catch (error: any) {
-            if (isKeywordExhaustedError(error)) {
-              console.log(`Skipping schedule ${scheduleSetting.id}: ${error.message}`);
-              stats.skipped += 1;
-            } else {
-              console.error(`Failed to execute schedule for ${wpConfig.name}:`, error);
-              stats.failed += 1;
-            }
+            console.error(`Failed to execute schedule for ${wpConfig.name}:`, error);
+            stats.failed += 1;
           }
         } else {
           stats.skipped += 1;
@@ -532,150 +469,6 @@ Deno.serve(async (req: Request) => {
     );
   }
 });
-
-function isMissingSchedulerLockRpc(error: any): boolean {
-  const errorText = [
-    String(error?.message || ''),
-    String(error?.details || ''),
-    String(error?.hint || ''),
-  ].join(' ').toLowerCase();
-
-  return (
-    errorText.includes('could not find the function') ||
-    (errorText.includes('function') && errorText.includes('does not exist'))
-  );
-}
-
-async function acquireScheduleExecutionLock(
-  supabase: any,
-  scheduleId: string,
-  wpConfigId: string,
-  lockSeconds = SCHEDULE_EXECUTION_LOCK_TTL_SECONDS
-): Promise<boolean> {
-  const { data, error } = await supabase.rpc('acquire_scheduler_execution_lock', {
-    p_schedule_id: scheduleId,
-    p_wp_config_id: wpConfigId,
-    p_lock_seconds: lockSeconds,
-  });
-
-  if (error) {
-    if (isMissingSchedulerLockRpc(error)) {
-      if (!warnedMissingSchedulerLockRpc) {
-        console.warn(
-          'Scheduler lock RPC "acquire_scheduler_execution_lock" is not available. ' +
-          'Apply latest Supabase migration to enable duplicate-run protection.'
-        );
-        warnedMissingSchedulerLockRpc = true;
-      }
-    } else {
-      console.error(`Failed to acquire scheduler execution lock for ${scheduleId}:`, error);
-    }
-
-    const fallbackAcquired = await acquireScheduleExecutionLockWithScheduleRow(
-      supabase,
-      scheduleId,
-      lockSeconds
-    );
-
-    if (fallbackAcquired !== null) {
-      if (!warnedUsingFallbackScheduleRowLock) {
-        console.warn(
-          'Using fallback schedule row lock (schedule_settings.updated_at). ' +
-          'Please apply latest Supabase migration for robust lock RPC support.'
-        );
-        warnedUsingFallbackScheduleRowLock = true;
-      }
-      return fallbackAcquired;
-    }
-
-    if (!warnedSchedulerLockUnavailable) {
-      console.warn(
-        'Scheduler execution lock is unavailable (RPC + fallback both failed). ' +
-        'Proceeding without lock – apply latest migration to enable duplicate-run protection.'
-      );
-      warnedSchedulerLockUnavailable = true;
-    }
-    return true;
-  }
-
-  const lockRow = Array.isArray(data) ? data[0] : data;
-  const acquired = lockRow?.acquired === true;
-  if (!acquired) return false;
-
-  console.log(
-    `Schedule lock acquired for ${scheduleId} (until ${lockRow?.locked_until || 'unknown'})`
-  );
-  return true;
-}
-
-function isMissingUpdatedAtColumn(error: any): boolean {
-  const errorText = [
-    String(error?.message || ''),
-    String(error?.details || ''),
-    String(error?.hint || ''),
-  ].join(' ').toLowerCase();
-
-  return errorText.includes('updated_at') && errorText.includes('does not exist');
-}
-
-async function acquireScheduleExecutionLockWithScheduleRow(
-  supabase: any,
-  scheduleId: string,
-  lockSeconds = SCHEDULE_EXECUTION_LOCK_TTL_SECONDS
-): Promise<boolean | null> {
-  const lockWindowSeconds = Math.max(
-    60,
-    Math.min(lockSeconds, FALLBACK_SCHEDULE_ROW_LOCK_WINDOW_SECONDS)
-  );
-  const nowIso = new Date().toISOString();
-  const thresholdIso = new Date(Date.now() - lockWindowSeconds * 1000).toISOString();
-
-  const thresholdAttempt = await supabase
-    .from('schedule_settings')
-    .update({ updated_at: nowIso })
-    .eq('id', scheduleId)
-    .lte('updated_at', thresholdIso)
-    .select('id')
-    .limit(1);
-
-  if (thresholdAttempt.error) {
-    if (isMissingUpdatedAtColumn(thresholdAttempt.error)) {
-      return null;
-    }
-    console.error(`Fallback lock acquisition failed for ${scheduleId} (threshold):`, thresholdAttempt.error);
-    return null;
-  }
-
-  const thresholdData = Array.isArray(thresholdAttempt.data) ? thresholdAttempt.data : [];
-  if (thresholdData.length > 0) {
-    console.log(`Fallback schedule row lock acquired for ${scheduleId} (window=${lockWindowSeconds}s)`);
-    return true;
-  }
-
-  const nullAttempt = await supabase
-    .from('schedule_settings')
-    .update({ updated_at: nowIso })
-    .eq('id', scheduleId)
-    .is('updated_at', null)
-    .select('id')
-    .limit(1);
-
-  if (nullAttempt.error) {
-    if (isMissingUpdatedAtColumn(nullAttempt.error)) {
-      return null;
-    }
-    console.error(`Fallback lock acquisition failed for ${scheduleId} (null check):`, nullAttempt.error);
-    return null;
-  }
-
-  const nullData = Array.isArray(nullAttempt.data) ? nullAttempt.data : [];
-  if (nullData.length > 0) {
-    console.log(`Fallback schedule row lock acquired for ${scheduleId} (window=${lockWindowSeconds}s, null->set)`);
-    return true;
-  }
-
-  return false;
-}
 
 // 螳溯｡後☆縺ｹ縺阪°繝√ぉ繝・け
 async function shouldExecuteNow(
@@ -1120,6 +913,7 @@ async function generateTitleWithAI(
 ): Promise<string> {
   const TITLE_MIN_LENGTH = 24;
   const TITLE_MAX_LENGTH = 68;
+  const TITLE_RETRY_COUNT = 4;
 
   const normalizeTitle = (raw: string): string => {
     let cleaned = String(raw || '').trim()
@@ -1156,16 +950,10 @@ async function generateTitleWithAI(
   };
 
   const isValidSeoTitle = (title: string, baseKeyword: string, currentYear: number): boolean => {
-    const compactTitle = title.replace(/\s+/g, '');
-    const compactKeyword = baseKeyword.replace(/\s+/g, '');
-    const hasRedundantPattern = /(選び方|おすすめ|比較|評判|費用|ポイント)の\1/.test(compactTitle);
-    const repeatsWholeKeyword = compactKeyword.length >= 4 && compactTitle.includes(`${compactKeyword}の${compactKeyword}`);
-
     if (!title) return false;
     if (title.length < TITLE_MIN_LENGTH || title.length > TITLE_MAX_LENGTH) return false;
     if (!includesKeyword(title, baseKeyword)) return false;
     if (isGenericTitleOnly(title, currentYear)) return false;
-    if (hasRedundantPattern || repeatsWholeKeyword) return false;
     if (/完全ガイド[｜|]\s*失敗しない選び方と費用比較/.test(title)) return false;
     const hasFreshness = new RegExp(`${currentYear}年|最新版|最新`).test(title);
     const hasReaderValue = /(選び方|比較|ポイント|費用|効果|注意点|評判|おすすめ|解説|ガイド|始め方)/.test(title);
@@ -1191,39 +979,54 @@ async function generateTitleWithAI(
     return `${currentYear}年版 ${compactKeyword}の選び方`;
   };
 
+  const relatedKwText = relatedKeywords.length > 0
+    ? `\n\n【関連キーワード/トピック（SEO強化）】\n${relatedKeywords.slice(0, 8).join('、')}`
+    : '';
+
+  // 競合タイトル＋見出し情報を含める（自動生成モードと同等）
+  let competitorText = '';
+  if (competitorData?.articles && competitorData.articles.length > 0) {
+    const articles = competitorData.articles.slice(0, 5);
+    competitorText = `\n\n【競合他社のタイトルと構成】\n${articles.map((a: any) => {
+      const headings = (a.headings || []).slice(0, 5).join(', ');
+      return `- タイトル: ${a.title}${headings ? `\n  (主な見出し: ${headings})` : ''}`;
+    }).join('\n')}`;
+  } else if (competitorTitles.length > 0) {
+    competitorText = `\n\n【競合他社のタイトル】\n${competitorTitles.slice(0, 5).map((t, i) => `${i + 1}. ${t}`).join('\n')}`;
+  }
+
   const currentYear = new Date().getFullYear();
-  const competitorInputs = Array.isArray(competitorData?.articles) && competitorData.articles.length > 0
-    ? competitorData.articles
-      .slice(0, 6)
-      .map((article: any) => ({
-        title: String(article?.title || '').trim(),
-        headings: Array.isArray(article?.headings) ? article.headings.slice(0, 6) : [],
-      }))
-      .filter((item: any) => item.title.length > 0)
-    : competitorTitles
-      .slice(0, 6)
-      .map((title: string) => ({ title: String(title || '').trim() }))
-      .filter((item: any) => item.title.length > 0);
+  const prompt = `
+以下のキーワードと競合他社のタイトルを参考に、SEO的に強力で思わずクリックしたくなる魅力的なブログ記事のタイトルを1つだけ生成してください。
 
-  try {
-    const suggestions = await generateTitleSuggestionsWithSharedCore({
-      keyword,
-      relatedKeywords,
-      competitors: competitorInputs,
-      count: 6,
-      callAI: (prompt, maxTokens) => callAI(prompt, aiConfig, Math.max(600, maxTokens)),
-    });
+【メインキーワード】
+${keyword}${relatedKwText}${competitorText}
 
-    for (const candidate of suggestions) {
-      const title = normalizeTitle(candidate.title);
-      if (!title) continue;
+【重要指示】
+- タイトルのみ出力してください（他のテキスト、説明、記号は不要）
+- 28〜52文字程度が理想（多少の前後は許容）
+- メインキーワードを自然に含める
+- 読者の悩みやニーズに刺さるキャッチーな表現にする
+- 「${currentYear}年」「最新」は必要な場合のみ自然に使う（毎回必須ではない）
+- 競合他社と差別化し、独自性や優位性が感じられるようにする
+- 「〇〇とは？」「〇〇は？」のような疑問形だけのタイトルは禁止
+- 「完全ガイド｜失敗しない選び方と費用比較」のような定型語尾は避ける
+- 関連キーワードは自然な範囲で使う（無理に詰め込まない）
+
+タイトル:
+`.trim();
+
+  for (let attempt = 1; attempt <= TITLE_RETRY_COUNT; attempt++) {
+    try {
+      const result = await callAI(prompt, aiConfig, 280);
+      const title = normalizeTitle(result);
       if (isValidSeoTitle(title, keyword, currentYear)) {
         return title;
       }
-      console.warn(`AI title rejected by validator: ${title}`);
+      console.warn(`AI title rejected (attempt ${attempt}/${TITLE_RETRY_COUNT}): ${title}`);
+    } catch (err) {
+      console.warn(`AI title generation failed (attempt ${attempt}/${TITLE_RETRY_COUNT}):`, err);
     }
-  } catch (err) {
-    console.warn('Shared title core failed, fallback title will be used:', err);
   }
 
   const fallbackTitle = buildFallbackTitle(keyword, currentYear);
@@ -1298,7 +1101,7 @@ async function executeSchedule(
     const selectedKeyword = await selectUnusedKeyword(schedule.id, allKeywords, supabase);
 
     if (!selectedKeyword) {
-      throw new KeywordExhaustedError('キーワードを使い切ったため投稿を停止しました');
+      throw new Error('使用可能なキーワードがありません');
     }
     keyword = selectedKeyword;
     console.log(`Keyword selected: ${keyword}`);
@@ -1403,8 +1206,6 @@ async function executeSchedule(
       fixedTitle,
       customInstructions: effectiveCustomInstructions,
       competitorHeadings,
-      relatedKeywords,
-      tone: writingTone,
       callAI: (prompt, maxTokens) => callAI(prompt, aiConfig, maxTokens)
     });
 
@@ -1415,7 +1216,7 @@ async function executeSchedule(
       targetWordCount,
       customInstructions: effectiveCustomInstructions,
       defaultMaxTokens: aiConfig.max_tokens || 2000,
-      qualityRetryCount: 3,
+      qualityRetryCount: 2,
       callAI: (prompt, maxTokens) => callAI(prompt, aiConfig, maxTokens)
     });
 
@@ -1523,18 +1324,6 @@ ${content}
       const resultH2Count = (result.match(/^##\s+/gm) || []).length;
       if (originalH2Count > 0 && resultH2Count === 0) {
         console.warn('AI refinement stripped all headings, discarding result');
-        return content;
-      }
-
-      const originalNonSummaryHeadingCount = countNonSummaryHeadings(content);
-      const resultNonSummaryHeadingCount = countNonSummaryHeadings(result);
-      if (
-        originalNonSummaryHeadingCount >= 2 &&
-        resultNonSummaryHeadingCount < Math.max(2, originalNonSummaryHeadingCount - 1)
-      ) {
-        console.warn(
-          `AI refinement removed too many headings (before=${originalNonSummaryHeadingCount}, after=${resultNonSummaryHeadingCount}), discarding result`
-        );
         return content;
       }
       return result;
@@ -1729,7 +1518,6 @@ JSON配列のみ（説明文は不要）。要素数は ${targetSections.length}
   }
 
   let fullContent = generationResult.fullContent;
-  const baseGeneratedContent = generationResult.fullContent;
   const articleTitle = outline.title;
 
   console.log(`Word count check: target=${targetWordCount}, current=${countGeneratedChars(fullContent)}, initial=${generationResult.wordCount}`);
@@ -1761,20 +1549,9 @@ JSON配列のみ（説明文は不要）。要素数は ${targetSections.length}
   const HEADING_REGEN_TIME_LIMIT_MS = 150_000; // 2.5分
   if (elapsedForHeadingMs < HEADING_REGEN_TIME_LIMIT_MS) {
     try {
-      const headingCountBeforeRegeneration = countNonSummaryHeadings(fullContent);
       const regeneratedHeadingContent = await regenerateHeadingsWithAI(fullContent, articleTitle, keyword, aiConfig);
       if (regeneratedHeadingContent && regeneratedHeadingContent.length > 500) {
-        const headingCountAfterRegeneration = countNonSummaryHeadings(regeneratedHeadingContent);
-        if (
-          headingCountBeforeRegeneration >= 2 &&
-          headingCountAfterRegeneration < Math.max(2, headingCountBeforeRegeneration - 1)
-        ) {
-          console.warn(
-            `Skipping regenerated headings because heading count dropped too much (before=${headingCountBeforeRegeneration}, after=${headingCountAfterRegeneration})`
-          );
-        } else {
-          fullContent = regeneratedHeadingContent;
-        }
+        fullContent = regeneratedHeadingContent;
       }
     } catch (headingError) {
       console.warn('Heading regeneration step skipped due to error:', headingError);
@@ -1790,183 +1567,149 @@ JSON配列のみ（説明文は不要）。要素数は ${targetSections.length}
   let finalPostStatus = schedule.post_status || 'draft';
   let factCheckReport = null;
   let factCheckItemsChecked = 0;
-  const factCheckAlerts: string[] = [];
-  let factCheckExecuted = false;
-  let factCheckCriticalIssues = 0;
-  let factCheckMinorIssues = 0;
 
   if ((schedule as any).enable_fact_check) {
     console.log(`Starting fact-check for article: ${articleTitle}`);
 
     try {
-      // ファクトチェック設定を取得（user_id が無い場合もグローバル設定でフォールバック）
+      // 繝輔ぃ繧ｯ繝医メ繧ｧ繝・け險ｭ螳壹ｒ蜿門ｾ・
       const scheduleUserId = (schedule as any).user_id;
-      let factCheckSettings: any = null;
-
       if (!scheduleUserId) {
-        console.warn(`Schedule ${schedule.id} has no user_id. Falling back to app_settings for fact-check.`);
+        console.warn(`Skipping fact-check for schedule ${schedule.id}: missing user_id`);
       } else {
-        const { data: userFactCheckSettings } = await supabase
+        let { data: factCheckSettings } = await supabase
           .from('fact_check_settings')
           .select('*')
           .eq('user_id', scheduleUserId)
           .order('updated_at', { ascending: false })
           .limit(1)
           .maybeSingle();
-        factCheckSettings = userFactCheckSettings;
-      }
 
-      if (!factCheckSettings) {
-        const { data: globalRows } = await supabase
-          .from('app_settings')
-          .select('key, value')
-          .in('key', [
-            'perplexity_api_key',
-            'fact_check_enabled',
-            'fact_check_model_name',
-            'fact_check_max_items',
-            'fact_check_auto_fix_enabled',
-          ]);
+        if (!factCheckSettings) {
+          const { data: globalRows } = await supabase
+            .from('app_settings')
+            .select('key, value')
+            .in('key', [
+              'perplexity_api_key',
+              'fact_check_enabled',
+              'fact_check_model_name',
+              'fact_check_max_items',
+              'fact_check_auto_fix_enabled',
+            ]);
 
-        if (globalRows && globalRows.length > 0) {
-          const map = new Map<string, string>();
-          globalRows.forEach((row: any) => {
-            map.set(String(row.key), String(row.value ?? ''));
-          });
+          if (globalRows && globalRows.length > 0) {
+            const map = new Map<string, string>();
+            globalRows.forEach((row: any) => {
+              map.set(String(row.key), String(row.value ?? ''));
+            });
 
-          const apiKey = map.get('perplexity_api_key');
-          if (apiKey) {
-            factCheckSettings = {
-              enabled: parseBoolean(map.get('fact_check_enabled'), true),
-              perplexity_api_key: apiKey,
-              model_name: map.get('fact_check_model_name') || 'sonar',
-              max_items_to_check: parseNumber(map.get('fact_check_max_items'), 10),
-              auto_fix_enabled: parseBoolean(map.get('fact_check_auto_fix_enabled'), false),
-            } as any;
+            const apiKey = map.get('perplexity_api_key');
+            if (apiKey) {
+              factCheckSettings = {
+                enabled: parseBoolean(map.get('fact_check_enabled'), true),
+                perplexity_api_key: apiKey,
+                model_name: map.get('fact_check_model_name') || 'sonar',
+                max_items_to_check: parseNumber(map.get('fact_check_max_items'), 10),
+                auto_fix_enabled: parseBoolean(map.get('fact_check_auto_fix_enabled'), false),
+              } as any;
+            }
           }
         }
-      }
 
-      if (factCheckSettings?.enabled && factCheckSettings?.perplexity_api_key) {
-        factCheckExecuted = true;
-        // 險倅ｺ九°繧峨ヵ繧｡繧ｯ繝域ュ蝣ｱ繧呈歓蜃ｺ
-        const factsToCheck = await extractFactsFromContent(fullContent, (schedule as any).fact_check_note);
-        const maxItems = factCheckSettings.max_items_to_check || 10;
-        const itemsToCheck = factsToCheck.slice(0, maxItems);
-        factCheckItemsChecked = itemsToCheck.length;
+        if (factCheckSettings?.enabled && factCheckSettings?.perplexity_api_key) {
+          // 險倅ｺ九°繧峨ヵ繧｡繧ｯ繝域ュ蝣ｱ繧呈歓蜃ｺ
+          const factsToCheck = await extractFactsFromContent(fullContent, (schedule as any).fact_check_note);
+          const maxItems = factCheckSettings.max_items_to_check || 10;
+          const itemsToCheck = factsToCheck.slice(0, maxItems);
+          factCheckItemsChecked = itemsToCheck.length;
 
-        console.log(`Found ${factsToCheck.length} facts, checking top ${itemsToCheck.length} in batches`);
+          console.log(`Found ${factsToCheck.length} facts, checking top ${itemsToCheck.length} in batches`);
 
-        // バッチ検証実行（5件ずつ）
-        let factCheckResults = await verifyFactsBatch(
-          itemsToCheck,
-          factCheckSettings.perplexity_api_key,
-          keyword,
-          factCheckSettings.model_name || 'sonar',
-          5
-        );
-
-        // 重大な誤りをカウント
-        const criticalIssues = factCheckResults.filter(r =>
-          r.verdict === 'incorrect' && r.confidence >= 70
-        ).length;
-        const minorIssues = factCheckResults.filter(r =>
-          r.verdict === 'partially_correct' ||
-          (r.verdict === 'incorrect' && r.confidence < 70)
-        ).length;
-        factCheckCriticalIssues = criticalIssues;
-        factCheckMinorIssues = minorIssues;
-        const scheduleAutoFixValue = (schedule as any).fact_check_auto_fix_enabled;
-        const autoFixEnabled = typeof scheduleAutoFixValue === 'boolean'
-          ? scheduleAutoFixValue
-          : Boolean(factCheckSettings.auto_fix_enabled);
-
-        console.log(`Fact-check completed: ${criticalIssues} critical, ${minorIssues} minor issues`);
-
-        if (autoFixEnabled && (criticalIssues > 0 || minorIssues > 0)) {
-          console.log('Auto-fix mode enabled. Applying AI corrections...');
-          const headingCountBeforeAutoFix = countNonSummaryHeadings(fullContent);
-          const fixedContent = await applyFactCheckCorrections(
-            fullContent,
-            factCheckResults,
+          // バッチ検証実行（5件ずつ）
+          let factCheckResults = await verifyFactsBatch(
+            itemsToCheck,
             factCheckSettings.perplexity_api_key,
             keyword,
-            factCheckSettings.model_name || 'sonar'
+            factCheckSettings.model_name || 'sonar',
+            5
           );
 
-          if (fixedContent && fixedContent.trim().length > 0) {
-            const normalizedFixedContent = normalizeGeneratedContentForPublishing(fixedContent, articleTitle);
-            const headingCountAfterAutoFix = countNonSummaryHeadings(normalizedFixedContent);
-            if (
-              headingCountBeforeAutoFix >= 2 &&
-              headingCountAfterAutoFix < Math.max(2, headingCountBeforeAutoFix - 1)
-            ) {
-              console.warn(
-                `Auto-fix removed too many headings (before=${headingCountBeforeAutoFix}, after=${headingCountAfterAutoFix}). Keeping pre-fix content.`
-              );
-            } else {
-              fullContent = normalizedFixedContent;
-            }
-            const recheckFacts = await extractFactsFromContent(fullContent, (schedule as any).fact_check_note);
-            const recheckItems = recheckFacts.slice(0, maxItems);
-            factCheckResults = await verifyFactsBatch(
-              recheckItems,
+          // 重大な誤りをカウント
+          const criticalIssues = factCheckResults.filter(r =>
+            r.verdict === 'incorrect' && r.confidence >= 70
+          ).length;
+          const minorIssues = factCheckResults.filter(r =>
+            r.verdict === 'partially_correct' ||
+            (r.verdict === 'incorrect' && r.confidence < 70)
+          ).length;
+
+          console.log(`Fact-check completed: ${criticalIssues} critical, ${minorIssues} minor issues`);
+
+          if (factCheckSettings.auto_fix_enabled && (criticalIssues > 0 || minorIssues > 0)) {
+            console.log('Auto-fix mode enabled. Applying AI corrections...');
+            const fixedContent = await applyFactCheckCorrections(
+              fullContent,
+              factCheckResults,
               factCheckSettings.perplexity_api_key,
               keyword,
-              factCheckSettings.model_name || 'sonar',
-              5
+              factCheckSettings.model_name || 'sonar'
             );
 
-            const reCritical = factCheckResults.filter(r =>
-              r.verdict === 'incorrect' && r.confidence >= 70
-            ).length;
-            const reMinor = factCheckResults.filter(r =>
-              r.verdict === 'partially_correct' ||
-              (r.verdict === 'incorrect' && r.confidence < 70)
-            ).length;
-            factCheckCriticalIssues = reCritical;
-            factCheckMinorIssues = reMinor;
-            console.log(`Re-check after auto-fix: ${reCritical} critical, ${reMinor} minor issues`);
-          } else {
-            console.warn('Auto-fix returned empty content. Keeping original content.');
+            if (fixedContent && fixedContent.trim().length > 0) {
+              fullContent = fixedContent;
+              const recheckFacts = await extractFactsFromContent(fullContent, (schedule as any).fact_check_note);
+              const recheckItems = recheckFacts.slice(0, maxItems);
+              factCheckResults = await verifyFactsBatch(
+                recheckItems,
+                factCheckSettings.perplexity_api_key,
+                keyword,
+                factCheckSettings.model_name || 'sonar',
+                5
+              );
+
+              const reCritical = factCheckResults.filter(r =>
+                r.verdict === 'incorrect' && r.confidence >= 70
+              ).length;
+              const reMinor = factCheckResults.filter(r =>
+                r.verdict === 'partially_correct' ||
+                (r.verdict === 'incorrect' && r.confidence < 70)
+              ).length;
+              console.log(`Re-check after auto-fix: ${reCritical} critical, ${reMinor} minor issues`);
+            } else {
+              console.warn('Auto-fix returned empty content. Keeping original content.');
+            }
           }
+
+          // 条件分岐: 重大な誤りがあれば強制的に下書き
+          const criticalIssuesAfterFix = factCheckResults.filter(r =>
+            r.verdict === 'incorrect' && r.confidence >= 70
+          ).length;
+          const minorIssuesAfterFix = factCheckResults.filter(r =>
+            r.verdict === 'partially_correct' ||
+            (r.verdict === 'incorrect' && r.confidence < 70)
+          ).length;
+
+          if (criticalIssuesAfterFix > 0) {
+            console.log(`Critical errors found (${criticalIssuesAfterFix}). Forcing draft status.`);
+            finalPostStatus = 'draft';
+          }
+
+          // 結果を保存
+          const { data: savedReport } = await supabase.from('fact_check_results').insert({
+            schedule_id: schedule.id,
+            checked_items: factCheckResults,
+            total_checked: itemsToCheck.length,
+            issues_found: criticalIssuesAfterFix + minorIssuesAfterFix,
+            critical_issues: criticalIssuesAfterFix
+          }).select().single();
+
+          factCheckReport = savedReport;
+        } else {
+          console.log('Fact-check settings not configured or API key missing');
         }
-
-        // 条件分岐: 重大な誤りがあれば強制的に下書き
-        const criticalIssuesAfterFix = factCheckResults.filter(r =>
-          r.verdict === 'incorrect' && r.confidence >= 70
-        ).length;
-        const minorIssuesAfterFix = factCheckResults.filter(r =>
-          r.verdict === 'partially_correct' ||
-          (r.verdict === 'incorrect' && r.confidence < 70)
-        ).length;
-        factCheckCriticalIssues = criticalIssuesAfterFix;
-        factCheckMinorIssues = minorIssuesAfterFix;
-
-        if (criticalIssuesAfterFix > 0) {
-          console.log(`Critical errors found (${criticalIssuesAfterFix}). Forcing draft status.`);
-          finalPostStatus = 'draft';
-          factCheckAlerts.push(`重大な不整合を ${criticalIssuesAfterFix} 件検出したため、投稿ステータスを下書きに変更しました。`);
-        }
-
-        // 結果を保存
-        const { data: savedReport } = await supabase.from('fact_check_results').insert({
-          schedule_id: schedule.id,
-          checked_items: factCheckResults,
-          total_checked: itemsToCheck.length,
-          issues_found: criticalIssuesAfterFix + minorIssuesAfterFix,
-          critical_issues: criticalIssuesAfterFix
-        }).select().single();
-
-        factCheckReport = savedReport;
-      } else {
-        console.log('Fact-check settings not configured or API key missing');
-        factCheckAlerts.push('ファクトチェック設定または Perplexity API キー未設定のため、検証を実行できませんでした。');
       }
     } catch (factCheckError) {
       console.error('Fact-check failed:', factCheckError);
-      const errorText = factCheckError instanceof Error ? factCheckError.message : String(factCheckError || '');
-      factCheckAlerts.push(`ファクトチェック処理でエラーが発生しました。${errorText}`);
       // 繝輔ぃ繧ｯ繝医メ繧ｧ繝・け繧ｨ繝ｩ繝ｼ縺ｯ蜈ｨ菴薙・蜃ｦ逅・ｒ豁｢繧√↑縺・
     }
   }
@@ -1977,20 +1720,6 @@ JSON配列のみ（説明文は不要）。要素数は ${targetSections.length}
   fullContent = normalizeGeneratedContentForPublishing(fullContent, articleTitle);
   if (contentBeforeNormalization !== fullContent) {
     console.log('Normalized generated content structure before publishing');
-  }
-
-  // 保険: 途中処理で見出しが大きく欠落した場合は、生成直後の見出し構造へフォールバックする
-  const baselineNormalizedContent = normalizeGeneratedContentForPublishing(baseGeneratedContent, articleTitle);
-  const baselineHeadingCount = countNonSummaryHeadings(baselineNormalizedContent);
-  const finalHeadingCount = countNonSummaryHeadings(fullContent);
-  if (
-    baselineHeadingCount >= 2 &&
-    finalHeadingCount < Math.max(2, baselineHeadingCount - 1)
-  ) {
-    console.warn(
-      `Final content lost too many headings (baseline=${baselineHeadingCount}, final=${finalHeadingCount}). Restoring baseline heading structure.`
-    );
-    fullContent = baselineNormalizedContent;
   }
 
   // 5. WordPress投稿（失敗時も記事スナップショットを保存）
@@ -2046,75 +1775,6 @@ JSON配列のみ（説明文は不要）。要素数は ${targetSections.length}
     } catch (cwError) {
       console.error('Chatwork notification failed:', cwError);
       // 通知失敗は全体失敗にしない
-    }
-  }
-
-  const rawNotifyEveryRun = (schedule as any).fact_check_notify_on_every_run === true;
-  const rawNotifyOnAnomaly = (schedule as any).fact_check_notify_on_anomaly ?? true;
-  const factCheckNotifyOnEveryRun = rawNotifyEveryRun;
-  const factCheckNotifyOnAnomaly = rawNotifyEveryRun ? false : rawNotifyOnAnomaly;
-  if (
-    (schedule as any).enable_fact_check &&
-    schedule.fact_check_alert_chatwork_room_id &&
-    chatworkApiToken
-  ) {
-    const alertUrl = postId ? `${wpConfig.url}/?p=${postId}` : '(未投稿)';
-    const postStatusLabel = finalPostStatus === 'publish' ? '公開' : '下書き';
-
-    if (factCheckNotifyOnEveryRun) {
-      try {
-        const summaryTemplate = `【ファクトチェック結果通知】
-スケジュールID: ${schedule.id}
-記事タイトル: {title}
-キーワード: {keyword}
-投稿URL: {url}
-投稿状態: {status}
-
-実行有無: ${factCheckExecuted ? '実行' : '未実行'}
-チェック件数: ${factCheckItemsChecked}件
-重大な不整合: ${factCheckCriticalIssues}件
-軽微な指摘: ${factCheckMinorIssues}件`;
-
-        await sendChatworkNotifications(
-          chatworkApiToken,
-          schedule.fact_check_alert_chatwork_room_id,
-          summaryTemplate,
-          articleTitle,
-          alertUrl,
-          keyword,
-          postStatusLabel
-        );
-      } catch (summaryError) {
-        console.error('Fact-check summary notification failed:', summaryError);
-      }
-    }
-
-    if (factCheckNotifyOnAnomaly && factCheckAlerts.length > 0) {
-      console.log(`Sending fact-check alert to rooms: ${schedule.fact_check_alert_chatwork_room_id}`);
-      try {
-        const alertTemplate = `【ファクトチェック異常通知】
-スケジュールID: ${schedule.id}
-記事タイトル: {title}
-キーワード: {keyword}
-投稿URL: {url}
-投稿状態: {status}
-
-異常内容:
-${factCheckAlerts.map((item, index) => `${index + 1}. ${item}`).join('\n')}`;
-
-        await sendChatworkNotifications(
-          chatworkApiToken,
-          schedule.fact_check_alert_chatwork_room_id,
-          alertTemplate,
-          articleTitle,
-          alertUrl,
-          keyword,
-          postStatusLabel
-        );
-      } catch (alertError) {
-        console.error('Fact-check alert notification failed:', alertError);
-        // 通知失敗は全体失敗にしない
-      }
     }
   }
 
@@ -2179,8 +1839,10 @@ async function selectUnusedKeyword(
   const availableKeywords = allKeywords.filter(k => !usedKeywords.has(k));
 
   if (availableKeywords.length === 0) {
-    console.log(`All keywords used for schedule ${scheduleId}. Posting will be skipped until keywords are reset.`);
-    return null;
+    console.log('All keywords used, resetting list');
+    // 全件使用後はリスト先頭から再開
+    if (allKeywords.length === 0) return null;
+    return allKeywords[0];
   }
 
   // リスト順: 未使用の先頭を選ぶ
@@ -2266,112 +1928,6 @@ async function getCategoryIdBySlugOrName(
 }
 
 // WordPress謚慕ｨｿ
-function splitLongParagraphForReadability(text: string): string[] {
-  const normalized = String(text || '').replace(/\s+/g, ' ').trim();
-  if (!normalized) return [];
-
-  const sentences = normalized
-    .split(/(?<=[。！？!?])\s*/g)
-    .map((s) => s.trim())
-    .filter(Boolean);
-
-  if (sentences.length <= 2) return [normalized];
-
-  const chunks: string[] = [];
-  let buffer: string[] = [];
-  let charCount = 0;
-
-  for (const sentence of sentences) {
-    buffer.push(sentence);
-    charCount += sentence.length;
-
-    if (buffer.length >= 2 || charCount >= 140) {
-      chunks.push(buffer.join(''));
-      buffer = [];
-      charCount = 0;
-    }
-  }
-
-  if (buffer.length > 0) {
-    chunks.push(buffer.join(''));
-  }
-
-  return chunks.length > 0 ? chunks : [normalized];
-}
-
-function renderBufferedBlock(lines: string[]): string[] {
-  const cleaned = (lines || [])
-    .map((line) => String(line || '').trim())
-    .filter((line) => line.length > 0);
-  if (cleaned.length === 0) return [];
-
-  const isUnorderedList = cleaned.every((line) => /^[-*+]\s+/.test(line));
-  if (isUnorderedList) {
-    const items = cleaned
-      .map((line) => line.replace(/^[-*+]\s+/, '').trim())
-      .filter(Boolean)
-      .map((item) => `<li>${item}</li>`)
-      .join('\n');
-    return [`<ul>\n${items}\n</ul>`];
-  }
-
-  const isOrderedList = cleaned.every((line) => /^\d+[.)]\s+/.test(line));
-  if (isOrderedList) {
-    const items = cleaned
-      .map((line) => line.replace(/^\d+[.)]\s+/, '').trim())
-      .filter(Boolean)
-      .map((item) => `<li>${item}</li>`)
-      .join('\n');
-    return [`<ol>\n${items}\n</ol>`];
-  }
-
-  const merged = cleaned.join(' ').replace(/\s+/g, ' ').trim();
-  return splitLongParagraphForReadability(merged).map((paragraph) => `<p>${paragraph}</p>`);
-}
-
-function wrapPlainTextBlocksWithParagraphs(text: string): string {
-  const lines = String(text || '')
-    .replace(/\r\n/g, '\n')
-    .replace(/\r/g, '\n')
-    .split('\n');
-
-  const output: string[] = [];
-  let buffer: string[] = [];
-
-  const flushBuffer = () => {
-    const rendered = renderBufferedBlock(buffer);
-    if (rendered.length > 0) {
-      output.push(...rendered);
-    }
-    buffer = [];
-  };
-
-  for (const rawLine of lines) {
-    const line = String(rawLine || '').trim();
-    if (!line) {
-      flushBuffer();
-      continue;
-    }
-
-    if (/^<h[1-6][^>]*>[\s\S]*<\/h[1-6]>$/i.test(line)) {
-      flushBuffer();
-      output.push(line);
-      continue;
-    }
-
-    if (/^<(ul|ol|li|p|blockquote|pre|table)\b/i.test(line)) {
-      flushBuffer();
-      output.push(line);
-      continue;
-    }
-
-    buffer.push(line);
-  }
-
-  flushBuffer();
-  return output.join('\n\n').replace(/\n{3,}/g, '\n\n').trim();
-}
-
 function formatContentForWordPress(rawContent: string): string {
   let text = String(rawContent ?? '');
 
@@ -2390,12 +1946,9 @@ function formatContentForWordPress(rawContent: string): string {
   }
 
   // Markdown emphasis -> HTML
-  text = text
+  return text
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     .replace(/\*(.+?)\*/g, '<em>$1</em>');
-
-  // 本文を段落化して、詰まって見える問題を防ぐ
-  return wrapPlainTextBlocksWithParagraphs(text);
 }
 
 function normalizeComparableText(value: string): string {
@@ -2452,177 +2005,9 @@ function looksLikeStandaloneHeadingLine(line: string): boolean {
   return /[A-Za-z0-9\u3040-\u30ff\u3400-\u9fff]/.test(text);
 }
 
-function isSummaryHeadingText(text: string): boolean {
-  const normalized = normalizeComparableText(text);
-  if (!normalized) return false;
-  const tokens = ['まとめ', '総まとめ', '結論', '総括', 'おわりに', '最後に', 'summary', 'conclusion'];
-  return tokens.some((token) => normalized.includes(normalizeComparableText(token)));
-}
-
-function sanitizeHeadingLabel(text: string): string {
-  return String(text || '')
-    .replace(/^[\d０-９]+[\.．、:：)\]]\s*/, '')
-    .replace(/^[（(][\d０-９]+[）)]\s*/, '')
-    .replace(/[：:]\s*$/, '')
-    .replace(/\s{2,}/g, ' ')
-    .trim();
-}
-
-function expandSimpleH2Heading(title: string): string {
-  const current = sanitizeHeadingLabel(title);
-  if (!current || isSummaryHeadingText(current)) return current;
-  if (current.length >= 16) return current;
-
-  if (/進行度/.test(current)) return `${current}が期間と費用に与える影響`;
-  if (/種類|方法/.test(current)) return `${current}ごとの特徴・費用・継続しやすさ`;
-  if (/料金体系|費用|価格|相場/.test(current)) return `${current}の内訳と総額で比較するポイント`;
-  if (/基礎|前提|概要|とは/.test(current)) return `${current}と最初に押さえるべき比較軸`;
-  if (/注意|失敗|リスク/.test(current)) return `${current}を踏まえた失敗回避の判断基準`;
-  if (/ポイント|比較|選び方/.test(current)) return `${current}で押さえる判断ポイント`;
-  if (/^.+の.+$/.test(current)) return `${current}を見極める判断ポイント`;
-  return current;
-}
-
-function getHeadingLevel(line: string): number {
-  const trimmed = String(line || '').trim();
-  const markdown = trimmed.match(/^(#{1,6})\s+(.+)$/);
-  if (markdown?.[1]) return markdown[1].length;
-  const html = trimmed.match(/^<h([1-6])[^>]*>[\s\S]*<\/h[1-6]>$/i);
-  if (html?.[1]) return Number(html[1]);
-  return 0;
-}
-
-function rewriteHeadingLine(originalLine: string, level: number, title: string): string {
-  const safeLevel = Math.min(6, Math.max(1, Math.floor(level)));
-  const safeTitle = String(title || '').trim();
-  if (!safeTitle) return originalLine;
-
-  if (/^<h[1-6][^>]*>[\s\S]*<\/h[1-6]>$/i.test(String(originalLine || '').trim())) {
-    return `<h${safeLevel}>${safeTitle}</h${safeLevel}>`;
-  }
-  return `${'#'.repeat(safeLevel)} ${safeTitle}`;
-}
-
-function normalizeHeadingHierarchy(lines: string[]): string[] {
-  const output = [...lines];
-
-  for (let i = 0; i < output.length; i += 1) {
-    const rawLine = String(output[i] || '');
-    const trimmed = rawLine.trim();
-    if (!isHeadingLine(trimmed)) continue;
-
-    let level = getHeadingLevel(trimmed);
-    if (!Number.isFinite(level) || level <= 0) continue;
-
-    let title = sanitizeHeadingLabel(extractHeadingText(trimmed));
-    if (!title) continue;
-
-    // Keep published article structure flat: all section headings become H2.
-    if (level >= 2) {
-      level = 2;
-    }
-
-    if (!isSummaryHeadingText(title)) {
-      title = expandSimpleH2Heading(title);
-    }
-
-    output[i] = rewriteHeadingLine(rawLine, level, title);
-  }
-
-  return output;
-}
-
-function countNonSummaryHeadings(content: string): number {
-  const lines = String(content || '')
-    .replace(/\r\n/g, '\n')
-    .replace(/\r/g, '\n')
-    .split('\n');
-
-  let count = 0;
-  for (const rawLine of lines) {
-    const trimmed = String(rawLine || '').trim();
-    if (!trimmed) continue;
-
-    let level = 0;
-    const markdownMatch = trimmed.match(/^(#{1,6})\s+.+$/);
-    if (markdownMatch?.[1]) {
-      level = markdownMatch[1].length;
-    } else {
-      const htmlMatch = trimmed.match(/^<h([1-6])[^>]*>[\s\S]*<\/h[1-6]>$/i);
-      if (htmlMatch?.[1]) {
-        level = Number(htmlMatch[1]);
-      }
-    }
-
-    if (!Number.isFinite(level) || level < 2) continue;
-    const headingText = extractHeadingText(trimmed);
-    if (!headingText || isSummaryHeadingText(headingText)) continue;
-    count += 1;
-  }
-
-  return count;
-}
-
-function removeDuplicateSummarySections(lines: string[]): string[] {
-  const headingRows: Array<{ start: number; end: number; headingText: string; bodyLength: number }> = [];
-
-  for (let i = 0; i < lines.length; i++) {
-    const text = String(lines[i] || '').trim();
-    if (!isHeadingLine(text)) continue;
-
-    let nextHeading = lines.length;
-    for (let j = i + 1; j < lines.length; j++) {
-      const nextText = String(lines[j] || '').trim();
-      if (isHeadingLine(nextText)) {
-        nextHeading = j;
-        break;
-      }
-    }
-
-    const bodyLength = lines
-      .slice(i + 1, nextHeading)
-      .join(' ')
-      .replace(/\s+/g, '')
-      .length;
-
-    headingRows.push({
-      start: i,
-      end: nextHeading,
-      headingText: extractHeadingText(text),
-      bodyLength,
-    });
-  }
-
-  const summaryRows = headingRows.filter((row) => isSummaryHeadingText(row.headingText));
-  if (summaryRows.length <= 1) return lines;
-
-  const keepRow = summaryRows
-    .slice()
-    .sort((a, b) => b.bodyLength - a.bodyLength)[0];
-  const removeRanges = summaryRows
-    .filter((row) => row.start !== keepRow.start)
-    .map((row) => ({ start: row.start, end: row.end }));
-
-  if (removeRanges.length === 0) return lines;
-
-  const filtered = lines.filter((_, index) => {
-    return !removeRanges.some((range) => index >= range.start && index < range.end);
-  });
-
-  console.log(`Removed duplicate summary sections: ${removeRanges.length} removed`);
-  return filtered;
-}
-
 function shouldRemoveLeadingTitleLine(line: string, articleTitle: string): boolean {
   const raw = extractHeadingText(line);
   if (!raw) return false;
-
-  const looksHeadingLike = isHeadingLine(line) || (
-    raw.length <= 80 &&
-    !/[。！？.!?]$/.test(raw) &&
-    /[A-Za-z0-9\u3040-\u30ff\u3400-\u9fff]/.test(raw)
-  );
-  if (!looksHeadingLike) return false;
 
   const normalizedLine = normalizeComparableText(raw);
   const normalizedTitle = normalizeComparableText(articleTitle);
@@ -2637,20 +2022,6 @@ function shouldRemoveLeadingTitleLine(line: string, articleTitle: string): boole
   if (hasSummarySuffix && (normalizedLine.includes(normalizedTitle) || withoutSummary.includes(normalizedTitle))) {
     return true;
   }
-
-  // Fuzzy near-duplicate check
-  const minComparable = Math.min(normalizedLine.length, normalizedTitle.length);
-  if (minComparable >= 10) {
-    let commonPrefixLen = 0;
-    while (
-      commonPrefixLen < minComparable &&
-      normalizedLine[commonPrefixLen] === normalizedTitle[commonPrefixLen]
-    ) {
-      commonPrefixLen += 1;
-    }
-    const prefixRate = commonPrefixLen / Math.max(1, minComparable);
-    if (prefixRate >= 0.72) return true;
-  }
   return false;
 }
 
@@ -2664,21 +2035,9 @@ function normalizeGeneratedContentForPublishing(rawContent: string, articleTitle
   if (!text) return '';
   let lines = text.split('\n');
 
-  // In WordPress, post title is handled separately; drop accidental leading H1 in body.
-  const firstHeadingIndex = findNextNonEmptyLineIndex(lines, 0);
-  if (firstHeadingIndex !== -1 && getHeadingLevel(lines[firstHeadingIndex]) === 1) {
-    lines.splice(firstHeadingIndex, 1);
-  }
-
   const firstLineIndex = findNextNonEmptyLineIndex(lines, 0);
   if (firstLineIndex !== -1 && shouldRemoveLeadingTitleLine(lines[firstLineIndex], articleTitle)) {
     lines.splice(firstLineIndex, 1);
-  }
-  for (let pass = 0; pass < 2; pass += 1) {
-    const idx = findNextNonEmptyLineIndex(lines, 0);
-    if (idx === -1) break;
-    if (!shouldRemoveLeadingTitleLine(lines[idx], articleTitle)) break;
-    lines.splice(idx, 1);
   }
 
   for (let i = 0; i < lines.length; i++) {
@@ -2691,12 +2050,8 @@ function normalizeGeneratedContentForPublishing(rawContent: string, articleTitle
     if (isHeadingLine(next)) continue;
     if (!isLikelyBodyLine(next)) continue;
 
-    const normalizedHeading = expandSimpleH2Heading(current) || sanitizeHeadingLabel(current) || current;
-    lines[i] = `## ${normalizedHeading}`;
+    lines[i] = `## ${current}`;
   }
-
-  lines = normalizeHeadingHierarchy(lines);
-  lines = removeDuplicateSummarySections(lines);
 
   const withoutEmptyHeadings: string[] = [];
   for (let i = 0; i < lines.length; i++) {
@@ -2721,15 +2076,9 @@ function normalizeGeneratedContentForPublishing(rawContent: string, articleTitle
   }
 
   lines = withoutEmptyHeadings;
-  lines = normalizeHeadingHierarchy(lines);
-  lines = removeDuplicateSummarySections(lines);
   let cleaned = lines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
 
   const postLines = cleaned.split('\n');
-  const postFirstHeadingIndex = findNextNonEmptyLineIndex(postLines, 0);
-  if (postFirstHeadingIndex !== -1 && getHeadingLevel(postLines[postFirstHeadingIndex]) === 1) {
-    postLines.splice(postFirstHeadingIndex, 1);
-  }
   const postFirstLineIndex = findNextNonEmptyLineIndex(postLines, 0);
   if (postFirstLineIndex !== -1 && shouldRemoveLeadingTitleLine(postLines[postFirstLineIndex], articleTitle)) {
     postLines.splice(postFirstLineIndex, 1);
@@ -2946,31 +2295,8 @@ async function sendChatworkNotifications(
   body = body
     .replace(/{title}/g, title)
     .replace(/{url}/g, url)
+    .replace(/{keyword}/g, keyword)
     .replace(/{status}/g, status);
-
-  const keywordValue = String(keyword || '').trim();
-  const normalizedLines = body.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
-  const filteredLines: string[] = [];
-
-  for (const rawLine of normalizedLines) {
-    const line = String(rawLine || '');
-
-    if (!keywordValue && line.includes('{keyword}')) {
-      continue;
-    }
-
-    const replaced = line.replace(/{keyword}/g, keywordValue);
-    if (!keywordValue) {
-      const trimmed = replaced.trim();
-      if (/^(?:■\s*)?キーワード[:：]?\s*$/u.test(trimmed)) {
-        continue;
-      }
-    }
-
-    filteredLines.push(replaced);
-  }
-
-  body = filteredLines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
 
   const errors = [];
 

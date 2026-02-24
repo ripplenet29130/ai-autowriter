@@ -4,6 +4,7 @@ import { ScheduleSetting } from '../types';
 class ScheduleService {
     private readonly maxSchemaRetryCount = 48;
     private readonly schemaOptionalColumns = [
+        'user_id',
         'ai_provider_override',
         'ai_model_override',
         'image_generation_enabled',
@@ -14,7 +15,122 @@ class ScheduleService {
         'generation_mode',
         'enable_fact_check',
         'fact_check_note',
+        'fact_check_alert_chatwork_room_id',
+        'fact_check_notify_on_anomaly',
+        'fact_check_notify_on_every_run',
     ] as const;
+
+    private isMissingTableError(error: any, tableName: string): boolean {
+        const text = this.getErrorText(error).toLowerCase();
+        const table = String(tableName || '').toLowerCase();
+        if (!table) return false;
+        return text.includes(`relation "${table}" does not exist`)
+            || text.includes(`could not find the table '${table}'`)
+            || text.includes(`table "${table}" does not exist`)
+            || text.includes(`table '${table}' does not exist`);
+    }
+
+    private async ensureWpConfigReference(wpConfigId: string): Promise<void> {
+        if (!supabase) {
+            throw new Error('Supabase is not initialized');
+        }
+        const targetId = String(wpConfigId || '').trim();
+        if (!targetId) {
+            throw new Error('WordPress設定IDが空です。設定を選択し直してください。');
+        }
+
+        const { data: currentWpConfig, error: currentWpConfigError } = await supabase
+            .from('wp_configs')
+            .select('id')
+            .eq('id', targetId)
+            .limit(1)
+            .maybeSingle();
+
+        if (!currentWpConfigError && currentWpConfig?.id) {
+            return;
+        }
+
+        if (currentWpConfigError && !this.isMissingTableError(currentWpConfigError, 'wp_configs')) {
+            throw new Error(`wp_configsの確認に失敗しました: ${this.getErrorText(currentWpConfigError)}`);
+        }
+
+        // If wp_configs table does not exist, there is no compatibility action needed.
+        if (currentWpConfigError && this.isMissingTableError(currentWpConfigError, 'wp_configs')) {
+            return;
+        }
+
+        // Compatibility path: copy matching row from legacy wordpress_configs into wp_configs.
+        const { data: legacyRow, error: legacyError } = await supabase
+            .from('wordpress_configs')
+            .select('id, name, url, username, password, category, is_active, post_type')
+            .eq('id', targetId)
+            .limit(1)
+            .maybeSingle();
+
+        if (legacyError) {
+            if (this.isMissingTableError(legacyError, 'wordpress_configs')) {
+                throw new Error(
+                    `選択したWordPress設定(${targetId})が wp_configs に存在しません。` +
+                    ' WordPress設定を開いて保存し直してください。'
+                );
+            }
+            throw new Error(`wordpress_configsの確認に失敗しました: ${this.getErrorText(legacyError)}`);
+        }
+
+        if (!legacyRow?.id) {
+            throw new Error(
+                `選択したWordPress設定(${targetId})が wp_configs に存在しません。` +
+                ' WordPress設定を開いて保存し直してください。'
+            );
+        }
+
+        let compatPayload: Record<string, any> = {
+            id: legacyRow.id,
+            name: legacyRow.name,
+            url: legacyRow.url,
+            username: legacyRow.username,
+            password: legacyRow.password,
+            category: legacyRow.category ?? '',
+            is_active: legacyRow.is_active ?? true,
+            post_type: legacyRow.post_type ?? 'posts',
+        };
+
+        const maxRetries = Math.max(8, Object.keys(compatPayload).length + 1);
+        for (let i = 0; i < maxRetries; i += 1) {
+            const { error } = await supabase
+                .from('wp_configs')
+                .upsert(compatPayload, { onConflict: 'id' });
+
+            if (!error) {
+                return;
+            }
+
+            if (this.isMissingTableError(error, 'wp_configs')) {
+                // Table disappeared between checks; nothing else to do.
+                return;
+            }
+
+            const missingColumn = this.extractMissingColumn(error);
+            if (missingColumn && Object.prototype.hasOwnProperty.call(compatPayload, missingColumn)) {
+                const nextPayload = { ...compatPayload };
+                delete nextPayload[missingColumn];
+                compatPayload = nextPayload;
+                continue;
+            }
+
+            throw new Error(`wp_configsへの互換同期に失敗しました: ${this.getErrorText(error)}`);
+        }
+
+        throw new Error('wp_configsへの互換同期に失敗しました。DBスキーマを確認してください。');
+    }
+
+    private ensureAutoFixEnabledPersisted(requestedEnabled: boolean, row: any): void {
+        if (!requestedEnabled) return;
+        if (row?.fact_check_auto_fix_enabled === true) return;
+        throw new Error(
+            '「ファクトチェック後に自動修正」をONに保存できませんでした。DBスキーマが古い可能性があります。schedule_settings.fact_check_auto_fix_enabled を追加してください。'
+        );
+    }
 
     private getErrorText(error: any): string {
         return [
@@ -64,7 +180,21 @@ class ScheduleService {
             throw new Error('Supabase is not initialized');
         }
 
+        await this.ensureWpConfigReference(schedule.wp_config_id);
+
+        let currentUserId: string | null = null;
+        try {
+            const {
+                data: { user },
+            } = await supabase.auth.getUser();
+            currentUserId = user?.id || null;
+        } catch {
+            currentUserId = null;
+        }
+
+        const requestedAutoFixEnabled = schedule.fact_check_auto_fix_enabled === true;
         let insertPayload: Record<string, any> = {
+            user_id: currentUserId,
             ai_config_id: schedule.ai_config_id,
             ai_provider_override: schedule.ai_provider_override || null,
             ai_model_override: schedule.ai_model_override || null,
@@ -86,6 +216,10 @@ class ScheduleService {
             generation_mode: schedule.generation_mode || 'keyword',
             enable_fact_check: schedule.enable_fact_check || false,
             fact_check_note: schedule.fact_check_note || null,
+            fact_check_auto_fix_enabled: schedule.fact_check_auto_fix_enabled ?? null,
+            fact_check_alert_chatwork_room_id: schedule.fact_check_alert_chatwork_room_id || null,
+            fact_check_notify_on_anomaly: schedule.fact_check_notify_on_anomaly ?? true,
+            fact_check_notify_on_every_run: schedule.fact_check_notify_on_every_run ?? false,
             image_generation_enabled: schedule.image_generation_enabled ?? false,
             images_per_article: schedule.images_per_article ?? 0,
         };
@@ -103,11 +237,17 @@ class ScheduleService {
                 .single();
 
             if (!error) {
+                this.ensureAutoFixEnabledPersisted(requestedAutoFixEnabled, data);
                 return data;
             }
 
             const missingColumn = this.extractMissingColumn(error);
             if (missingColumn && Object.prototype.hasOwnProperty.call(insertPayload, missingColumn)) {
+                if (missingColumn === 'fact_check_auto_fix_enabled' && requestedAutoFixEnabled) {
+                    throw new Error(
+                        '「ファクトチェック後に自動修正」をONに保存できませんでした。DBスキーマが古い可能性があります。schedule_settings.fact_check_auto_fix_enabled を追加してください。'
+                    );
+                }
                 console.warn(`createSchedule: retrying without unknown column "${missingColumn}"`);
                 const nextPayload = { ...insertPayload };
                 delete nextPayload[missingColumn];
@@ -176,11 +316,30 @@ class ScheduleService {
             throw new Error('Supabase is not initialized');
         }
 
+        if (typeof updates.wp_config_id === 'string' && updates.wp_config_id.trim().length > 0) {
+            await this.ensureWpConfigReference(updates.wp_config_id);
+        }
+
+        let currentUserId: string | null = null;
+        try {
+            const {
+                data: { user },
+            } = await supabase.auth.getUser();
+            currentUserId = user?.id || null;
+        } catch {
+            currentUserId = null;
+        }
+
+        const requestedAutoFixEnabled = updates.fact_check_auto_fix_enabled === true;
         const cleanUpdates = { ...updates };
+        if (!('user_id' in cleanUpdates) && currentUserId) {
+            (cleanUpdates as any).user_id = currentUserId;
+        }
         if (cleanUpdates.start_date === '') cleanUpdates.start_date = null as any;
         if (cleanUpdates.end_date === '') cleanUpdates.end_date = null as any;
         if (cleanUpdates.prompt_set_id === '') cleanUpdates.prompt_set_id = null as any;
         if (cleanUpdates.chatwork_room_id === '') cleanUpdates.chatwork_room_id = null as any;
+        if (cleanUpdates.fact_check_alert_chatwork_room_id === '') cleanUpdates.fact_check_alert_chatwork_room_id = null as any;
         if (cleanUpdates.keyword_set_id === '') cleanUpdates.keyword_set_id = null as any;
         if (cleanUpdates.title_set_id === '') cleanUpdates.title_set_id = null as any;
         if (cleanUpdates.ai_provider_override === '') cleanUpdates.ai_provider_override = null as any;
@@ -202,11 +361,17 @@ class ScheduleService {
                 .single();
 
             if (!error) {
+                this.ensureAutoFixEnabledPersisted(requestedAutoFixEnabled, data);
                 return data;
             }
 
             const missingColumn = this.extractMissingColumn(error);
             if (missingColumn && Object.prototype.hasOwnProperty.call(updatePayload, missingColumn)) {
+                if (missingColumn === 'fact_check_auto_fix_enabled' && requestedAutoFixEnabled) {
+                    throw new Error(
+                        '「ファクトチェック後に自動修正」をONに保存できませんでした。DBスキーマが古い可能性があります。schedule_settings.fact_check_auto_fix_enabled を追加してください。'
+                    );
+                }
                 console.warn(`updateSchedule: retrying without unknown column "${missingColumn}"`);
                 const nextPayload = { ...updatePayload };
                 delete nextPayload[missingColumn];

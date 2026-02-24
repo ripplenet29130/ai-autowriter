@@ -49,7 +49,7 @@ export const Scheduler: React.FC = () => {
   const [usedKeywordsMap, setUsedKeywordsMap] = useState<Record<string, string[]>>({});
   const [usedTitlesMap, setUsedTitlesMap] = useState<Record<string, string[]>>({});
   const [lastExecutionMap, setLastExecutionMap] = useState<Record<string, string | null>>({});
-  const [defaultFactCheckAutoFixEnabled, setDefaultFactCheckAutoFixEnabled] = useState(false);
+  const [factCheckAutoFixEnabled, setFactCheckAutoFixEnabled] = useState(false);
 
   const [loading, setLoading] = useState(false);
   const [editingSchedule, setEditingSchedule] = useState<ScheduleSetting | null>(null);
@@ -81,10 +81,6 @@ export const Scheduler: React.FC = () => {
     status: true,
     enable_fact_check: false,
     fact_check_note: '',
-    fact_check_auto_fix_enabled: false,
-    fact_check_alert_chatwork_room_id: '',
-    fact_check_notify_on_anomaly: true,
-    fact_check_notify_on_every_run: false,
     image_generation_enabled: false,
     images_per_article: 0,
   });
@@ -236,7 +232,7 @@ export const Scheduler: React.FC = () => {
 
   const loadFactCheckSettings = async () => {
     if (!supabase) {
-      setDefaultFactCheckAutoFixEnabled(false);
+      setFactCheckAutoFixEnabled(false);
       return;
     }
 
@@ -255,7 +251,7 @@ export const Scheduler: React.FC = () => {
           .limit(1)
           .maybeSingle();
 
-        setDefaultFactCheckAutoFixEnabled(Boolean(data?.auto_fix_enabled));
+        setFactCheckAutoFixEnabled(Boolean(data?.auto_fix_enabled));
         return;
       }
 
@@ -266,10 +262,10 @@ export const Scheduler: React.FC = () => {
         .limit(1);
 
       const raw = String(globalRows?.[0]?.value ?? '').toLowerCase();
-      setDefaultFactCheckAutoFixEnabled(['1', 'true', 'yes', 'on'].includes(raw));
+      setFactCheckAutoFixEnabled(['1', 'true', 'yes', 'on'].includes(raw));
     } catch (error) {
       console.error('Failed to load fact check settings:', error);
-      setDefaultFactCheckAutoFixEnabled(false);
+      setFactCheckAutoFixEnabled(false);
     }
   };
 
@@ -311,14 +307,10 @@ export const Scheduler: React.FC = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    const notifyMode = formData.fact_check_notify_on_every_run ? 'every' : 'anomaly';
     const submitData = {
       ...formData,
       ai_provider_override: useDefaultAiConfig ? '' : selectedAiProvider,
       ai_model_override: useDefaultAiConfig ? '' : selectedAiModel,
-      fact_check_note: '',
-      fact_check_notify_on_anomaly: notifyMode === 'anomaly',
-      fact_check_notify_on_every_run: notifyMode === 'every',
     };
 
     // Validation
@@ -370,8 +362,7 @@ export const Scheduler: React.FC = () => {
       resetForm();
     } catch (error) {
       console.error('Failed to save schedule:', error);
-      const message = error instanceof Error ? error.message : 'スケジュールの保存に失敗しました';
-      toast.error(message);
+      toast.error('スケジュールの保存に失敗しました');
     } finally {
       setLoading(false);
     }
@@ -388,10 +379,6 @@ export const Scheduler: React.FC = () => {
       || activeAiConfig?.model
       || fallbackModels[0]
       || '';
-
-    const notifyMode = schedule.fact_check_notify_on_every_run
-      ? 'every'
-      : 'anomaly';
 
     setUseDefaultAiConfig(isUsingDefault);
     setSelectedAiProvider(overrideProvider);
@@ -419,11 +406,7 @@ export const Scheduler: React.FC = () => {
       writing_tone: schedule.writing_tone || 'professional',
       status: schedule.status,
       enable_fact_check: schedule.enable_fact_check || false,
-      fact_check_note: '',
-      fact_check_auto_fix_enabled: schedule.fact_check_auto_fix_enabled ?? defaultFactCheckAutoFixEnabled,
-      fact_check_alert_chatwork_room_id: schedule.fact_check_alert_chatwork_room_id || '',
-      fact_check_notify_on_anomaly: notifyMode === 'anomaly',
-      fact_check_notify_on_every_run: notifyMode === 'every',
+      fact_check_note: schedule.fact_check_note || '',
       image_generation_enabled: schedule.image_generation_enabled ?? false,
       images_per_article: schedule.images_per_article ?? 0,
     });
@@ -516,10 +499,6 @@ export const Scheduler: React.FC = () => {
       status: true,
       enable_fact_check: false,
       fact_check_note: '',
-      fact_check_auto_fix_enabled: defaultFactCheckAutoFixEnabled,
-      fact_check_alert_chatwork_room_id: '',
-      fact_check_notify_on_anomaly: true,
-      fact_check_notify_on_every_run: false,
       image_generation_enabled: false,
       images_per_article: 0,
     });
@@ -1133,64 +1112,19 @@ export const Scheduler: React.FC = () => {
 
             {formData.enable_fact_check && (
               <div>
-                <label className="flex items-center space-x-2 text-sm text-gray-700 mt-3">
-                  <input
-                    type="checkbox"
-                    checked={formData.fact_check_auto_fix_enabled ?? false}
-                    onChange={(e) => setFormData({ ...formData, fact_check_auto_fix_enabled: e.target.checked })}
-                    className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-                  />
-                  <span>ファクトチェック後に自動修正を行う</span>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  優先チェック箇所（任意）
                 </label>
-                <p className="text-xs text-gray-500 mt-1">
-                  ON: 指摘がある場合に本文を自動補正して再チェックします。
-                </p>
-
-                <label className="block text-sm font-medium text-gray-700 mb-1 mt-4">
-                  異常時のChatWorkルームID（任意）
-                </label>
-                <input
-                  type="text"
-                  value={formData.fact_check_alert_chatwork_room_id || ''}
-                  onChange={(e) => setFormData({ ...formData, fact_check_alert_chatwork_room_id: e.target.value })}
-                  placeholder="例: 123456789"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                <textarea
+                  value={formData.fact_check_note || ''}
+                  onChange={(e) => setFormData({ ...formData, fact_check_note: e.target.value })}
+                  placeholder="特に確認してほしい情報を [[ ]] で囲んで入力してください。&#10;例: この治療法は [[2023年に厚生労働省が承認]] されました。"
+                  rows={3}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent font-mono text-sm"
                 />
                 <p className="text-xs text-gray-500 mt-1">
-                  重大な不整合・ファクトチェック失敗時のみ通知します。複数指定はカンマ区切り。
+                  [[  ]]で囲んだ箇所は優先的にファクトチェックされます
                 </p>
-
-                <div className="mt-3 space-y-2">
-                  <p className="text-xs font-medium text-gray-600">通知モード（どちらか1つ）</p>
-                  <label className="flex items-center space-x-2 text-sm text-gray-700">
-                    <input
-                      type="radio"
-                      name="fact_check_notify_mode"
-                      checked={(formData.fact_check_notify_on_every_run ?? false) === false}
-                      onChange={() => setFormData({
-                        ...formData,
-                        fact_check_notify_on_anomaly: true,
-                        fact_check_notify_on_every_run: false
-                      })}
-                      className="w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500"
-                    />
-                    <span>異常時に通知する（重大不整合・エラー時）</span>
-                  </label>
-                  <label className="flex items-center space-x-2 text-sm text-gray-700">
-                    <input
-                      type="radio"
-                      name="fact_check_notify_mode"
-                      checked={formData.fact_check_notify_on_every_run ?? false}
-                      onChange={() => setFormData({
-                        ...formData,
-                        fact_check_notify_on_anomaly: false,
-                        fact_check_notify_on_every_run: true
-                      })}
-                      className="w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500"
-                    />
-                    <span>毎回、ファクトチェック結果を通知する</span>
-                  </label>
-                </div>
               </div>
             )}
           </div>
@@ -1480,22 +1414,11 @@ export const Scheduler: React.FC = () => {
                               <ShieldCheck className="w-3 h-3" />
                               <span className="font-medium">Enabled</span>
                             </span>
-                            <span className={`text-xs px-2 py-0.5 rounded border ${(schedule.fact_check_auto_fix_enabled ?? defaultFactCheckAutoFixEnabled)
+                            <span className={`text-xs px-2 py-0.5 rounded border ${factCheckAutoFixEnabled
                               ? 'text-emerald-700 bg-emerald-50 border-emerald-100'
                               : 'text-gray-600 bg-gray-50 border-gray-200'
                               }`}>
-                              Auto Fix: {(schedule.fact_check_auto_fix_enabled ?? defaultFactCheckAutoFixEnabled) ? 'ON' : 'OFF'}
-                            </span>
-                            {schedule.fact_check_alert_chatwork_room_id && (
-                              <span className="font-mono text-xs bg-amber-50 text-amber-700 px-2 py-0.5 rounded border border-amber-200">
-                                Alert: {schedule.fact_check_alert_chatwork_room_id}
-                              </span>
-                            )}
-                            <span className={`text-xs px-2 py-0.5 rounded border ${(schedule.fact_check_notify_on_every_run ?? false)
-                              ? 'text-sky-700 bg-sky-50 border-sky-100'
-                              : 'text-amber-700 bg-amber-50 border-amber-100'
-                              }`}>
-                              通知モード: {(schedule.fact_check_notify_on_every_run ?? false) ? '毎回結果' : '異常時のみ'}
+                              Auto Fix: {factCheckAutoFixEnabled ? 'ON' : 'OFF'}
                             </span>
                           </div>
                         )}
@@ -1611,3 +1534,5 @@ export const Scheduler: React.FC = () => {
     </div>
   );
 };
+
+
