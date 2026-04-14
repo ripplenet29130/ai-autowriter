@@ -56,6 +56,7 @@ export class WordPressService {
       applicationPassword: configData.password, // Supabase側が「password」カラムの場合
       isActive: configData.is_active,
       defaultCategory: configData.default_category || "",
+      postType: configData.post_type || 'posts',
     };
   }
 
@@ -242,8 +243,10 @@ export class WordPressService {
         }
       };
 
+      const postType = this.config.postType || 'posts';
+      console.log(`WordPress予約投稿タイプ: ${postType}`);
       const response = await axios.post(
-        `${this.config.url}/wp-json/wp/v2/posts`,
+        `${this.config.url}/wp-json/wp/v2/${postType}`,
         postData,
         { headers: this.getAuthHeaders() }
       );
@@ -540,7 +543,8 @@ export async function saveWordPressConfig(
   wp_url: string,
   wp_username: string,
   wp_app_password: string,
-  wp_category: string
+  wp_category: string,
+  wp_post_type?: string
 ): Promise<any> {
   if (!supabase) {
     throw new Error('Supabase is not initialized');
@@ -554,6 +558,7 @@ export async function saveWordPressConfig(
       username: wp_username,
       password: wp_app_password,
       category: wp_category,
+      post_type: wp_post_type || 'posts',
       is_active: true
     })
     .select()

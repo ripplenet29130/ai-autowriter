@@ -1,4 +1,4 @@
-﻿import { createClient } from 'npm:@supabase/supabase-js@2';
+import { createClient } from 'npm:@supabase/supabase-js@2';
 import { DEFAULT_TARGET_WORD_COUNT } from '../../../src/shared/generationPolicy.ts';
 import {
   countGeneratedChars,
@@ -1416,6 +1416,7 @@ async function executeSchedule(
       customInstructions: effectiveCustomInstructions,
       defaultMaxTokens: aiConfig.max_tokens || 2000,
       qualityRetryCount: 3,
+      finalPolish: false, // スケジューラー側の refineContentWithAI で一括得浄・整形するため内部polishは無効化
       callAI: (prompt, maxTokens) => callAI(prompt, aiConfig, maxTokens)
     });
 
@@ -1441,6 +1442,14 @@ async function executeSchedule(
 
     // 1.5 見出しの番号を除去（例: "## 1. 導入" -> "## 導入"）
     text = text.replace(/^(#{1,6}\s+)\d+[\.．]\s*(.+)$/gm, '$1$2');
+
+    // 1.6 壊れた見出し（「」などの括弧記号で始まる）を修正
+    // 例: ## 」「メリット -> ## メリット
+    text = text.replace(/^(#{1,6}\s+)[\u300c\u300d\u300e\u300f\u3010\u3011\uff08\uff09\[\]\u3001\u3002\uff01\uff1f]+\s*/gm, '$1');
+    // 末尾の閉じかっこも除去（例: ## メリット」 -> ## メリット）
+    text = text.replace(/^(#{1,6}\s+)(.+?)[\u300d\u300f\u3011\uff09]+\s*$/gm, '$1$2');
+    // 記号除去後に空になった見出しは削除
+    text = text.replace(/^#{1,6}\s*$/gm, '');
 
     // 2. 本文冒頭にタイトルが含まれていたら除去 (強化版)
     const lines = text.split('\n');
@@ -1478,7 +1487,12 @@ async function executeSchedule(
     // 4. 「まとめ：」「結論：」プレフィックスの除去
     text = text.replace(/^(まとめ|結論|総括)[：:]\s*/gm, '');
 
-    // 5. 連続する空行を2行まで制限
+    // 5. **（太字マーク）の除去 — 強調記号なし本文を維持
+    text = text.replace(/\*\*(.+?)\*\*/g, '$1');
+    // 孤立した ** も除去
+    text = text.replace(/\*\*/g, '');
+
+    // 6. 連続する空行を2行まで制限
     text = text.replace(/\n{3,}/g, '\n\n');
 
     return text.trim();
@@ -1496,28 +1510,33 @@ async function executeSchedule(
     console.log('Refining content with AI...');
 
     const prompt = `
-あなたはプロの編集者です。以下のブログ記事の原稿を推敲してください。
+あなたはプロの日本語記事編集者です。以下のMarkdown記事を、内容を変えずに読みやすく整形してください。
+
+記事タイトル: ${title}
 
 【絶対に守るルール】
-- 記事の構成（見出しの順番、セクション数）は一切変えないでください
-- すべての ## や ### の見出し行はそのまま残してください（削除・統合禁止）
-- 見出しのMarkdown記法（## や ###）は絶対に削除しないでください
-- 文章の意味や情報は変えないでください
+- ## や ### で始まる見出し行を一字一句変更しない（文言・数・順序すべて維持）
+- 事実・主張・数値・固有名詞を変更しない
+- **（二重アスタリスク）が残っている場合は除去する（例: **重要** → 重要）
+- 記事の最後まで必ず出力する（途中で切らない）
+- 前置き・注釈・謝罪文を出力しない
 
-【やってほしいこと】
-1. 長い段落（3文以上続く部分）を意味の区切りで分割し、空行を入れて読みやすくする
-2. 箇条書きの前後に空行を入れる
-3. 文章の接続が不自然な箇所を軽く整える（意味は変えない）
+【やること（最小限の修正のみ）】
+1. 3文以上が続く段落を意味の区切りで空行で分割する
+2. 箇条書き（- や * で始まる行）の前後に空行を入れる
+3. 文章の接続が不自然な箇所を数カ所だけ軽く整える
+4. 文末が句点以外で不自然に終わっている場合は句点で締める
 
 【原稿】
 ${content}
 
 【出力】
-修正後のMarkdownのみを出力してください。コードブロックで囲まないでください。
+整形後のMarkdownのみを出力してください。コードブロックで囲まないでください。
 `.trim();
 
     try {
-      const result = await callAI(prompt, aiConfig, 4000);
+      const dynamicMaxTokens = Math.max(4000, Math.ceil(content.length * 2));
+      const result = await callAI(prompt, aiConfig, dynamicMaxTokens);
       // 安全チェック: ## が元の記事にあるのに結果にない場合は採用しない
       const originalH2Count = (content.match(/^##\s+/gm) || []).length;
       const resultH2Count = (result.match(/^##\s+/gm) || []).length;
@@ -1794,6 +1813,8 @@ JSON配列のみ（説明文は不要）。要素数は ${targetSections.length}
   let factCheckExecuted = false;
   let factCheckCriticalIssues = 0;
   let factCheckMinorIssues = 0;
+  let factCheckChangeSummaries: string[] = [];
+  let factCheckAutoFixApplied = false;
 
   if ((schedule as any).enable_fact_check) {
     console.log(`Starting fact-check for article: ${articleTitle}`);
@@ -1886,6 +1907,7 @@ JSON配列のみ（説明文は不要）。要素数は ${targetSections.length}
         if (autoFixEnabled && (criticalIssues > 0 || minorIssues > 0)) {
           console.log('Auto-fix mode enabled. Applying AI corrections...');
           const headingCountBeforeAutoFix = countNonSummaryHeadings(fullContent);
+          const contentBeforeAutoFix = fullContent;
           const fixedContent = await applyFactCheckCorrections(
             fullContent,
             factCheckResults,
@@ -1906,6 +1928,11 @@ JSON配列のみ（説明文は不要）。要素数は ${targetSections.length}
               );
             } else {
               fullContent = normalizedFixedContent;
+              factCheckChangeSummaries = summarizeFactCheckContentChanges(contentBeforeAutoFix, normalizedFixedContent, 5);
+              if (factCheckChangeSummaries.length > 0) {
+                factCheckAutoFixApplied = true;
+                factCheckAlerts.push(`ファクトチェック自動修正を ${factCheckChangeSummaries.length} 箇所適用しました。`);
+              }
             }
             const recheckFacts = await extractFactsFromContent(fullContent, (schedule as any).fact_check_note);
             const recheckItems = recheckFacts.slice(0, maxItems);
@@ -2053,13 +2080,17 @@ JSON配列のみ（説明文は不要）。要素数は ${targetSections.length}
   const rawNotifyOnAnomaly = (schedule as any).fact_check_notify_on_anomaly ?? true;
   const factCheckNotifyOnEveryRun = rawNotifyEveryRun;
   const factCheckNotifyOnAnomaly = rawNotifyEveryRun ? false : rawNotifyOnAnomaly;
+  const factCheckAlertRoomIds = String((schedule as any).fact_check_alert_chatwork_room_id || schedule.chatwork_room_id || '').trim();
   if (
     (schedule as any).enable_fact_check &&
-    schedule.fact_check_alert_chatwork_room_id &&
+    factCheckAlertRoomIds &&
     chatworkApiToken
   ) {
     const alertUrl = postId ? `${wpConfig.url}/?p=${postId}` : '(未投稿)';
     const postStatusLabel = finalPostStatus === 'publish' ? '公開' : '下書き';
+    const factCheckChangeBlock = factCheckAutoFixApplied
+      ? `\n修正箇所サマリ:\n${factCheckChangeSummaries.join('\n\n')}`
+      : '\n修正箇所サマリ: なし';
 
     if (factCheckNotifyOnEveryRun) {
       try {
@@ -2073,11 +2104,11 @@ JSON配列のみ（説明文は不要）。要素数は ${targetSections.length}
 実行有無: ${factCheckExecuted ? '実行' : '未実行'}
 チェック件数: ${factCheckItemsChecked}件
 重大な不整合: ${factCheckCriticalIssues}件
-軽微な指摘: ${factCheckMinorIssues}件`;
+軽微な指摘: ${factCheckMinorIssues}件${factCheckChangeBlock}`;
 
         await sendChatworkNotifications(
           chatworkApiToken,
-          schedule.fact_check_alert_chatwork_room_id,
+          factCheckAlertRoomIds,
           summaryTemplate,
           articleTitle,
           alertUrl,
@@ -2090,7 +2121,7 @@ JSON配列のみ（説明文は不要）。要素数は ${targetSections.length}
     }
 
     if (factCheckNotifyOnAnomaly && factCheckAlerts.length > 0) {
-      console.log(`Sending fact-check alert to rooms: ${schedule.fact_check_alert_chatwork_room_id}`);
+      console.log(`Sending fact-check alert to rooms: ${factCheckAlertRoomIds}`);
       try {
         const alertTemplate = `【ファクトチェック異常通知】
 スケジュールID: ${schedule.id}
@@ -2100,11 +2131,11 @@ JSON配列のみ（説明文は不要）。要素数は ${targetSections.length}
 投稿状態: {status}
 
 異常内容:
-${factCheckAlerts.map((item, index) => `${index + 1}. ${item}`).join('\n')}`;
+${factCheckAlerts.map((item, index) => `${index + 1}. ${item}`).join('\n')}${factCheckChangeBlock}`;
 
         await sendChatworkNotifications(
           chatworkApiToken,
-          schedule.fact_check_alert_chatwork_room_id,
+          factCheckAlertRoomIds,
           alertTemplate,
           articleTitle,
           alertUrl,
@@ -2384,15 +2415,13 @@ function formatContentForWordPress(rawContent: string): string {
     .replace(/^\s*##\s+(.+)$/gm, '<h2>$1</h2>')
     .replace(/^\s*#\s+(.+)$/gm, '<h1>$1</h1>');
 
-  // 既にHTMLタグが含まれている場合、emphasis変換はスキップ
-  if (/<\/?[a-z][\s\S]*>/i.test(rawContent)) {
-    return text;
-  }
-
-  // Markdown emphasis -> HTML
+  // Markdown emphasis -> HTML（見出し変換後でも確実に実行）
   text = text
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     .replace(/\*(.+?)\*/g, '<em>$1</em>');
+
+  // 変換漏れの孤立した ** を除去
+  text = text.replace(/\*\*/g, '');
 
   // 本文を段落化して、詰まって見える問題を防ぐ
   return wrapPlainTextBlocksWithParagraphs(text);
@@ -3008,6 +3037,33 @@ function trimForLog(text: string, maxLength: number): string {
   const normalized = String(text || '').replace(/\s+/g, ' ').trim();
   if (normalized.length <= maxLength) return normalized;
   return `${normalized.slice(0, maxLength)}...`;
+}
+
+function summarizeFactCheckContentChanges(
+  beforeContent: string,
+  afterContent: string,
+  maxItems = 5
+): string[] {
+  const beforeLines = String(beforeContent || '').replace(/\r\n/g, '\n').split('\n');
+  const afterLines = String(afterContent || '').replace(/\r\n/g, '\n').split('\n');
+  const maxLines = Math.max(beforeLines.length, afterLines.length);
+  const summaries: string[] = [];
+
+  for (let i = 0; i < maxLines && summaries.length < maxItems; i += 1) {
+    const beforeRaw = beforeLines[i] ?? '';
+    const afterRaw = afterLines[i] ?? '';
+    const beforeLine = trimForLog(beforeRaw, 120);
+    const afterLine = trimForLog(afterRaw, 120);
+    if (beforeLine === afterLine) continue;
+
+    summaries.push(
+      `${summaries.length + 1}. L${i + 1}\n` +
+      `修正前: ${beforeLine || '(空行)'}\n` +
+      `修正後: ${afterLine || '(空行)'}`
+    );
+  }
+
+  return summaries;
 }
 
 type KeyCandidate = { label: 'anon' | 'service'; value: string };

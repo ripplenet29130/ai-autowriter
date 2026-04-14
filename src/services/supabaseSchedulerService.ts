@@ -9,17 +9,20 @@ class SupabaseSchedulerService {
     }
 
     const { scheduleSettings, ...wpConfig } = config;
+    const configId = wpConfig.id;
+    const normalizedCategory = wpConfig.category || wpConfig.defaultCategory || '';
+    const normalizedPostType = wpConfig.postType || 'posts';
 
     const { data, error } = await supabase
       .from('wordpress_configs')
       .upsert({
-        id: wpConfig.id,
+        id: configId,
         name: wpConfig.name,
         url: wpConfig.url,
         username: wpConfig.username,
         password: wpConfig.applicationPassword,
-        category: wpConfig.category || wpConfig.defaultCategory || '',
-        post_type: wpConfig.postType || 'posts',
+        category: normalizedCategory,
+        post_type: normalizedPostType,
         is_active: wpConfig.isActive,
       })
       .select()
@@ -30,8 +33,26 @@ class SupabaseSchedulerService {
       throw new Error(`WordPress設定の保存に失敗しました: ${error.message}`);
     }
 
+    const { error: legacySyncError } = await supabase
+      .from('wp_configs')
+      .upsert({
+        id: configId,
+        name: wpConfig.name,
+        url: wpConfig.url,
+        username: wpConfig.username,
+        app_password: wpConfig.applicationPassword,
+        default_category: normalizedCategory,
+        post_type: normalizedPostType,
+        is_active: wpConfig.isActive,
+      });
+
+    if (legacySyncError) {
+      console.error('Error syncing wp_configs:', legacySyncError);
+      throw new Error(`wp_configs との同期に失敗しました: ${legacySyncError.message}`);
+    }
+
     if (scheduleSettings) {
-      await this.saveScheduleSettings(data.id, scheduleSettings);
+      await this.saveScheduleSettings(configId, scheduleSettings);
     }
 
     return data.id;
@@ -43,16 +64,16 @@ class SupabaseSchedulerService {
     const { data: existing } = await supabase
       .from('schedule_settings')
       .select('id')
-      .eq('wordpress_config_id', wpConfigId)
+      .eq('wp_config_id', wpConfigId)
       .maybeSingle();
 
     const scheduleData = {
-      wordpress_config_id: wpConfigId,
-      is_active: settings.isActive,
+      wp_config_id: wpConfigId,
+      status: settings.isActive,
       frequency: settings.frequency,
-      time: settings.time,
-      target_keywords: settings.targetKeywords,
-      publish_status: settings.publishStatus,
+      post_time: settings.time,
+      related_keywords: settings.targetKeywords,
+      post_status: settings.publishStatus,
     };
 
     if (existing) {
@@ -80,42 +101,66 @@ class SupabaseSchedulerService {
   async loadWordPressConfigs(): Promise<WordPressConfig[]> {
     if (!supabase) return [];
 
-    const { data, error } = await supabase
-      .from('wordpress_configs')
-      .select(`
-        *,
-        schedule_settings (*)
-      `)
-      .order('created_at', { ascending: false });
+    const [{ data: configsData, error: configsError }, { data: schedulesData, error: schedulesError }] = await Promise.all([
+      supabase
+        .from('wordpress_configs')
+        .select('*')
+        .order('created_at', { ascending: false }),
+      supabase
+        .from('schedule_settings')
+        .select('wp_config_id, status, frequency, post_time, related_keywords, post_status'),
+    ]);
 
-    if (error) {
-      console.error('Error loading WordPress configs:', error);
-      throw new Error(`WordPress設定の読み込みに失敗しました: ${error.message}`);
+    if (configsError) {
+      console.error('Error loading WordPress configs:', configsError);
+      throw new Error(`WordPress設定の読み込みに失敗しました: ${configsError.message}`);
     }
 
-    return (data || []).map((item: any) => ({
-      id: item.id,
-      name: item.name,
-      url: item.url,
-      username: item.username,
-      applicationPassword: item.password,
-      isActive: item.is_active,
-      category: item.category,
-      defaultCategory: item.category,
-      postType: item.post_type,
-      scheduleSettings: item.schedule_settings?.[0] ? {
-        isActive: item.schedule_settings[0].is_active,
-        frequency: item.schedule_settings[0].frequency,
-        time: item.schedule_settings[0].time,
-        targetKeywords: item.schedule_settings[0].target_keywords,
-        publishStatus: item.schedule_settings[0].publish_status,
-        timezone: 'Asia/Tokyo',
-      } : undefined,
-    }));
+    if (schedulesError) {
+      console.error('Error loading schedule settings:', schedulesError);
+      throw new Error(`スケジュール設定の読み込みに失敗しました: ${schedulesError.message}`);
+    }
+
+    const scheduleByWpConfigId = new Map(
+      (schedulesData || []).map((item: any) => [item.wp_config_id, item])
+    );
+
+    return (configsData || []).map((item: any) => {
+      const schedule = scheduleByWpConfigId.get(item.id);
+      return {
+        id: item.id,
+        name: item.name,
+        url: item.url,
+        username: item.username,
+        applicationPassword: item.password,
+        isActive: item.is_active,
+        category: item.category,
+        defaultCategory: item.category,
+        postType: item.post_type,
+        scheduleSettings: schedule ? {
+          isActive: schedule.status,
+          frequency: schedule.frequency,
+          time: schedule.post_time,
+          targetKeywords: schedule.related_keywords || [],
+          publishStatus: schedule.post_status,
+          timezone: 'Asia/Tokyo',
+        } : undefined,
+      };
+    });
   }
 
   async deleteWordPressConfig(id: string): Promise<void> {
     if (!supabase) return;
+
+    const { error: scheduleError } = await supabase
+      .from('schedule_settings')
+      .delete()
+      .eq('wp_config_id', id);
+
+    if (scheduleError) {
+      console.error('Error deleting schedule settings:', scheduleError);
+      throw new Error(`スケジュール設定の削除に失敗しました: ${scheduleError.message}`);
+    }
 
     const { error } = await supabase
       .from('wordpress_configs')
@@ -125,6 +170,16 @@ class SupabaseSchedulerService {
     if (error) {
       console.error('Error deleting WordPress config:', error);
       throw new Error(`WordPress設定の削除に失敗しました: ${error.message}`);
+    }
+
+    const { error: legacyDeleteError } = await supabase
+      .from('wp_configs')
+      .delete()
+      .eq('id', id);
+
+    if (legacyDeleteError) {
+      console.error('Error deleting legacy wp_config:', legacyDeleteError);
+      throw new Error(`wp_configs の削除に失敗しました: ${legacyDeleteError.message}`);
     }
   }
 

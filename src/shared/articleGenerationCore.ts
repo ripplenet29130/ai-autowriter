@@ -331,7 +331,20 @@ function selectH3TitlesForH2(h2Title: string, count: number): string[] {
     if (title.includes('選び方') || title.includes('比較')) {
       return ['比較時のチェック項目', '判断を誤らないコツ'];
     }
-    return ['重要ポイント', '実践時の着眼点'];
+    if (title.includes('方法') || title.includes('手順') || title.includes('やり方')) {
+      return ['基本的な手順', '実践時の注意点'];
+    }
+    if (title.includes('種類') || title.includes('タイプ') || title.includes('分類')) {
+      return ['主な種類と特徴', '用途に応じた選び方'];
+    }
+    if (title.includes('原因') || title.includes('理由') || title.includes('なぜ')) {
+      return ['主な原因の整理', '根本的な対処の考え方'];
+    }
+    if (title.includes('管理') || title.includes('運用') || title.includes('メンテ')) {
+      return ['日常管理のポイント', 'トラブルを防ぐ対策'];
+    }
+    // デフォルト：H2タイトルから文脈に合った見出しを生成
+    return ['基本的な考え方', '実践における着眼点'];
   })();
   return pool.slice(0, Math.max(1, Math.min(count, pool.length)));
 }
@@ -457,7 +470,8 @@ async function polishArticleFormatting(
   ].join('\n');
 
   try {
-    const polished = (await callAI(prompt, Math.min(2200, Math.max(1200, maxTokens)))).trim();
+    const polishTokens = Math.max(2200, Math.ceil(originalContent.length * 1.8));
+    const polished = (await callAI(prompt, Math.min(polishTokens, Math.max(1200, maxTokens)))).trim();
     if (!isValidPolishedArticle(originalContent, polished)) {
       return originalContent;
     }
@@ -764,8 +778,11 @@ async function completeSectionIfIncomplete(
 }
 
 function formatReadableParagraphs(content: string): string {
-  const text = (content || '').trim();
+  let text = (content || '').trim();
   if (!text) return '';
+
+  // ** (太字マーク) を除去 — 公開記事ではMarkdown強調をそのまま残さない
+  text = text.replace(/\*\*(.+?)\*\*/g, '$1').replace(/\*\*/g, '');
 
   const blocks = text.split(/\n{2,}/);
   const formattedBlocks = blocks.map((block) => {
@@ -1049,12 +1066,17 @@ function buildFallbackSummarySection(outline: SharedArticleOutline, content: str
     ? `本記事では、${h2Titles.join('、')}を中心に、判断に必要な情報を整理しました。`
     : '本記事では、判断に必要な情報を整理しました。';
 
+  // 記事テーマに合った汎用的なまとめ文を生成（特定ジャンルに依存しない）
+  const closingLine = h2Titles.length > 0
+    ? `${h2Titles[0]}をはじめとする各ポイントを踏まえ、目的や条件に合った選択・対応を行うことが重要です。`
+    : '各ポイントを総合的に確認し、目的や条件に合った選択・対応を行うことが重要です。';
+
   return [
     '## まとめ',
     '',
     focusLine,
     '',
-    '導入前には、初期費用と維持管理の負担、住環境との相性、期待できる効果を総合的に確認し、無理なく継続できる選択を行うことが重要です。'
+    closingLine
   ].join('\n');
 }
 
@@ -1075,23 +1097,33 @@ function buildSupplementSectionCandidates(
       description: '比較時に見るべき観点を具体的に整理する',
     },
     {
-      title: '選ぶ前に確認したい注意点',
-      description: '失敗を避けるためのチェックポイントを明確にする',
+      title: '選定前に押さえておきたい注意点',
+      description: '失敗を避けるためのポイントを明確にする',
     },
     {
-      title: '長く使うための実践ポイント',
-      description: '無理なく続けるための実践策を提示する',
+      title: '運用・管理における実践ポイント',
+      description: '継続的に活用するための実践策を提示する',
     },
+  ];
+
+  // 関連キーワードからセクション候補を生成（タイトルを自然な形に）
+  const supplementTemplates = [
+    (k: string) => ({ title: `${k}の選び方と注意点`, description: `${k}に関する選定基準と落とし穴を整理する` }),
+    (k: string) => ({ title: `${k}の種類と特徴`, description: `${k}の分類と各特性を整理する` }),
+    (k: string) => ({ title: `${k}の活用方法`, description: `${k}を効果的に使うための具体的な方法を説明する` }),
+    (k: string) => ({ title: `${k}に関するよくある疑問`, description: `${k}についての疑問と回答を整理する` }),
+    (k: string) => ({ title: `${k}の管理と最適化`, description: `${k}のパフォーマンスを維持・向上させる方法を解説する` }),
+    (k: string) => ({ title: `${k}を選ぶ際のポイント`, description: `${k}の効果的な選定基準を説明する` }),
   ];
 
   const related = (relatedKeywords || [])
     .map((k) => String(k || '').trim())
     .filter((k) => k.length > 0)
     .slice(0, 6)
-    .map((k) => ({
-      title: `${k}を踏まえたチェックポイント`,
-      description: '関連テーマをもとに比較時の見落としを防ぐ',
-    }));
+    .map((k, index) => {
+      const templateFn = supplementTemplates[index % supplementTemplates.length];
+      return templateFn(k);
+    });
 
   return [...related, ...base];
 }
@@ -1330,7 +1362,13 @@ async function generateSectionWithQualityGate(
     customInstructions: params.customInstructions
   });
 
-  let content = stripHeading(await params.callAI(prompt, params.maxTokens));
+  // セクションの推定文字数に応じて十分な maxTokens を確保（日本語 1 文字 ≈ 1.5〜2 トークン + 余裕）
+  const sectionMaxTokens = Math.max(
+    1500,
+    params.maxTokens,
+    Math.ceil(section.estimatedWordCount * 2.5)
+  );
+  let content = stripHeading(await params.callAI(prompt, sectionMaxTokens));
   const { minAllowed, maxAllowed } = getWordCountBounds(section.estimatedWordCount, DEFAULT_WORD_COUNT_TOLERANCE);
 
   for (let attempt = 0; attempt <= params.qualityRetryCount; attempt++) {
@@ -1553,24 +1591,24 @@ export async function generateOutlineWithSharedCore(
     const bodyTarget = Math.max(1, fallbackSectionCount - 2); // lead + summary を除く
     const fallbackCandidates: Array<{ title: string; description: string }> = [
       {
-        title: `${params.keyword}の比較ポイント`,
-        description: '判断基準を明確にして比較する',
+        title: `${params.keyword}の種類と特徴`,
+        description: '主要な分類と各タイプの特性を整理する',
       },
       {
-        title: `${params.keyword}の実践手順`,
-        description: '失敗しにくい進め方を具体化する',
+        title: `${params.keyword}の適切な選定基準`,
+        description: '目的・条件に応じた選び方の判断軸を示す',
       },
       {
-        title: `${params.keyword}の注意点`,
-        description: 'よくある失敗を避けるための留意点を整理する',
+        title: `${params.keyword}の運用と管理のポイント`,
+        description: '実際の運用で押さえるべき管理手順を解説する',
       },
       {
-        title: `${params.keyword}の費用と継続の考え方`,
-        description: '継続しやすさと費用対効果の観点から整理する',
+        title: `${params.keyword}に関するよくある問題と対処法`,
+        description: '実務でよく発生する課題とその解決策を示す',
       },
       {
-        title: '見落としやすいチェック項目',
-        description: '選定時に重要な観点を具体例とともに整理する',
+        title: `${params.keyword}の導入・設定における留意点`,
+        description: '導入時に見落としやすい観点を具体的に整理する',
       },
     ];
 
@@ -1621,7 +1659,7 @@ export async function generateArticleFromOutlineWithSharedCore(
   params: GenerateArticleWithSharedCoreParams
 ): Promise<SharedGenerationResult> {
   const tone = normalizeTone(params.tone);
-  const maxTokens = Math.max(900, params.defaultMaxTokens || 2000);
+  const maxTokens = Math.max(2000, params.defaultMaxTokens || 4000);
   const qualityRetryCount = params.qualityRetryCount ?? 1;
   const sectionsWithContent: SharedSectionWithContent[] = [];
 
@@ -1660,7 +1698,6 @@ export async function generateArticleFromOutlineWithSharedCore(
       qualityRetryCount
     );
   }
-  fullContent = ensureSummarySection(fullContent, params.outline);
 
   if (params.finalPolish !== false) {
     fullContent = await polishArticleFormatting(
@@ -1670,10 +1707,10 @@ export async function generateArticleFromOutlineWithSharedCore(
       maxTokens
     );
   }
-  fullContent = ensureSummarySection(fullContent, params.outline);
 
   fullContent = insertSubheadingsIntoLongSections(fullContent);
   fullContent = trimDanglingTail(formatReadableParagraphs(fullContent));
+  // まとめセクション保険は最後に一度だけ実行
   fullContent = ensureSummarySection(fullContent, params.outline);
   if (!fullContent.endsWith('\n')) {
     fullContent = `${fullContent}\n`;

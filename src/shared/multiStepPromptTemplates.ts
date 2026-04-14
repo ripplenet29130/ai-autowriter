@@ -52,13 +52,13 @@ export function buildSchedulerStructureRules(targetWordCount: number): string {
 export function buildSchedulerOutlinePrompt(input: OutlinePromptInput): string {
   const competitorInsights =
     input.competitorHeadings && input.competitorHeadings.length > 0
-      ? `\n【参考見出し（必要なものだけ取り入れる）】\n- ${input.competitorHeadings.join('\n- ')}\n`
+      ? `\n【既存記事の見出し（差別化のためだけに参照。模倣・流用禁止）】\n- ${input.competitorHeadings.join('\n- ')}\n`
       : '';
 
   const structureRules = buildSchedulerStructureRules(input.targetWordCount);
 
   return `
-次の条件で、日本語SEO記事のアウトラインを作成してください。
+あなたは日本語SEOライターです。以下の条件で、オリジナルの記事アウトラインを作成してください。
 
 【メインキーワード】
 ${input.keyword}
@@ -71,7 +71,15 @@ ${input.customInstructions ? `【追加指示】\n${input.customInstructions}\n`
 ${competitorInsights}
 ${structureRules}
 
-出力形式は必ず次のフォーマットにしてください（この形式以外は不可）。
+【見出し作成ルール】
+- 各見出しは、読者にそのセクションで得られる内容・価値が具体的に伝わる表現にする
+- 既存記事の見出しを模倣しない。構成・語順・表現すべてオリジナルにする
+- キーワードを機械的に繰り返さない（全見出しに同じ語を入れない）
+- 「〜のチェックポイント」「〜のポイントを押さえる」などの汎用的な定型表現を避ける
+- 見出しの先頭・末尾に「」や（）などの括弧記号を使わない
+- 出力は下記フォーマットのみ。前置き・解説・補足は不要
+
+出力形式（この形式のみ）:
 
 Title: [記事タイトル]
 
@@ -89,7 +97,6 @@ Estimated: [推定文字数]
 
 注意:
 - 最後のH2は「まとめ」にしてください。
-- 出力は上記フォーマットのみ。前置きや解説は不要です。
 `.trim();
 }
 

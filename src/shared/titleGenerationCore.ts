@@ -109,31 +109,53 @@ function fallbackTitleSuggestions(
   relatedKeywords: string[] = [],
   hotTopics: string[] = []
 ): SharedTitleSuggestion[] {
-  const currentYear = new Date().getFullYear();
   const base = String(keyword || '').trim() || '記事テーマ';
   const topic = pickTopicTerm(base, relatedKeywords, hotTopics);
-  const templates = [
-    `${currentYear}年版 ${base}の選び方｜後悔しない比較ポイント`,
-    `${base}で迷わないための基礎知識と判断基準`,
-    `${base}の費用相場と${topic}で見る比較ポイント`,
-    `${base}の失敗例から学ぶ、後悔しない進め方`,
-    `はじめての${base}で確認すべき手順と注意点`,
-    `${base}を比較する前に知っておきたいチェックリスト`,
-    `${base}の評判・実例から見る向いている人の特徴`,
-    `${base}のおすすめ候補を整理｜選定時に見るべき軸`,
+
+  // フォールバックも多様なパターンで生成（定型語尾の連発を避ける）
+  const patterns: [string, string][] = [
+    [
+      `${base}とは何か：仕組みと基本的な考え方`,
+      'テーマの本質を問う形式で、基礎から理解したい読者に対応するため。',
+    ],
+    [
+      `${base}を正しく理解するための重要ポイント`,
+      '「正しく」という言葉で、情報の信頼性を求める読者の関心を引くため。',
+    ],
+    [
+      `${base}における${topic}の役割と実践的な活用法`,
+      '関連トピックとの関係を切り口に、実用性を重視する読者に訴求するため。',
+    ],
+    [
+      `現場で役立つ${base}の知識と対処法`,
+      '「現場」という具体性が実務者の共感を呼び、クリック動機を高めるため。',
+    ],
+    [
+      `${base}の効果を最大化するための管理・運用のコツ`,
+      '導入後の運用フェーズを意識した読者層に合致する切り口のため。',
+    ],
+    [
+      `${base}に関してよく見落とされる注意点と対策`,
+      '「見落とし」という表現が検索意図と合致し、情報収集層を引き込むため。',
+    ],
+    [
+      `${base}の種類と特徴を整理：目的に応じた使い分け方`,
+      '分類・整理の需要に応え、選定で迷う読者の意思決定を助けるため。',
+    ],
+    [
+      `${base}の導入・設定で押さえるべき手順と判断軸`,
+      '手順ベースの情報ニーズに応え、初めて取り組む読者にとって有益なため。',
+    ],
   ];
 
   const seen = new Set<string>();
   const suggestions: SharedTitleSuggestion[] = [];
-  for (const raw of templates) {
-    const title = normalizeTitleText(raw);
+  for (const [rawTitle, reason] of patterns) {
+    const title = normalizeTitleText(rawTitle);
     const comparable = normalizeComparable(title);
     if (!title || !comparable || seen.has(comparable)) continue;
     seen.add(comparable);
-    suggestions.push({
-      title,
-      reason: buildReasonFromTitle(title),
-    });
+    suggestions.push({ title, reason });
     if (suggestions.length >= Math.max(1, count)) break;
   }
   return suggestions;
@@ -262,33 +284,33 @@ export async function generateTitleSuggestionsWithSharedCore(
     : '（データなし）';
 
   const prompt = `
-以下のキーワードと競合他社のタイトルを参考に、SEO的に強力で思わずクリックしたくなる魅力的なブログ記事のタイトル案を${count}件提案してください。
+あなたは日本語SEOライターです。以下のキーワードで、オリジナルのブログ記事タイトルを${count}件作成してください。
 
 【メインキーワード】
 ${keyword}
 
-【関連キーワード/トピック（SEO強化）】
+【関連キーワード（記事内容の参考に）】
 ${relatedLine}
 
-${essentialKeywords.length > 0 ? `【必須キーワード（自然な範囲で優先）】\n${essentialKeywords.join('、')}\n` : ''}
-${ngKeywords.length > 0 ? `【NGキーワード（使用禁止）】\n${ngKeywords.join('、')}\n` : ''}
+${essentialKeywords.length > 0 ? `【必ず含めるキーワード】\n${essentialKeywords.join('、')}\n` : ''}
+${ngKeywords.length > 0 ? `【使用禁止キーワード】\n${ngKeywords.join('、')}\n` : ''}
 
-【競合他社のタイトルと構成】
+${competitors.length > 0 ? `【既存記事（差別化のために参照、模倣しないこと）】
 ${competitorText}
+` : ''}
+【タイトル作成ルール】
+1. 既存記事のタイトルを真似しない。構成・語順・語尾すべて独自に考える
+2. 「○○の選び方」「後悔しない」「○○年版」などの使い古した定型句を避ける
+3. ${count}件それぞれ異なる切り口・視点・文体にする（同じ型の繰り返し禁止）
+4. 読者の「なぜ？」「どうやって？」「何が違う？」などの問いに直接答えるタイトルにする
+5. キーワードは文脈に合わせて自然に含め、無理な詰め込みをしない
+6. 記事の具体的な内容・価値が伝わるタイトルにする（曖昧な表現を避ける）
+7. 各タイトルに、そのタイトルにした理由（読者視点での狙い）を1文で添える
 
-【重要指示】
-- 毎回異なる視点や切り口（比較、注意点、始め方、失敗回避、費用整理など）を混ぜる
-- タイトルの語尾を毎回同じ型にしない（定型語尾の連発を避ける）
-- 「2026年版」「後悔しない比較ポイント」などの定型句に偏らない
-- キーワードは自然に含め、無理な詰め込みをしない
-- 数字が有効な場合のみ使う（必須ではない）
-- 各タイトル案に短い理由を付ける
-- 出力はJSON配列のみ
-
-出力形式:
+【出力形式（JSON配列のみ、前置き不要）】
 [
-  { "title": "タイトル案1", "reason": "狙い" },
-  { "title": "タイトル案2", "reason": "狙い" }
+  { "title": "タイトル1", "reason": "この切り口にした理由" },
+  { "title": "タイトル2", "reason": "この切り口にした理由" }
 ]
 `.trim();
 
