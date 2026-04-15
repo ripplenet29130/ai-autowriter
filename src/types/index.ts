@@ -23,10 +23,10 @@ export interface Article {
   wordPressId?: number;
   isPublished?: boolean;
   wordPressUrl?: string;
-  seoScore?: number;
   readingTime?: number;
   wordCount?: number;
   targetWordCount?: number;
+  articleGoal?: ArticleGoal;
   trendData?: TrendAnalysisResult;
   factCheckResults?: FactCheckResult[];
 }
@@ -41,6 +41,7 @@ export interface WordPressConfig {
   defaultCategory?: string;
   category?: string;
   postType?: string;
+  styleReferenceUrl?: string;
   scheduleSettings?: ScheduleSettings;
 }
 
@@ -94,6 +95,7 @@ export interface GenerationPrompt {
   previousContent?: string;
   isLead?: boolean;
   customInstructions?: string;
+  articleGoal?: ArticleGoal;
   imagesPerArticle?: number; // 險倅ｺ九≠縺溘ｊ縺ｮ逕ｻ蜒冗函謌先椢謨ｰ
 }
 
@@ -152,6 +154,7 @@ export interface ScheduleSetting {
   chatwork_message_template?: string;
   target_word_count?: number;
   writing_tone?: string;
+  article_goal?: 'standard' | 'beginner' | 'practical' | 'seo' | 'authority' | 'comparison' | 'conversion';
   created_at?: string;
   updated_at?: string;
   prompt_set_id?: string; // DB column name
@@ -168,6 +171,15 @@ export interface ScheduleSetting {
   images_per_article?: number;
 }
 
+export type ArticleGoal =
+  | 'standard'
+  | 'beginner'
+  | 'practical'
+  | 'seo'
+  | 'authority'
+  | 'comparison'
+  | 'conversion';
+
 export interface TitleSuggestion {
   id: string;
   title: string;
@@ -176,8 +188,6 @@ export interface TitleSuggestion {
   trendScore: number;
   searchVolume: number;
   competition: 'low' | 'medium' | 'high';
-  seoScore: number;
-  clickPotential: number;
   targetAudience: string;
   contentAngle: string;
   relatedKeywords: string[];
@@ -194,10 +204,6 @@ export interface TrendTopic {
   competition: 'low' | 'medium' | 'high';
   type: 'main' | 'related' | 'suggestion';
   relatedKeywords?: string[];
-  seoData?: {
-    difficulty: number;
-    opportunity: number;
-  };
 }
 
 export interface TrendAnalysisResult {
@@ -208,11 +214,6 @@ export interface TrendAnalysisResult {
   trend?: 'rising' | 'stable' | 'declining';
   relatedKeywords: string[];
   hotTopics: string[];
-  seoData: {
-    difficulty: number;
-    opportunity: number;
-    suggestions: string[];
-  };
   competitorAnalysis: {
     topArticles: CompetitorArticle[];
     averageLength: number;

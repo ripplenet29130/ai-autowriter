@@ -14,7 +14,7 @@ import { FactCheckResultsDisplay } from '../FactCheckResultsDisplay';
 import { factCheckService } from '../../services/factCheckService';
 import type { FactCheckResult } from '../../types';
 import type { FactCheckItem } from '../../types/factCheck';
-import type { Article } from '../../types';
+import type { Article, ArticleGoal } from '../../types';
 import toast from 'react-hot-toast';
 
 /**
@@ -30,6 +30,7 @@ export const AIGenerator: React.FC = () => {
     const [keywords, setKeywords] = useState<string[]>([]);
     const [tone, setTone] = useState<'professional' | 'casual' | 'technical' | 'friendly'>('professional');
     const [length, setLength] = useState<'short' | 'medium' | 'long'>('medium');
+    const [articleGoal, setArticleGoal] = useState<ArticleGoal>('standard');
     const [generationMode, setGenerationMode] = useState<'auto' | 'interactive'>('interactive');
     const [showMultiStep, setShowMultiStep] = useState(false);
     const [useDefaultAIConfig, setUseDefaultAIConfig] = useState(true);
@@ -271,6 +272,66 @@ export const AIGenerator: React.FC = () => {
         setKeywords(keywords.filter(k => k !== keyword));
     };
 
+    const buildArticleGoalInstructions = (goal: ArticleGoal): string => {
+        switch (goal) {
+            case 'beginner':
+                return [
+                    '記事の目的は初心者向けです。',
+                    '- 専門用語は短くかみ砕いて説明する',
+                    '- 前提知識がない読者でも理解できる順序で書く',
+                    '- いきなり比較や結論だけに飛ばず、基礎から整理する'
+                ].join('\n');
+            case 'practical':
+                return [
+                    '記事の目的は実務重視です。',
+                    '- 一般論の羅列で終わらせず、現場の判断材料を優先する',
+                    '- 各見出しで具体例、判断場面、失敗例のいずれかを入れる',
+                    '- 読者が次に何を確認すべきか分かるように書く'
+                ].join('\n');
+            case 'seo':
+                return [
+                    '記事の目的はSEO重視です。',
+                    '- 見出しごとに読者の疑問へ直接答える',
+                    '- 網羅性を保ちつつ、要点がすぐ分かる構成にする',
+                    '- 抽象表現の繰り返しを避け、検索意図に沿って整理する'
+                ].join('\n');
+            case 'authority':
+                return [
+                    '記事の目的は専門性重視です。',
+                    '- 条件差、例外、注意点を省略しない',
+                    '- 断定だけで終わらせず、どの条件でそう言えるかを書く',
+                    '- 実務での判断に使える解像度を優先する'
+                ].join('\n');
+            case 'comparison':
+                return [
+                    '記事の目的は比較・選定向けです。',
+                    '- 違いの説明だけで終わらせず、どんな条件ならどちらが向くかまで述べる',
+                    '- 比較軸を明示し、それぞれの向き不向きを整理する',
+                    '- 読者が選べるように判断基準を入れる'
+                ].join('\n');
+            case 'conversion':
+                return [
+                    '記事の目的は問い合わせ導線向けです。',
+                    '- 読者の課題を整理し、検討時の確認ポイントを明確にする',
+                    '- 過剰に煽らず、導入判断に必要な情報を優先する',
+                    '- メリットだけでなく注意点や条件差も書く'
+                ].join('\n');
+            default:
+                return [
+                    '記事の目的は標準です。',
+                    '- 教科書的な総論の羅列にしない',
+                    '- 同じ内容の言い換えを繰り返さない',
+                    '- 読者が実務や意思決定に使える情報を優先する'
+                ].join('\n');
+        }
+    };
+
+    const buildEffectiveCustomInstructions = (base?: string, goal?: ArticleGoal) => {
+        const parts = [base?.trim(), buildArticleGoalInstructions(goal || articleGoal)]
+            .filter((value): value is string => Boolean(value && value.trim()));
+        return parts.join('\n\n');
+    };
+
     const handleGenerate = async (finalKeywords: string[]) => {
         if (finalKeywords.length === 0) {
             return;
@@ -281,7 +342,8 @@ export const AIGenerator: React.FC = () => {
             keywords: finalKeywords,
             tone,
             length,
-            customInstructions: selectedPromptSet?.customInstructions,
+            articleGoal,
+            customInstructions: buildEffectiveCustomInstructions(selectedPromptSet?.customInstructions, articleGoal),
             targetWordCount,
             imagesPerArticle
         });
@@ -339,13 +401,14 @@ export const AIGenerator: React.FC = () => {
                 targetLength: length,
                 selectedTitle: selectedTitle || undefined,
                 targetWordCount,
-                customInstructions: selectedPromptSet?.customInstructions,
+                customInstructions: buildEffectiveCustomInstructions(selectedPromptSet?.customInstructions, articleGoal),
                 imagesPerArticle: imageGenEnabled ? imagesPerArticle : 0 // 画像生成設定を追加
             });
 
             if (article) {
-                setGeneratedArticle(article);
-                addArticle(article);
+                const articleWithGoal = { ...article, articleGoal };
+                setGeneratedArticle(articleWithGoal);
+                addArticle(articleWithGoal);
             }
             return;
         }
@@ -561,7 +624,8 @@ export const AIGenerator: React.FC = () => {
                 keywords: generatedArticle.keywords || [],
                 tone: generatedArticle.tone,
                 length: generatedArticle.length,
-                customInstructions
+                articleGoal: generatedArticle.articleGoal || articleGoal,
+                customInstructions: buildEffectiveCustomInstructions(customInstructions, generatedArticle.articleGoal || articleGoal)
             });
 
             if (regenerated) {
@@ -574,7 +638,7 @@ export const AIGenerator: React.FC = () => {
     };
 
     const handleMultiStepComplete = (article: Article) => {
-        setGeneratedArticle(article as any);
+        setGeneratedArticle({ ...article, articleGoal } as any);
         setShowMultiStep(false);
     };
 
@@ -584,7 +648,8 @@ export const AIGenerator: React.FC = () => {
                 keywords={keywords}
                 tone={tone}
                 length={length}
-                customInstructions={promptSets.find(ps => ps.id === selectedPromptSetId)?.customInstructions}
+                articleGoal={articleGoal}
+                customInstructions={buildEffectiveCustomInstructions(promptSets.find(ps => ps.id === selectedPromptSetId)?.customInstructions, articleGoal)}
                 selectedTitleSetId={selectedTitleSetId}
                 selectedTitle={selectedTitle}
                 targetWordCount={targetWordCount}
@@ -938,6 +1003,26 @@ export const AIGenerator: React.FC = () => {
                             <option value="casual">カジュアル</option>
                             <option value="technical">テクニカル</option>
                             <option value="friendly">フレンドリー</option>
+                        </select>
+                    </div>
+
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                            記事の目的
+                        </label>
+                        <select
+                            value={articleGoal}
+                            onChange={(e) => setArticleGoal(e.target.value as ArticleGoal)}
+                            disabled={isGenerating || isAutoGenerating}
+                            className="input-field"
+                        >
+                            <option value="standard">標準</option>
+                            <option value="beginner">初心者向け</option>
+                            <option value="practical">実務重視</option>
+                            <option value="seo">SEO重視</option>
+                            <option value="authority">専門性重視</option>
+                            <option value="comparison">比較・選定向け</option>
+                            <option value="conversion">問い合わせ導線向け</option>
                         </select>
                     </div>
 

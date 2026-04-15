@@ -12,6 +12,7 @@ export interface WordPressConfig {
   isActive: boolean;
   defaultCategory?: string;
   postType?: string;
+  styleReferenceUrl?: string;
   scheduleSettings?: ScheduleSettings;
 }
 
@@ -57,6 +58,7 @@ export class WordPressService {
       isActive: configData.is_active,
       defaultCategory: configData.default_category || "",
       postType: configData.post_type || 'posts',
+      styleReferenceUrl: configData.style_reference_url || '',
     };
   }
 
@@ -544,7 +546,8 @@ export async function saveWordPressConfig(
   wp_username: string,
   wp_app_password: string,
   wp_category: string,
-  wp_post_type?: string
+  wp_post_type?: string,
+  style_reference_url?: string
 ): Promise<any> {
   if (!supabase) {
     throw new Error('Supabase is not initialized');
@@ -559,6 +562,7 @@ export async function saveWordPressConfig(
       password: wp_app_password,
       category: wp_category,
       post_type: wp_post_type || 'posts',
+      style_reference_url: style_reference_url || null,
       is_active: true
     })
     .select()

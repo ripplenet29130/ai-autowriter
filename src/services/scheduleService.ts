@@ -13,6 +13,7 @@ class ScheduleService {
         'keyword_set_id',
         'title_set_id',
         'generation_mode',
+        'article_goal',
         'enable_fact_check',
         'fact_check_note',
         'fact_check_alert_chatwork_room_id',
@@ -62,7 +63,7 @@ class ScheduleService {
         // Compatibility path: copy matching row from legacy wordpress_configs into wp_configs.
         const { data: legacyRow, error: legacyError } = await supabase
             .from('wordpress_configs')
-            .select('id, name, url, username, password, category, is_active, post_type')
+            .select('id, name, url, username, password, category, is_active, post_type, style_reference_url')
             .eq('id', targetId)
             .limit(1)
             .maybeSingle();
@@ -93,6 +94,7 @@ class ScheduleService {
             category: legacyRow.category ?? '',
             is_active: legacyRow.is_active ?? true,
             post_type: legacyRow.post_type ?? 'posts',
+            style_reference_url: legacyRow.style_reference_url ?? null,
         };
 
         const maxRetries = Math.max(8, Object.keys(compatPayload).length + 1);
@@ -211,6 +213,7 @@ class ScheduleService {
             prompt_set_id: schedule.prompt_set_id || null,
             target_word_count: schedule.target_word_count,
             writing_tone: schedule.writing_tone,
+            article_goal: schedule.article_goal || 'standard',
             keyword_set_id: schedule.keyword_set_id || null,
             title_set_id: schedule.title_set_id || null,
             generation_mode: schedule.generation_mode || 'keyword',

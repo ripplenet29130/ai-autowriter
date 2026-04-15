@@ -20,7 +20,7 @@ export const ArticlesList: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
   const [publishedFilter, setPublishedFilter] = useState<string>('all');
-  const [sortField, setSortField] = useState<'created_at' | 'updated_at' | 'title' | 'seo_score'>('created_at');
+  const [sortField, setSortField] = useState<'created_at' | 'updated_at' | 'title'>('created_at');
   const [sortAscending, setSortAscending] = useState(false);
   const [localArticles, setLocalArticles] = useState<Article[]>([]);
   const [isLoading, setIsLoading] = useState(true);

@@ -129,6 +129,12 @@ function normalizeComparableText(value: string): string {
     .trim();
 }
 
+function appendCustomInstructions(prompt: string, customInstructions?: string): string {
+  const extra = String(customInstructions || '').trim();
+  if (!extra) return prompt;
+  return `${prompt}\n\n追加指示:\n${extra}`.trim();
+}
+
 interface ParsedOutlineLikeSection {
   title: string;
   level: 2 | 3;
@@ -449,7 +455,8 @@ async function polishArticleFormatting(
   originalContent: string,
   outline: SharedArticleOutline,
   callAI: SharedCallAI,
-  maxTokens: number
+  maxTokens: number,
+  customInstructions?: string
 ): Promise<string> {
   const prompt = [
     '以下のMarkdown記事を「内容を変えずに」整形してください。',
@@ -471,11 +478,67 @@ async function polishArticleFormatting(
 
   try {
     const polishTokens = Math.max(2200, Math.ceil(originalContent.length * 1.8));
-    const polished = (await callAI(prompt, Math.min(polishTokens, Math.max(1200, maxTokens)))).trim();
+    const polished = (await callAI(
+      appendCustomInstructions(prompt, customInstructions),
+      Math.min(polishTokens, Math.max(1200, maxTokens))
+    )).trim();
     if (!isValidPolishedArticle(originalContent, polished)) {
       return originalContent;
     }
     return formatReadableParagraphs(polished);
+  } catch {
+    return originalContent;
+  }
+}
+
+function shouldRunFinalStyleUnification(content: string, outline: SharedArticleOutline): boolean {
+  const textLength = countGeneratedChars(content);
+  const h2Count = outline.sections.filter((section) => !section.isLead && section.level === 2).length;
+  return textLength >= 1500 || h2Count >= 3;
+}
+
+async function finalUnifyArticleStyle(
+  originalContent: string,
+  outline: SharedArticleOutline,
+  callAI: SharedCallAI,
+  maxTokens: number,
+  customInstructions?: string
+): Promise<string> {
+  const prompt = [
+    '以下の記事全体を最終調整してください。',
+    '目的は、文体統一、内容重複の軽微な整理、途中で切れている文の補完のみです。',
+    '',
+    '必須ルール:',
+    '- です・ます体に統一する',
+    '- H2見出しの文言と順序は絶対に変更しない',
+    '- H3見出しは維持する',
+    '- 内容の追加禁止',
+    '- 内容の大幅な削除禁止',
+    '- 事実関係や主張を変えない',
+    '- 重複表現は最小限の整理にとどめる',
+    '- 途中で切れている文だけ自然に完結させる',
+    '- 出力は修正後のMarkdown本文のみ',
+    '',
+    `記事タイトル: ${outline.title}`,
+    'H2一覧:',
+    ...outline.sections.filter((section) => !section.isLead && section.level === 2).map((section) => `- ${section.title}`),
+    '',
+    '本文:',
+    originalContent
+  ].join('\n');
+
+  try {
+    const unifyTokens = Math.max(2200, Math.ceil(originalContent.length * 1.6));
+    const unified = trimDanglingTailSafe(formatReadableParagraphs(
+      (await callAI(
+        appendCustomInstructions(prompt, customInstructions),
+        Math.min(unifyTokens, Math.max(1200, maxTokens))
+      )).trim()
+    ));
+    if (!isValidPolishedArticle(originalContent, unified)) {
+      return originalContent;
+    }
+    return unified;
   } catch {
     return originalContent;
   }
@@ -521,13 +584,15 @@ async function summarizeToWordCount(
   keywords: string[],
   callAI: SharedCallAI,
   maxTokens: number,
-  isSection = false
+  isSection = false,
+  customInstructions?: string
 ): Promise<string> {
   const summaryPrompt = buildSummaryPrompt({
     originalContent,
     title,
     targetWordCount,
-    keywords
+    keywords,
+    customInstructions
   });
 
   try {
@@ -563,7 +628,8 @@ async function extendToMinimumLength(
   keywords: string[],
   callAI: SharedCallAI,
   maxTokens: number,
-  isSection: boolean
+  isSection: boolean,
+  customInstructions?: string
 ): Promise<string> {
   const currentCount = countGeneratedChars(originalContent);
   const remaining = Math.max(0, minAllowed - currentCount);
@@ -579,7 +645,8 @@ async function extendToMinimumLength(
     title,
     keywords,
     isSection,
-    hasSummaryAnchor: false
+    hasSummaryAnchor: false,
+    customInstructions
   });
 
   try {
@@ -645,6 +712,51 @@ function trimDanglingTail(content: string): string {
   }
 
   return merged.slice(0, lastBoundary + 1).trim();
+}
+
+const TERMINAL_SENTENCE_END_RE = /(?:\u3002|\uff01|\uff1f|[.!?]|」|』|】)\s*$/;
+const SENTENCE_BOUNDARY_RE = /[\u3002\uff01\uff1f.!?](?:\s|$)/g;
+const CONTINUATION_TAIL_RE = /(?:\u3057|\u3057\u3001|\u3057\u3066|\u3057\u306a\u304c\u3089|\u3057\u305f\u304c\u3063\u3066|\u306e\u3067|\u305f\u3081|\u3068\u3044\u3048\u3070|\u306a\u3069|\u307e\u305f|\u304a\u3088\u3073|\u3068\u3044\u3046|[A-Za-z0-9]+\s*(?:and|or|because|with))\s*$/i;
+
+function findLastSentenceBoundary(text: string): number {
+  let lastIndex = -1;
+  for (const match of text.matchAll(SENTENCE_BOUNDARY_RE)) {
+    const index = typeof match.index === 'number' ? match.index : -1;
+    if (index >= 0) lastIndex = index;
+  }
+  return lastIndex;
+}
+
+function trimDanglingTailSafe(content: string): string {
+  const text = String(content || '').trim();
+  if (!text) return '';
+
+  const isHeadingOnly = (line: string): boolean => /^#{1,6}\s+\S/.test(line.trim());
+  const blocks = text.split(/\n{2,}/).map((b) => b.trim()).filter(Boolean);
+  while (blocks.length > 0 && isHeadingOnly(blocks[blocks.length - 1])) {
+    blocks.pop();
+  }
+
+  const merged = blocks.join('\n\n').trim();
+  if (!merged) return '';
+  if (TERMINAL_SENTENCE_END_RE.test(merged)) return merged;
+
+  const lastBoundary = findLastSentenceBoundary(merged);
+  if (lastBoundary < 0) return merged;
+
+  const trimmed = merged.slice(0, lastBoundary + 1).trim();
+  if (!trimmed) return merged;
+  if (merged.length < 120) return trimmed;
+  if (lastBoundary < Math.floor(merged.length * 0.7)) return merged;
+  return trimmed;
+}
+
+function endsWithContinuationCueSafe(content: string): boolean {
+  const text = String(content || '').trim();
+  if (!text) return false;
+  if (TERMINAL_SENTENCE_END_RE.test(text)) return false;
+  const tail = text.slice(-24);
+  return CONTINUATION_TAIL_RE.test(tail);
 }
 
 function normalizeDigits(value: string): string {
@@ -721,7 +833,7 @@ function isLikelyIncompleteSection(
   const text = String(content || '').trim();
   if (!text) return { incomplete: true, reason: 'empty' };
 
-  if (endsWithContinuationCue(text)) {
+  if (endsWithContinuationCueSafe(text)) {
     return { incomplete: true, reason: 'continuation-tail' };
   }
 
@@ -741,7 +853,8 @@ async function completeSectionIfIncomplete(
   section: SharedOutlineSection,
   outlineTitle: string,
   callAI: SharedCallAI,
-  maxTokens: number
+  maxTokens: number,
+  customInstructions?: string
 ): Promise<string> {
   const check = isLikelyIncompleteSection(content, section);
   if (!check.incomplete) return content;
@@ -766,11 +879,11 @@ async function completeSectionIfIncomplete(
   ].filter(Boolean).join('\n');
 
   try {
-    const raw = await callAI(prompt, maxTokens);
+    const raw = await callAI(appendCustomInstructions(prompt, customInstructions), maxTokens);
     const addition = sanitizeRewriterOutput(raw, content, true);
     if (!addition) return content;
 
-    const merged = trimDanglingTail(`${content}\n\n${addition}`.trim());
+    const merged = trimDanglingTailSafe(`${content}\n\n${addition}`.trim());
     return merged || content;
   } catch {
     return content;
@@ -1299,7 +1412,8 @@ async function normalizeLengthWithQualityGate(
   keywords: string[],
   callAI: SharedCallAI,
   maxTokens: number,
-  retryCount: number
+  retryCount: number,
+  customInstructions?: string
 ): Promise<string> {
   const { minAllowed, maxAllowed } = getWordCountBounds(targetWordCount, DEFAULT_WORD_COUNT_TOLERANCE);
   let normalized = content;
@@ -1315,7 +1429,8 @@ async function normalizeLengthWithQualityGate(
         keywords,
         callAI,
         maxTokens,
-        false
+        false,
+        customInstructions
       );
       continue;
     }
@@ -1327,7 +1442,8 @@ async function normalizeLengthWithQualityGate(
         keywords,
         callAI,
         maxTokens,
-        false
+        false,
+        customInstructions
       );
       continue;
     }
@@ -1382,7 +1498,8 @@ async function generateSectionWithQualityGate(
         params.keywords,
         params.callAI,
         params.maxTokens,
-        true
+        true,
+        params.customInstructions
       );
       continue;
     }
@@ -1395,7 +1512,8 @@ async function generateSectionWithQualityGate(
         params.keywords,
         params.callAI,
         params.maxTokens,
-        true
+        true,
+        params.customInstructions
       );
       continue;
     }
@@ -1407,7 +1525,8 @@ async function generateSectionWithQualityGate(
         section,
         outline.title,
         params.callAI,
-        params.maxTokens
+        params.maxTokens,
+        params.customInstructions
       );
       continue;
     }
@@ -1422,11 +1541,11 @@ async function generateSectionWithQualityGate(
     }
   }
 
-  const normalized = trimDanglingTail(formatReadableParagraphs(content));
+  const normalized = trimDanglingTailSafe(formatReadableParagraphs(content));
   if (section.isLead) {
-    return trimDanglingTail(stripLeadingTitleLine(normalized, outline.title));
+    return trimDanglingTailSafe(stripLeadingTitleLine(normalized, outline.title));
   }
-  return trimDanglingTail(normalized);
+  return trimDanglingTailSafe(normalized);
 }
 
 export async function generateOutlineWithSharedCore(
@@ -1695,7 +1814,8 @@ export async function generateArticleFromOutlineWithSharedCore(
       params.keywords,
       params.callAI,
       maxTokens,
-      qualityRetryCount
+      qualityRetryCount,
+      params.customInstructions
     );
   }
 
@@ -1704,12 +1824,23 @@ export async function generateArticleFromOutlineWithSharedCore(
       fullContent,
       params.outline,
       params.callAI,
-      maxTokens
+      maxTokens,
+      params.customInstructions
+    );
+  }
+
+  if (shouldRunFinalStyleUnification(fullContent, params.outline)) {
+    fullContent = await finalUnifyArticleStyle(
+      fullContent,
+      params.outline,
+      params.callAI,
+      maxTokens,
+      params.customInstructions
     );
   }
 
   fullContent = insertSubheadingsIntoLongSections(fullContent);
-  fullContent = trimDanglingTail(formatReadableParagraphs(fullContent));
+  fullContent = trimDanglingTailSafe(formatReadableParagraphs(fullContent));
   // まとめセクション保険は最後に一度だけ実行
   fullContent = ensureSummarySection(fullContent, params.outline);
   if (!fullContent.endsWith('\n')) {

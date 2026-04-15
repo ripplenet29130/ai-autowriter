@@ -32,8 +32,6 @@ export const TitleSelectionStep: React.FC<TitleSelectionStepProps> = ({
         trendScore: 0,
         searchVolume: 0,
         competition: 'medium',
-        seoScore: 0,
-        clickPotential: 0,
         targetAudience: '',
         contentAngle: '',
         relatedKeywords: [],

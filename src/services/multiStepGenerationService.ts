@@ -1,4 +1,4 @@
-﻿import { v4 as uuidv4 } from 'uuid';
+import { v4 as uuidv4 } from 'uuid';
 import {
     Article,
     ArticleOutline,
@@ -19,8 +19,11 @@ import { generateArticleFromOutlineWithSharedCore } from '../shared/articleGener
  */
 export class MultiStepGenerationService {
     private formatReadableParagraphs(content: string): string {
-        const text = (content || '').trim();
+        let text = (content || '').trim();
         if (!text) return '';
+
+        // ** (太字マーク) を除去
+        text = text.replace(/\*\*(.+?)\*\*/g, '$1').replace(/\*\*/g, '');
 
         const blocks = text.split(/\n{2,}/);
         const formattedBlocks = blocks
@@ -345,7 +348,6 @@ export class MultiStepGenerationService {
                 generatedAt: new Date().toISOString(),
                 createdAt: new Date().toISOString(),
                 wordCount: fullContent.length,
-                seoScore: 0, // 莉･蜑阪・險育ｮ励＠縺ｦ縺・◆縺後∽ｸ崎ｦ√↓縺ｪ縺｣縺溘◆繧∝崋螳壼､縺ｾ縺溘・蜑企勁讀懆ｨ趣ｼ亥梛螳夂ｾｩ縺ｫ蜷医ｏ縺帙※菫晄戟・・
                 readingTime: 0, // 蜷御ｸ・
                 trendData: outline.trendData
             };
@@ -536,12 +538,6 @@ export class MultiStepGenerationService {
         return first.length > 150 ? first.substring(0, 150) + '...' : first;
     }
 
-    private calculateSEOScore(title: string, content: string, keyword: string): number {
-        let score = 50;
-        if (title.includes(keyword)) score += 20;
-        if (content.length > 2000) score += 30;
-        return Math.min(100, score);
-    }
 }
 
 export const multiStepGenerationService = new MultiStepGenerationService();

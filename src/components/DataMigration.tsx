@@ -68,7 +68,6 @@ export const DataMigration: React.FC = () => {
             wordPressConfigId: article.wordPressConfigId,
             isPublished: article.isPublished || false,
             wordPressUrl: article.wordPressUrl,
-            seoScore: article.seoScore,
             readingTime: article.readingTime,
             wordCount: article.wordCount,
             trendData: article.trendData

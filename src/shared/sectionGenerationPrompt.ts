@@ -64,7 +64,7 @@ export function buildHighQualitySectionPrompt(input: SectionPromptInput): string
   const mainKeywords = keywordList.slice(0, 2);
   const subKeywords = keywordList.slice(2, 5);
   const prefText = keywordPreferenceText(input.keywordPreferences);
-  const context = (input.previousContent || '').slice(-700);
+  const context = String(input.previousContent || '').trim();
 
   return `
 あなたは日本語SEO記事の編集者です。次の1セクション本文だけを作成してください。
@@ -96,9 +96,13 @@ ${prefText ? prefText : ''}
 - 医療・金融などの断定が危険な領域では、過度な断定を避ける
 - 文章は必ず完結した文で終えること（途中で切れた文を残さない）
 - 最後の文は必ず句点（。）で終わること
+ - 必ず日本語の「です・ます調」で統一し、「だ・である調」を混ぜない
+ - 文は必ず完結させ、語尾が「し」「して」「し、」「ため」「など」で終わらないようにする
+ - 直前までのセクションと説明が重複しないようにし、同じ役割や効能の説明を繰り返さない
+ - このセクションでは、この見出しの話題だけを書く。他セクション向けの内容を混ぜない
 ${input.isLead ? '- 導入セクションとして、課題提起と記事で得られる価値を明示する' : ''}
 ${input.isLead ? '- 導入文で記事タイトルの文言をそのまま繰り返さない（タイトル引用禁止）' : ''}
-${context ? `直前文脈（重複回避用）:\n${context}` : ''}
+${context ? `直前文脈（重複回避用・全文）:\n${context}` : ''}
 ${input.customInstructions ? `追加指示:\n${input.customInstructions}` : ''}
 
 本文のみを出力してください。`.trim();

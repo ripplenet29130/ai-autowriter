@@ -3,6 +3,7 @@ export interface SummaryPromptInput {
   title: string;
   targetWordCount: number;
   keywords: string[];
+  customInstructions?: string;
 }
 
 export interface SupplementPromptInput {
@@ -16,26 +17,25 @@ export interface SupplementPromptInput {
   keywords: string[];
   isSection?: boolean;
   hasSummaryAnchor?: boolean;
+  customInstructions?: string;
 }
 
 export function buildSummaryPrompt(input: SummaryPromptInput): string {
   return `
-次の本文を、意味を保ったまま ${input.targetWordCount} 字前後に要約してください。
-タイトル: ${input.title}
+次の本文を、意味を保ったまま ${input.targetWordCount} 字前後に要約してください。タイトル: ${input.title}
 関連キーワード: ${input.keywords.length > 0 ? input.keywords.join('、') : 'なし'}
+${input.customInstructions ? `追加指示:\n${input.customInstructions}\n` : ''}
 
-要件:
-- 情報の正確性を保つ
-- 結論・重要ポイントを優先して残す
-- 本文の見出し構造や書式は維持する
-- 不自然な短縮や重複は避ける
-- キーワードを機械的に繰り返さない
-- 読み手に自然な日本語として違和感なく読める文にする
-- 要約本文のみを出力する（前置き・注釈・謝罪・断り書き・区切り線・補足説明は禁止）
-- 「ご提示いただいた本文」「以下に要約」など依頼メタ表現は出力しない
-- 不足情報や偏りへの言及をしない
+要約条件:
+- 重要な情報を優先して残す
+- 見出しや本文の流れを壊さず自然につなぐ
+- 本文中の事実関係や文脈を変えない
+- 不要な前置きや結論の言い換えを足さない
+- キーワードを不自然に増やさない
+- 読みやすい自然な日本語として整える
+- 要約文だけを返す
 
-本文:
+本文
 ${input.originalContent}
 `.trim();
 }
@@ -43,26 +43,25 @@ ${input.originalContent}
 export function buildSupplementPrompt(input: SupplementPromptInput): string {
   const isSection = input.isSection === true;
   const sectionLine = input.sectionTitle ? `セクション: ${input.sectionTitle}` : '';
-  const rangeLine = `目標レンジ: ${input.minAllowed}〜${input.maxAllowed}字`;
+  const rangeLine = `許容レンジ: ${input.minAllowed}〜${input.maxAllowed}字`;
 
   return `
-次の本文は文字数が不足しています。既存内容と整合する追記のみを作成してください。
-現在文字数: ${input.currentCount}
+次の本文は文字数が不足しています。元の方針と整合する補足だけを追加してください。現在文字数: ${input.currentCount}
 不足目安: ${input.remaining}字
 ${rangeLine}
 タイトル: ${input.title}
 ${sectionLine}
 関連キーワード: ${input.keywords.length > 0 ? input.keywords.join('、') : 'なし'}
+${input.customInstructions ? `追加指示:\n${input.customInstructions}\n` : ''}
 
-追記ルール:
-- 既存内容を繰り返さない
-- 新しい情報を自然に補う
-- キーワードは必要な場合のみ自然な文脈で使い、無理に挿入しない
-- ${isSection ? '本文のみを出力し、見出しは出力しない' : '記事全体の流れを崩さない'}
-- 追記本文のみを出力する（前置き・注釈・謝罪・断り書き・区切り線は禁止）
-- 「以下に追記」「ご提示いただいた本文」など依頼メタ表現は出力しない
+補足ルール:
+- 既存の内容と矛盾させない
+- 新しい重要情報を自然に補う
+- キーワードの詰め込みをしない
+- ${isSection ? '本文だけを返し、見出しは出力しない' : '記事全体の流れを壊さない'}
+- 追加文だけを返す
 
-既存本文:
+既存本文
 ${input.originalContent}
 `.trim();
 }

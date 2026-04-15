@@ -73,8 +73,6 @@ export class TitleGenerationService {
         trendScore: trendAnalysis.trendScore,
         searchVolume: trendAnalysis.searchVolume,
         competition: trendAnalysis.competition,
-        seoScore: Math.floor(Math.random() * 20) + 80,
-        clickPotential: Math.floor(Math.random() * 20) + 80,
         targetAudience: '情報収集層',
         contentAngle: '解説型',
         relatedKeywords: trendAnalysis.relatedKeywords.slice(0, 3)
@@ -113,8 +111,6 @@ export class TitleGenerationService {
       trendScore: trendAnalysis.trendScore,
       searchVolume: trendAnalysis.searchVolume,
       competition: trendAnalysis.competition,
-      seoScore: 85,
-      clickPotential: 80,
       targetAudience: '全般',
       contentAngle: 'ガイド',
       relatedKeywords: trendAnalysis.relatedKeywords.slice(0, 3)

@@ -1,337 +1,128 @@
-import { TrendAnalysisResult, CompetitorArticle, GeographicTrend } from '../types';
+﻿import { CompetitorArticle, TrendAnalysisResult } from '../types';
 import { apiKeyManager } from './apiKeyManager';
 import { competitorResearchService } from './competitorResearchService';
+import { trendAnalysisService } from './trendAnalysisService';
 
 export class RealTrendAnalysisService {
-  private serpApiKey: string = '';
-  private customSearchApiKey: string = '';
-  private customSearchEngineId: string = '';
+  private serpApiKey = '';
+  private customSearchApiKey = '';
+  private customSearchEngineId = '';
 
   constructor() {
     this.refreshApiKeys();
   }
 
-  /**
-   * 最新のAPIキーをマネージャーから再取得
-   */
   private refreshApiKeys() {
     this.serpApiKey = apiKeyManager.getApiKey('serpapi') || '';
     this.customSearchApiKey = apiKeyManager.getApiKey('google_custom_search') || '';
     this.customSearchEngineId = apiKeyManager.getApiKey('google_custom_search_engine_id') || '';
   }
 
-  async analyzeTrends(keyword: string, options?: {
-    region?: string;
-    timeframe?: string;
-    category?: number;
-    limit?: number;
-  }): Promise<TrendAnalysisResult> {
+  async analyzeTrends(
+    keyword: string,
+    options?: {
+      region?: string;
+      timeframe?: string;
+      category?: number;
+      limit?: number;
+    }
+  ): Promise<TrendAnalysisResult> {
+    this.refreshApiKeys();
+
     try {
-      console.log(`競合調査ベーストレンド分析を開始: ${keyword}`);
+      const competitorResearch = await this.loadCompetitorResearch(keyword, options?.limit || 5);
+      const relatedKeywords = await this.loadRelatedKeywords(keyword, competitorResearch);
 
-      // 最新のキーを取得
-      this.refreshApiKeys();
-
-      console.log('APIキー読み込み状況:', {
-        hasSerpApi: !!this.serpApiKey,
-        hasGoogleApi: !!this.customSearchApiKey,
-        hasGoogleEngineId: !!this.customSearchEngineId
-      });
-
-      let competitorResearch;
-
-      // 第1候補: Supabase Edge Function（サーバー側で実際のスクレイピングを実行）
-      console.log('✅ Supabase Edge Functionを使用して深い競合調査（スクレイピング）を開始します');
-      try {
-        competitorResearch = await competitorResearchService.conductResearch(
-          keyword,
-          options?.limit || 5,
-          this.serpApiKey
-        );
-        console.log('✅ 深い競合調査が完了しました');
-      } catch (supabaseError) {
-        console.warn('⚠️ Supabaseでの深い調査に失敗しました。フォールバックします', supabaseError);
-        if (this.serpApiKey) {
-          competitorResearch = await this.conductResearchViaSerpApi(keyword, options?.limit || 5);
-        } else {
-          competitorResearch = await this.conductResearchDirectly(keyword, options?.limit || 5);
-        }
-      }
-
-      // 関連キーワードを抽出（見出し・要約からの抽出、AI補完、Google Custom Searchの順に試行）
-      let relatedKeywords: string[] = [];
-
-      if (competitorResearch.commonTopics.length > 0) {
-        relatedKeywords = competitorResearch.commonTopics;
-      } else {
-        // 競合記事の見出しやタイトルからキーワードを自力で抽出
-        const textBlob = competitorResearch.articles.map(a =>
-          `${a.title} ${a.metaDescription} ${(a.headings || []).join(' ')}`
-        ).join(' ');
-
-        const extracted = this.extractKeywordsFromText(textBlob, keyword);
-        if (extracted.length > 3) {
-          relatedKeywords = extracted;
-        } else {
-          // それでも足りなければAIに頼る
-          try {
-            console.log('🤖 AIを使用して関連キーワードを補完します');
-            const { aiService } = await import('./aiService');
-            relatedKeywords = await aiService.generateRelatedKeywords(keyword);
-          } catch (aiError) {
-            console.warn('AIキーワード生成失敗:', aiError);
-          }
-        }
-      }
-
-      // 最終手段としてGoogle Custom Search（もしこれまでの手段で取得できなかった場合）
-      if (relatedKeywords.length === 0) {
-        relatedKeywords = await this.getRelatedKeywordsViaCustomSearch(keyword).catch(() => []);
-      }
-
-      // SEO分析
-      const seoAnalysis = await this.analyzeSEOViaDataForSeo(keyword).catch(() => ({
-        difficulty: 50,
-        opportunity: 50,
-        suggestions: ['競合記事を参考にコンテンツを作成する', '独自の視点を追加する']
-      }));
-
-      // 推定スコアの計算
-      const trendScore = Math.min(100, Math.max(0,
-        (competitorResearch.articles.length * 15) + (100 - seoAnalysis.difficulty)
-      ));
-      const estimatedVolume = Math.floor(competitorResearch.averageLength * 2);
-
-      const result: TrendAnalysisResult = {
+      return {
         keyword,
-        trendScore,
-        searchVolume: estimatedVolume,
+        trendScore: Math.min(100, Math.max(20, competitorResearch.articles.length * 18)),
+        searchVolume: Math.max(1000, competitorResearch.averageLength * 2 || keyword.length * 1500),
         competition: this.determineCompetition(competitorResearch.articles.length),
         relatedKeywords,
         hotTopics: competitorResearch.commonTopics.slice(0, 5),
-        seoData: seoAnalysis,
         competitorAnalysis: {
           topArticles: competitorResearch.articles,
           averageLength: competitorResearch.averageLength,
-          commonTopics: competitorResearch.commonTopics
+          commonTopics: competitorResearch.commonTopics,
         },
         userInterest: {
           risingQueries: relatedKeywords.slice(0, 5),
-          breakoutQueries: [],
-          geographicData: []
+          breakoutQueries: relatedKeywords.slice(5, 8),
+          geographicData: [],
         },
-        timestamp: new Date()
+        timestamp: new Date(),
       };
-
-      console.log('競合調査ベーストレンド分析完了:', result);
-      return result;
     } catch (error) {
-      console.error('Real API: トレンド分析エラー:', error);
-      throw error;
+      console.warn('Real trend analysis failed, falling back to mock service:', error);
+      return trendAnalysisService.analyzeTrends(keyword, options);
     }
   }
 
-  /**
-   * テキストから頻出単語やキーワードを抽出する（日本語対応）
-   */
-  private extractKeywordsFromText(text: string, seed: string): string[] {
-    const seedLower = seed.toLowerCase();
-    const words = text.match(/[ぁ-んァ-ヶー一-龠a-zA-Z0-9]{2,}/g) || [];
-    const freq: Record<string, number> = {};
-    const stopWords = new Set(['記事', 'ブログ', '紹介', 'まとめ', 'おすすめ', '比較', 'ランキング', '方法', '解説', 'こと', 'もの', 'ため', '話題', '人気']);
+  private async loadCompetitorResearch(keyword: string, limit: number) {
+    try {
+      return await competitorResearchService.conductResearch(keyword, limit, this.serpApiKey || undefined);
+    } catch (error) {
+      console.warn('Competitor research service failed:', error);
+      return {
+        keyword,
+        articles: this.buildFallbackArticles(keyword, limit),
+        averageLength: 2400,
+        commonTopics: this.extractKeywordsFromText(keyword, keyword),
+      };
+    }
+  }
 
-    words.forEach(w => {
-      const lower = w.toLowerCase();
-      if (lower === seedLower || stopWords.has(lower) || /^[0-9]+$/.test(lower)) return;
-      freq[lower] = (freq[lower] || 0) + 1;
+  private async loadRelatedKeywords(keyword: string, competitorResearch: { articles: CompetitorArticle[]; commonTopics: string[]; }) {
+    if (competitorResearch.commonTopics.length > 0) {
+      return competitorResearch.commonTopics.slice(0, 10);
+    }
+
+    const textBlob = competitorResearch.articles
+      .map((article) => `${article.title} ${article.metaDescription} ${(article.headings || []).join(' ')}`)
+      .join(' ');
+    const extracted = this.extractKeywordsFromText(textBlob, keyword);
+    if (extracted.length > 0) {
+      return extracted.slice(0, 10);
+    }
+
+    const fallback = await trendAnalysisService.getKeywordSuggestions(keyword, 10);
+    return fallback.map((item) => item.keyword);
+  }
+
+  private extractKeywordsFromText(text: string, seed: string): string[] {
+    const tokens = String(text || '')
+      .match(/[A-Za-z0-9ぁ-んァ-ン一-龠]{2,}/g) || [];
+    const normalizedSeed = String(seed || '').toLowerCase();
+    const stopWords = new Set(['こと', 'ため', 'よう', 'もの', 'これ', 'それ', '記事']);
+    const counts = new Map<string, number>();
+
+    tokens.forEach((token) => {
+      const normalized = token.toLowerCase();
+      if (normalized === normalizedSeed || stopWords.has(normalized)) return;
+      counts.set(token, (counts.get(token) || 0) + 1);
     });
 
-    return Object.entries(freq)
+    return Array.from(counts.entries())
       .sort((a, b) => b[1] - a[1])
-      .map(([w]) => w)
+      .map(([token]) => token)
       .slice(0, 10);
   }
 
-  private async conductResearchViaSerpApi(keyword: string, limit: number = 5) {
-    if (!this.serpApiKey) throw new Error('SerpAPIキーが設定されていません');
-
-    const params = {
-      engine: 'google',
-      q: keyword,
-      api_key: this.serpApiKey,
-      num: Math.min(limit, 10).toString(),
-      gl: 'jp',
-      hl: 'ja'
-    };
-
-    let data;
-    if (import.meta.env.DEV) {
-      // ローカル開発環境: Vite Proxy (GET)
-      const qs = new URLSearchParams(params as any);
-      const response = await fetch(`/api-serp?${qs}`);
-      if (!response.ok) throw new Error(`SerpAPI search error: ${response.status}`);
-      data = await response.json();
-    } else {
-      // Supabase Edge Function (POST)
-      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-      const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-      const response = await fetch(`${supabaseUrl}/functions/v1/ai-proxy`, {
-        method: 'POST',
-        body: JSON.stringify({ ...params, provider: 'serpapi' }),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${supabaseAnonKey}`
-        }
-      });
-      if (!response.ok) {
-        const err = await response.json().catch(() => ({}));
-        throw new Error(`SerpAPI Proxy error: ${err.error || response.status}`);
-      }
-      data = await response.json();
-    }
-
-    const items = data.organic_results || [];
-
-    const articles: CompetitorArticle[] = items.map((item: any) => ({
-      title: item.title,
-      url: item.link,
-      domain: item.displayed_link ? new URL(item.link).hostname : '',
-      headings: [item.title],
-      metaDescription: item.snippet || '',
-      wordCount: 2000 + Math.floor(Math.random() * 1000)
+  private buildFallbackArticles(keyword: string, limit: number): CompetitorArticle[] {
+    return Array.from({ length: Math.max(1, limit) }, (_, index) => ({
+      title: `${keyword}の参考記事 ${index + 1}`,
+      url: `https://example.com/${encodeURIComponent(keyword)}/${index + 1}`,
+      domain: 'example.com',
+      wordCount: 2200 + index * 120,
+      headings: [`${keyword}の概要`, `${keyword}の活用方法`, `${keyword}の注意点`],
+      metaDescription: `${keyword}に関する参考記事 ${index + 1}`,
     }));
-
-    return {
-      keyword,
-      articles,
-      averageLength: articles.length > 0 ? 2500 : 0,
-      commonTopics: this.extractKeywordsFromText(items.map((i: any) => i.title + ' ' + i.snippet).join(' '), keyword)
-    };
   }
 
-  private async conductResearchDirectly(keyword: string, limit: number = 5) {
-    if (!this.customSearchApiKey || !this.customSearchEngineId) throw new Error('Google APIキーが設定されていません');
-
-    const params = {
-      key: this.customSearchApiKey,
-      cx: this.customSearchEngineId,
-      q: keyword,
-      num: Math.min(limit, 10).toString(),
-      lr: 'lang_ja',
-      gl: 'jp'
-    };
-
-    let data;
-    if (import.meta.env.DEV) {
-      // ローカル: Vite Proxy (GET)
-      const qs = new URLSearchParams(params as any);
-      const response = await fetch(`/api-google?${qs}`);
-      if (!response.ok) throw new Error(`Google API error: ${response.status}`);
-      data = await response.json();
-    } else {
-      // Supabase Edge Function (POST)
-      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-      const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-      const response = await fetch(`${supabaseUrl}/functions/v1/ai-proxy`, {
-        method: 'POST',
-        body: JSON.stringify({ ...params, provider: 'google-search' }),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${supabaseAnonKey}`
-        }
-      });
-      if (!response.ok) {
-        const err = await response.json().catch(() => ({}));
-        throw new Error(`Google Proxy error: ${err.error || response.status}`);
-      }
-      data = await response.json();
-    }
-
-    const items = data.items || [];
-
-    const articles: CompetitorArticle[] = items.map((item: any) => ({
-      title: item.title,
-      url: item.link,
-      domain: new URL(item.link).hostname,
-      headings: [item.title],
-      metaDescription: item.snippet || '',
-      wordCount: 2000 + Math.floor(Math.random() * 1000)
-    }));
-
-    return {
-      keyword,
-      articles,
-      averageLength: articles.length > 0 ? 2500 : 0,
-      commonTopics: this.extractKeywordsFromText(items.map((i: any) => i.title + ' ' + i.snippet).join(' '), keyword)
-    };
-  }
-
-  private async getRelatedKeywordsViaCustomSearch(keyword: string): Promise<string[]> {
-    if (!this.customSearchApiKey || !this.customSearchEngineId) return [];
-
-    const params = {
-      key: this.customSearchApiKey,
-      cx: this.customSearchEngineId,
-      q: keyword,
-      num: '10'
-    };
-
-    try {
-      let data;
-      if (import.meta.env.DEV) {
-        const qs = new URLSearchParams(params as any);
-        const response = await fetch(`/api-google?${qs}`);
-        if (!response.ok) throw new Error('Proxy failed');
-        data = await response.json();
-      } else {
-        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-        const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-        const response = await fetch(`${supabaseUrl}/functions/v1/ai-proxy`, {
-          method: 'POST',
-          body: JSON.stringify({ ...params, provider: 'google-search' }),
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${supabaseAnonKey}`
-          }
-        });
-        if (!response.ok) throw new Error('Proxy failed');
-        data = await response.json();
-      }
-      return this.extractKeywordsFromText(data.items?.map((i: any) => i.title + ' ' + i.snippet).join(' ') || '', keyword);
-    } catch {
-      return [];
-    }
-  }
-
-  private async analyzeSEOViaDataForSeo(keyword: string): Promise<{
-    difficulty: number;
-    opportunity: number;
-    suggestions: string[];
-  }> {
-    return this.estimateSEOMetrics(keyword);
-  }
-
-  private determineCompetition(competitorCount: number): 'low' | 'medium' | 'high' {
-    if (competitorCount < 3) return 'low';
-    if (competitorCount < 7) return 'medium';
-    return 'high';
-  }
-
-  private estimateSEOMetrics(keyword: string): {
-    difficulty: number;
-    opportunity: number;
-    suggestions: string[];
-  } {
-    const difficulty = Math.floor(Math.random() * 60) + 20; // 20-80の間でシミュレート
-    return {
-      difficulty,
-      opportunity: 100 - difficulty,
-      suggestions: [
-        '適切な見出しタグ構造を使用する',
-        '読者の検索意図に沿った導入文を作成する',
-        '信頼できるソースからの情報を盛り込む'
-      ]
-    };
+  private determineCompetition(articleCount: number): 'low' | 'medium' | 'high' {
+    if (articleCount >= 8) return 'high';
+    if (articleCount >= 4) return 'medium';
+    return 'low';
   }
 }
 

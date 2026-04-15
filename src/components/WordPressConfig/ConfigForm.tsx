@@ -8,9 +8,6 @@ interface ConfigFormProps {
     initialData?: WordPressConfig;
 }
 
-/**
- * WordPress設定フォームコンポーネント
- */
 export const ConfigForm: React.FC<ConfigFormProps> = ({
     onSubmit,
     onCancel,
@@ -24,6 +21,7 @@ export const ConfigForm: React.FC<ConfigFormProps> = ({
         category: initialData?.category || '',
         defaultCategory: initialData?.defaultCategory || '',
         postType: initialData?.postType || 'posts',
+        styleReferenceUrl: initialData?.styleReferenceUrl || '',
     });
 
     const [errors, setErrors] = useState<Record<string, string>>({});
@@ -49,6 +47,13 @@ export const ConfigForm: React.FC<ConfigFormProps> = ({
             newErrors.applicationPassword = 'アプリケーションパスワードは必須です';
         }
 
+        if (
+            formData.styleReferenceUrl.trim() &&
+            !formData.styleReferenceUrl.match(/^https?:\/\/.+/)
+        ) {
+            newErrors.styleReferenceUrl = '有効なURLを入力してください';
+        }
+
         setErrors(newErrors);
         return Object.keys(newErrors).length === 0;
     };
@@ -66,10 +71,9 @@ export const ConfigForm: React.FC<ConfigFormProps> = ({
     };
 
     const handleChange = (field: string, value: string) => {
-        setFormData(prev => ({ ...prev, [field]: value }));
-        // Clear error when user starts typing
+        setFormData((prev) => ({ ...prev, [field]: value }));
         if (errors[field]) {
-            setErrors(prev => ({ ...prev, [field]: '' }));
+            setErrors((prev) => ({ ...prev, [field]: '' }));
         }
     };
 
@@ -102,9 +106,7 @@ export const ConfigForm: React.FC<ConfigFormProps> = ({
                         placeholder="例: メインサイト"
                         className={`input-field ${errors.name ? 'border-red-500' : ''}`}
                     />
-                    {errors.name && (
-                        <p className="text-sm text-red-600 mt-1">{errors.name}</p>
-                    )}
+                    {errors.name && <p className="text-sm text-red-600 mt-1">{errors.name}</p>}
                 </div>
 
                 <div>
@@ -118,11 +120,9 @@ export const ConfigForm: React.FC<ConfigFormProps> = ({
                         placeholder="https://example.com"
                         className={`input-field ${errors.url ? 'border-red-500' : ''}`}
                     />
-                    {errors.url && (
-                        <p className="text-sm text-red-600 mt-1">{errors.url}</p>
-                    )}
+                    {errors.url && <p className="text-sm text-red-600 mt-1">{errors.url}</p>}
                     <p className="text-xs text-gray-500 mt-1">
-                        WordPressサイトのURL（例: https://example.com）
+                        WordPressサイトのベースURLを入力します。
                     </p>
                 </div>
 
@@ -137,9 +137,7 @@ export const ConfigForm: React.FC<ConfigFormProps> = ({
                         placeholder="admin"
                         className={`input-field ${errors.username ? 'border-red-500' : ''}`}
                     />
-                    {errors.username && (
-                        <p className="text-sm text-red-600 mt-1">{errors.username}</p>
-                    )}
+                    {errors.username && <p className="text-sm text-red-600 mt-1">{errors.username}</p>}
                 </div>
 
                 <div>
@@ -157,13 +155,13 @@ export const ConfigForm: React.FC<ConfigFormProps> = ({
                         <p className="text-sm text-red-600 mt-1">{errors.applicationPassword}</p>
                     )}
                     <p className="text-xs text-gray-500 mt-1">
-                        WordPress管理画面の「ユーザー」→「プロフィール」から作成できます
+                        WordPress管理画面の「ユーザー」→「プロフィール」で発行した値を入力します。
                     </p>
                 </div>
 
                 <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">
-                        デフォルトカテゴリ（スラッグ）
+                        デフォルトカテゴリー
                     </label>
                     <input
                         type="text"
@@ -173,7 +171,7 @@ export const ConfigForm: React.FC<ConfigFormProps> = ({
                         className="input-field"
                     />
                     <p className="text-xs text-gray-500 mt-1">
-                        カテゴリスタッグを指定（例: news, blog）。投稿タイプとどちらか一方でOK
+                        通常投稿時に使うカテゴリースラッグです。例: news, blog
                     </p>
                 </div>
 
@@ -189,16 +187,32 @@ export const ConfigForm: React.FC<ConfigFormProps> = ({
                         className="input-field"
                     />
                     <p className="text-xs text-gray-500 mt-1">
-                        投稿タイプを指定（デフォルト: post）。カスタム投稿タイプも可（例: product, event）
+                        通常投稿は `posts` です。カスタム投稿タイプも指定できます。
+                    </p>
+                </div>
+
+                <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                        スタイル参照URL
+                    </label>
+                    <input
+                        type="url"
+                        value={formData.styleReferenceUrl}
+                        onChange={(e) => handleChange('styleReferenceUrl', e.target.value)}
+                        placeholder="https://example.com/sample-article"
+                        className={`input-field ${errors.styleReferenceUrl ? 'border-red-500' : ''}`}
+                    />
+                    {errors.styleReferenceUrl && (
+                        <p className="text-sm text-red-600 mt-1">{errors.styleReferenceUrl}</p>
+                    )}
+                    <p className="text-xs text-gray-500 mt-1">
+                        このURLの本文表現を参考に、語尾や文体の傾向を新規記事へ反映します。内容そのものはコピーしません。
                     </p>
                 </div>
 
                 <div className="flex space-x-3 pt-4 border-t border-gray-200">
-                    <button
-                        type="submit"
-                        className="btn-primary flex-1"
-                    >
-                        {initialData ? '更新' : '追加'}
+                    <button type="submit" className="btn-primary flex-1">
+                        {initialData ? '更新' : '保存'}
                     </button>
                     <button
                         type="button"

@@ -78,6 +78,7 @@ export const Scheduler: React.FC = () => {
     prompt_set_id: '',
     target_word_count: 2000,
     writing_tone: 'professional',
+    article_goal: 'standard' as 'standard' | 'beginner' | 'practical' | 'seo' | 'authority' | 'comparison' | 'conversion',
     status: true,
     enable_fact_check: false,
     fact_check_note: '',
@@ -417,6 +418,7 @@ export const Scheduler: React.FC = () => {
       prompt_set_id: schedule.prompt_set_id || '',
       target_word_count: schedule.target_word_count || 2000,
       writing_tone: schedule.writing_tone || 'professional',
+      article_goal: schedule.article_goal || 'standard',
       status: schedule.status,
       enable_fact_check: schedule.enable_fact_check || false,
       fact_check_note: '',
@@ -513,6 +515,7 @@ export const Scheduler: React.FC = () => {
       prompt_set_id: '',
       target_word_count: 2000,
       writing_tone: 'professional',
+      article_goal: 'standard',
       status: true,
       enable_fact_check: false,
       fact_check_note: '',
@@ -998,6 +1001,28 @@ export const Scheduler: React.FC = () => {
                 <option value="friendly">フレンドリー</option>
               </select>
             </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                記事の目的
+              </label>
+              <select
+                value={formData.article_goal}
+                onChange={(e) => setFormData({ ...formData, article_goal: e.target.value as any })}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              >
+                <option value="standard">標準</option>
+                <option value="beginner">初心者向け</option>
+                <option value="practical">実務重視</option>
+                <option value="seo">SEO重視</option>
+                <option value="authority">専門性重視</option>
+                <option value="comparison">比較・選定向け</option>
+                <option value="conversion">問い合わせ導線向け</option>
+              </select>
+              <p className="text-xs text-gray-500 mt-1">
+                文体ではなく、記事で何を優先するかを指定します
+              </p>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -1458,6 +1483,14 @@ export const Scheduler: React.FC = () => {
                           </span>
                           <span className="font-mono text-xs bg-gray-50 text-gray-600 px-2 py-0.5 rounded border border-gray-200">
                             {schedule.target_word_count || 3000}文字
+                          </span>
+                          <span className="font-mono text-xs bg-gray-50 text-gray-600 px-2 py-0.5 rounded border border-gray-200">
+                            {schedule.article_goal === 'beginner' ? '初心者向け' :
+                              schedule.article_goal === 'practical' ? '実務重視' :
+                                schedule.article_goal === 'seo' ? 'SEO重視' :
+                                  schedule.article_goal === 'authority' ? '専門性重視' :
+                                    schedule.article_goal === 'comparison' ? '比較向け' :
+                                      schedule.article_goal === 'conversion' ? '導線重視' : '標準'}
                           </span>
                         </div>
 

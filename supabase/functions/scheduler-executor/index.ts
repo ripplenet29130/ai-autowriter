@@ -1,4 +1,5 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
+import { DOMParser } from 'https://deno.land/x/deno_dom/deno-dom-wasm.ts';
 import { DEFAULT_TARGET_WORD_COUNT } from '../../../src/shared/generationPolicy.ts';
 import {
   countGeneratedChars,
@@ -43,6 +44,7 @@ interface WordPressConfig {
   password: string; // This maps to 'applicationPassword' in the DB column 'password'
   category: string;
   post_type: string; // Custom post type slug (e.g., 'posts', 'sushirecipe', 'product')
+  style_reference_url?: string;
   is_active: boolean;
 }
 
@@ -65,6 +67,7 @@ interface Schedule {
   prompt_set_id?: string;
   target_word_count?: number;
   writing_tone?: string;
+  article_goal?: 'standard' | 'beginner' | 'practical' | 'seo' | 'authority' | 'comparison' | 'conversion';
   title_set_id?: string;
   generation_mode?: 'keyword' | 'title' | 'both';
   keyword_set_id?: string;
@@ -132,6 +135,7 @@ interface AIConfig {
 }
 
 type WritingTone = 'professional' | 'casual' | 'technical' | 'friendly';
+type ArticleGoal = 'standard' | 'beginner' | 'practical' | 'seo' | 'authority' | 'comparison' | 'conversion';
 
 const INVALID_GEMINI_MODELS = new Set([
   'gemini-1.0-pro',
@@ -160,6 +164,161 @@ function resolveWritingTone(value: unknown): WritingTone {
   if (normalized === 'desu_masu') return 'friendly';
   if (normalized === 'da_dearu') return 'professional';
   return 'professional';
+}
+
+function resolveArticleGoal(value: unknown): ArticleGoal {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (
+    normalized === 'beginner' ||
+    normalized === 'practical' ||
+    normalized === 'seo' ||
+    normalized === 'authority' ||
+    normalized === 'comparison' ||
+    normalized === 'conversion' ||
+    normalized === 'standard'
+  ) {
+    return normalized;
+  }
+  return 'standard';
+}
+
+function buildArticleGoalInstructions(goal: ArticleGoal): string {
+  switch (goal) {
+    case 'beginner':
+      return [
+        '記事の目的: 初心者向け',
+        '- 専門用語は短くかみ砕いて説明する',
+        '- 前提知識がない読者でも理解できる順番で書く',
+        '- 難しい比較より、まず基本と全体像を明確にする',
+      ].join('\n');
+    case 'practical':
+      return [
+        '記事の目的: 実務重視',
+        '- 一般論の羅列にせず、現場での判断基準を優先する',
+        '- 各見出しで具体例、失敗例、確認ポイントのいずれかを入れる',
+        '- 読者が次に何を確認すべきか分かるように書く',
+      ].join('\n');
+    case 'seo':
+      return [
+        '記事の目的: SEO重視',
+        '- 読者の検索意図に直接答える構成にする',
+        '- 見出しごとに疑問へ明確に回答する',
+        '- 網羅性を保ちつつ、冗長な言い換えは避ける',
+      ].join('\n');
+    case 'authority':
+      return [
+        '記事の目的: 専門性重視',
+        '- 条件差、例外、注意点を明確に書く',
+        '- 断定だけでなく、どういう条件でそう言えるかを示す',
+        '- 教科書的になりすぎず、専門家の実務解説として書く',
+      ].join('\n');
+    case 'comparison':
+      return [
+        '記事の目的: 比較・選定向け',
+        '- 違いの説明だけで終わらせず、どんな条件ならどちらが向くかまで書く',
+        '- 比較軸を明確にし、選び方に結論を出す',
+        '- 読者が迷わないように判断基準を整理する',
+      ].join('\n');
+    case 'conversion':
+      return [
+        '記事の目的: 問い合わせ導線重視',
+        '- 読者の課題を整理し、放置リスクや判断ポイントを明確にする',
+        '- 過剰な煽りは避けつつ、相談や比較検討の必要性が伝わるようにする',
+        '- 実務上の不安や見落としやすい点に触れる',
+      ].join('\n');
+    default:
+      return [
+        '記事の目的: 標準',
+        '- 教科書的な総論の羅列にしない',
+        '- 同じ説明の言い換えを繰り返さない',
+        '- 読者が理解しやすく、実務や判断に役立つ情報を優先する',
+      ].join('\n');
+  }
+}
+
+function normalizeWhitespace(value: string): string {
+  return String(value || '').replace(/\s+/g, ' ').trim();
+}
+
+function truncateForStyleReference(value: string, minLength = 500, maxLength = 800): string {
+  const text = normalizeWhitespace(value);
+  if (!text) return '';
+  if (text.length <= maxLength) return text;
+
+  const candidate = text.slice(0, maxLength);
+  const boundary = Math.max(
+    candidate.lastIndexOf('。'),
+    candidate.lastIndexOf('！'),
+    candidate.lastIndexOf('？'),
+    candidate.lastIndexOf('. ')
+  );
+
+  if (boundary >= minLength) {
+    return candidate.slice(0, boundary + 1).trim();
+  }
+  return candidate.trim();
+}
+
+async function fetchStyleReferenceSample(styleReferenceUrl?: string): Promise<string> {
+  const url = String(styleReferenceUrl || '').trim();
+  if (!url) return '';
+
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8000);
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (compatible; AutomaticWriter/1.0; +https://example.com/bot)',
+      },
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+
+    if (!response.ok) {
+      throw new Error(`style reference fetch failed: ${response.status}`);
+    }
+
+    const html = await response.text();
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    if (!doc) return '';
+
+    const removeTargets = doc.querySelectorAll('script, style, nav, footer, header, noscript, aside, form');
+    removeTargets.forEach((node) => (node as any).remove());
+
+    const mainNode =
+      doc.querySelector('article') ||
+      doc.querySelector('main') ||
+      doc.querySelector('[role="main"]') ||
+      doc.body;
+
+    const paragraphNodes = mainNode?.querySelectorAll('p') || [];
+    let text = Array.from(paragraphNodes)
+      .map((node) => normalizeWhitespace(node.textContent))
+      .filter((line) => line.length >= 20)
+      .join(' ');
+
+    if (!text) {
+      text = normalizeWhitespace(mainNode?.textContent || '');
+    }
+
+    return truncateForStyleReference(text);
+  } catch (error) {
+    console.warn('Failed to fetch style reference sample:', error);
+    return '';
+  }
+}
+
+function buildStyleReferenceInstructions(sample: string, styleReferenceUrl?: string): string {
+  const normalizedSample = truncateForStyleReference(sample);
+  if (!normalizedSample) return '';
+
+  const sourceLine = styleReferenceUrl ? `参照元URL: ${styleReferenceUrl}` : '';
+  return [
+    '以下は既存サイトの文体サンプルです。内容や固有情報をコピーせず、語尾・テンポ・言い回しの傾向だけを参考にしてください。',
+    sourceLine,
+    'スタイルサンプル:',
+    normalizedSample,
+  ].filter(Boolean).join('\n');
 }
 
 type ModelRate = { input: number; output: number };
@@ -1319,6 +1478,17 @@ async function executeSchedule(
     }
   }
 
+  let styleReferenceInstructions = '';
+  if (wpConfig.style_reference_url) {
+    const styleSample = await fetchStyleReferenceSample(wpConfig.style_reference_url);
+    if (styleSample) {
+      styleReferenceInstructions = buildStyleReferenceInstructions(styleSample, wpConfig.style_reference_url);
+      console.log(`Loaded style reference sample from ${wpConfig.style_reference_url}`);
+    } else {
+      console.warn(`Style reference URL configured but no sample could be extracted: ${wpConfig.style_reference_url}`);
+    }
+  }
+
   // 2. 遶ｶ蜷郁ｪｿ譟ｻ縺ｮ螳溯｡鯉ｼ・uto Mode縺ｨ蜷後§繝ｭ繧ｸ繝・け・・
   console.log(`Conducting competitor research for: ${keyword}`);
   let competitorData: any = null;
@@ -1337,6 +1507,7 @@ async function executeSchedule(
   console.log(`Enriching keywords for: ${keyword}`);
   const targetWordCount = schedule.target_word_count || DEFAULT_TARGET_WORD_COUNT;
   const writingTone = resolveWritingTone(schedule.writing_tone);
+  const articleGoal = resolveArticleGoal(schedule.article_goal);
   const keywordArray = (schedule.keyword || '').split(',').map((k: string) => k.trim()).filter((k: string) => k);
 
   // 関連キーワードを競合データ + Google Custom Search から収集
@@ -1392,6 +1563,8 @@ async function executeSchedule(
     const instructionParts: string[] = [];
     const customInstructionText = customInstructions.trim();
     if (customInstructionText) instructionParts.push(customInstructionText);
+    instructionParts.push(buildArticleGoalInstructions(articleGoal));
+    if (styleReferenceInstructions) instructionParts.push(styleReferenceInstructions);
     if (relatedKeywords.length > 0) {
       instructionParts.push(`関連キーワード候補: ${relatedKeywords.slice(0, 8).join('、')}`);
     }

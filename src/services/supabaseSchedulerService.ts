@@ -12,6 +12,7 @@ class SupabaseSchedulerService {
     const configId = wpConfig.id;
     const normalizedCategory = wpConfig.category || wpConfig.defaultCategory || '';
     const normalizedPostType = wpConfig.postType || 'posts';
+    const normalizedStyleReferenceUrl = wpConfig.styleReferenceUrl?.trim() || null;
 
     const { data, error } = await supabase
       .from('wordpress_configs')
@@ -23,6 +24,7 @@ class SupabaseSchedulerService {
         password: wpConfig.applicationPassword,
         category: normalizedCategory,
         post_type: normalizedPostType,
+        style_reference_url: normalizedStyleReferenceUrl,
         is_active: wpConfig.isActive,
       })
       .select()
@@ -43,6 +45,7 @@ class SupabaseSchedulerService {
         app_password: wpConfig.applicationPassword,
         default_category: normalizedCategory,
         post_type: normalizedPostType,
+        style_reference_url: normalizedStyleReferenceUrl,
         is_active: wpConfig.isActive,
       });
 
@@ -137,6 +140,7 @@ class SupabaseSchedulerService {
         category: item.category,
         defaultCategory: item.category,
         postType: item.post_type,
+        styleReferenceUrl: item.style_reference_url || '',
         scheduleSettings: schedule ? {
           isActive: schedule.status,
           frequency: schedule.frequency,

@@ -5,7 +5,6 @@ import { useAppStore } from '../../store/useAppStore';
 import { KeywordInput } from './KeywordInput';
 import { TrendResults } from './TrendResults';
 import { CompetitorCards } from './CompetitorCards';
-import { SEOMetrics } from './SEOMetrics';
 
 /**
  * トレンド分析メインコンポーネント
@@ -55,9 +54,6 @@ export const TrendAnalysis: React.FC = () => {
                 <div className="space-y-6">
                     {/* Trend Metrics */}
                     <TrendResults result={analysisResult} />
-
-                    {/* SEO Metrics and Keywords */}
-                    <SEOMetrics result={analysisResult} />
 
                     {/* Competitor Analysis */}
                     {analysisResult.competitorAnalysis && (
