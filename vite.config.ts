@@ -7,6 +7,8 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
+      '@aw/config': path.resolve(__dirname, './packages/config/src/index.ts'),
+      '@aw/types': path.resolve(__dirname, './packages/types/src/index.ts'),
     },
   },
   server: {
@@ -27,5 +29,7 @@ export default defineConfig({
   },
   build: {
     chunkSizeWarningLimit: 700,
+    reportCompressedSize: false,
+    emptyOutDir: true,
   },
 });

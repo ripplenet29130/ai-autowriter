@@ -3,6 +3,9 @@ import { persist } from 'zustand/middleware';
 import { Article, WordPressConfig, AIConfig, PromptSet, KeywordSet, TitleSet } from '../types';
 import { supabaseSchedulerService } from '../services/supabaseSchedulerService';
 import { articlesService } from '../services/articlesService';
+import { promptSetService } from '../services/promptSetService';
+import { keywordSetService } from '../services/keywordSetService';
+import { titleSetService } from '../services/titleSetService';
 
 interface AppState {
   articles: Article[];
@@ -181,7 +184,6 @@ export const useAppStore = create<AppState>()(
 
       addPromptSet: async (promptSet) => {
         try {
-          const { promptSetService } = await import('../services/promptSetService');
           const saved = await promptSetService.savePromptSet(promptSet);
           if (saved) {
             set((state) => ({
@@ -199,7 +201,6 @@ export const useAppStore = create<AppState>()(
 
       updatePromptSet: async (id, updates) => {
         try {
-          const { promptSetService } = await import('../services/promptSetService');
           const current = get().promptSets.find(ps => ps.id === id);
           if (current) {
             const updated = { ...current, ...updates };
@@ -217,7 +218,6 @@ export const useAppStore = create<AppState>()(
 
       deletePromptSet: async (id) => {
         try {
-          const { promptSetService } = await import('../services/promptSetService');
           await promptSetService.deletePromptSet(id);
           set((state) => ({
             promptSets: state.promptSets.filter((ps) => ps.id !== id),
@@ -323,7 +323,6 @@ export const useAppStore = create<AppState>()(
 
       loadKeywordSets: async () => {
         try {
-          const { keywordSetService } = await import('../services/keywordSetService');
           const sets = await keywordSetService.getKeywordSets();
           set({ keywordSets: sets });
         } catch (error) {
@@ -333,7 +332,6 @@ export const useAppStore = create<AppState>()(
 
       loadTitleSets: async () => {
         try {
-          const { titleSetService } = await import('../services/titleSetService');
           const sets = await titleSetService.getTitleSets();
           set({ titleSets: sets });
         } catch (error) {
@@ -356,9 +354,9 @@ export const useAppStore = create<AppState>()(
             supabaseSchedulerService.loadWordPressConfigs(),
             supabaseSchedulerService.loadAIConfigs(),
             articlesService.getAllArticles(),
-            import('../services/keywordSetService').then(m => m.keywordSetService.getKeywordSets()),
-            import('../services/promptSetService').then(m => m.promptSetService.getPromptSets()),
-            import('../services/titleSetService').then(m => m.titleSetService.getTitleSets())
+            keywordSetService.getKeywordSets(),
+            promptSetService.getPromptSets(),
+            titleSetService.getTitleSets()
           ]);
           set({
             wordPressConfigs: wpConfigs,
@@ -387,7 +385,6 @@ export const useAppStore = create<AppState>()(
 
       loadPromptSets: async () => {
         try {
-          const { promptSetService } = await import('../services/promptSetService');
           const promptSets = await promptSetService.getPromptSets();
           set({ promptSets });
         } catch (error) {

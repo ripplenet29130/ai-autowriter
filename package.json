@@ -3,12 +3,18 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "workspaces": [
+    "apps/*",
+    "apps/clients/*",
+    "packages/*"
+  ],
   "engines": {
     "node": ">=20 <24"
   },
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build --outDir build",
+    "build": "tsc -b && node scripts/build-vite.mjs",
+    "build:vite": "node scripts/build-vite.mjs",
     "lint": "eslint .",
     "preview": "vite preview --outDir build"
   },

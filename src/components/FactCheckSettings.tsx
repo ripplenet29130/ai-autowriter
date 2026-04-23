@@ -1,7 +1,8 @@
-﻿import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { ExternalLink, Info, Key, Save, ShieldCheck } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { supabase } from '../services/supabaseClient';
+import { IS_CLIENT_DEPLOYMENT } from '@aw/config';
 
 type SettingsState = {
   enabled: boolean;
@@ -14,10 +15,10 @@ const LOCAL_STORAGE_KEY = 'fact_check_settings_local';
 
 export const FactCheckSettings: React.FC = () => {
   const [settings, setSettings] = useState<SettingsState>({
-    enabled: false,
+    enabled: IS_CLIENT_DEPLOYMENT,
     autoFixEnabled: false,
     perplexityApiKey: '',
-    maxItemsToCheck: 10,
+    maxItemsToCheck: 50,
   });
   const [loading, setLoading] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
@@ -32,10 +33,10 @@ export const FactCheckSettings: React.FC = () => {
       if (localRaw) {
         const local = JSON.parse(localRaw) as Partial<SettingsState>;
         setSettings((prev) => ({
-          enabled: Boolean(local.enabled ?? prev.enabled),
+          enabled: IS_CLIENT_DEPLOYMENT ? true : Boolean(local.enabled ?? prev.enabled),
           autoFixEnabled: Boolean(local.autoFixEnabled ?? prev.autoFixEnabled),
           perplexityApiKey: String(local.perplexityApiKey ?? prev.perplexityApiKey ?? ''),
-          maxItemsToCheck: Number.parseInt(String(local.maxItemsToCheck ?? prev.maxItemsToCheck ?? 10), 10) || 10,
+          maxItemsToCheck: Number.parseInt(String(local.maxItemsToCheck ?? prev.maxItemsToCheck ?? 50), 10) || 50,
         }));
       }
     } catch (error) {
@@ -68,10 +69,10 @@ export const FactCheckSettings: React.FC = () => {
 
         if (data) {
           setSettings({
-            enabled: data.enabled ?? false,
+            enabled: IS_CLIENT_DEPLOYMENT ? true : (data.enabled ?? false),
             autoFixEnabled: data.auto_fix_enabled ?? false,
             perplexityApiKey: data.perplexity_api_key ?? '',
-            maxItemsToCheck: data.max_items_to_check ?? 10,
+            maxItemsToCheck: data.max_items_to_check ?? 50,
           });
           return;
         }
@@ -97,12 +98,14 @@ export const FactCheckSettings: React.FC = () => {
           map.set(String(row.key), String(row.value ?? ''));
         });
         setSettings({
-          enabled: ['1', 'true', 'yes', 'on'].includes((map.get('fact_check_enabled') ?? '').toLowerCase()),
+          enabled: IS_CLIENT_DEPLOYMENT
+            ? true
+            : ['1', 'true', 'yes', 'on'].includes((map.get('fact_check_enabled') ?? '').toLowerCase()),
           autoFixEnabled: ['1', 'true', 'yes', 'on'].includes(
             (map.get('fact_check_auto_fix_enabled') ?? '').toLowerCase()
           ),
           perplexityApiKey: map.get('perplexity_api_key') ?? '',
-          maxItemsToCheck: Number.parseInt(map.get('fact_check_max_items') || '10', 10) || 10,
+          maxItemsToCheck: Number.parseInt(map.get('fact_check_max_items') || '50', 10) || 50,
         });
       }
     } catch (error) {
@@ -118,7 +121,7 @@ export const FactCheckSettings: React.FC = () => {
       window.localStorage.setItem(
         LOCAL_STORAGE_KEY,
         JSON.stringify({
-          enabled: settings.enabled,
+          enabled: IS_CLIENT_DEPLOYMENT ? true : settings.enabled,
           autoFixEnabled: settings.autoFixEnabled,
           perplexityApiKey: settings.perplexityApiKey,
           maxItemsToCheck: settings.maxItemsToCheck,
@@ -147,7 +150,7 @@ export const FactCheckSettings: React.FC = () => {
 
         const payload = {
           user_id: user.id,
-          enabled: settings.enabled,
+          enabled: IS_CLIENT_DEPLOYMENT ? true : settings.enabled,
           auto_fix_enabled: settings.autoFixEnabled,
           perplexity_api_key: settings.perplexityApiKey,
           max_items_to_check: settings.maxItemsToCheck,
@@ -168,7 +171,7 @@ export const FactCheckSettings: React.FC = () => {
 
       const globalSettingsToSave = [
         { key: 'perplexity_api_key', value: settings.perplexityApiKey, description: 'Perplexity API key' },
-        { key: 'fact_check_enabled', value: String(settings.enabled), description: 'Enable fact check' },
+        { key: 'fact_check_enabled', value: String(IS_CLIENT_DEPLOYMENT ? true : settings.enabled), description: 'Enable fact check' },
         { key: 'fact_check_max_items', value: String(settings.maxItemsToCheck), description: 'Max fact-check items' },
         {
           key: 'fact_check_auto_fix_enabled',
@@ -213,15 +216,23 @@ export const FactCheckSettings: React.FC = () => {
         <h3 className="text-lg font-semibold text-gray-900">Perplexity ファクトチェック設定</h3>
       </div>
 
-      <label className="flex items-center justify-between rounded-lg border p-3">
-        <span className="text-sm font-medium text-gray-700">ファクトチェックを有効化</span>
-        <input
-          type="checkbox"
-          checked={settings.enabled}
-          onChange={(e) => setSettings({ ...settings, enabled: e.target.checked })}
-          className="h-4 w-4"
-        />
-      </label>
+      {!IS_CLIENT_DEPLOYMENT && (
+        <label className="flex items-center justify-between rounded-lg border p-3">
+          <span className="text-sm font-medium text-gray-700">ファクトチェックを有効化</span>
+          <input
+            type="checkbox"
+            checked={settings.enabled}
+            onChange={(e) => setSettings({ ...settings, enabled: e.target.checked })}
+            className="h-4 w-4"
+          />
+        </label>
+      )}
+
+      {IS_CLIENT_DEPLOYMENT && (
+        <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
+          クライアントモードのため、ファクトチェックは常時有効です。
+        </div>
+      )}
 
       <label className="flex items-center justify-between rounded-lg border p-3">
         <span className="text-sm font-medium text-gray-700">問題があればAIで自動修正</span>
@@ -263,12 +274,12 @@ export const FactCheckSettings: React.FC = () => {
         <input
           type="number"
           min="1"
-          max="20"
+          max="50"
           value={settings.maxItemsToCheck}
           onChange={(e) =>
             setSettings({
               ...settings,
-              maxItemsToCheck: Math.max(1, Math.min(20, Number.parseInt(e.target.value || '10', 10))),
+              maxItemsToCheck: Math.max(1, Math.min(50, Number.parseInt(e.target.value || '50', 10))),
             })
           }
           className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"

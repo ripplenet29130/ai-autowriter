@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Key, Check, AlertCircle, ExternalLink, MessageSquare } from 'lucide-react';
 import { apiKeyManager } from '../services/apiKeyManager';
+import { realTrendAnalysisService } from '../services/realTrendAnalysisService';
 import { supabase } from '../services/supabaseClient';
 import toast from 'react-hot-toast';
 
@@ -95,7 +96,6 @@ export const ApiKeySettings: React.FC = () => {
         alert('APIキーのテストを開始します。コンソールで結果を確認してください。');
 
         try {
-            const { realTrendAnalysisService } = await import('../services/realTrendAnalysisService');
             const result = await realTrendAnalysisService.analyzeTrends('テスト', {
                 region: 'JP',
                 timeframe: 'today 12-m'

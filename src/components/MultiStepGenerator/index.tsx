@@ -121,10 +121,10 @@ export const MultiStepGenerator: React.FC<MultiStepGeneratorProps> = ({
     });
   };
 
-    const handleStep4Generate = async () => {
-      if (!outline) return;
+    const handleStep4Generate = async (latestOutline: typeof outline) => {
+      if (!latestOutline) return;
 
-      const result = await executeStep4(outline, {
+      const result = await executeStep4(latestOutline, {
         tone,
         customInstructions,
         targetWordCount,
@@ -220,7 +220,7 @@ export const MultiStepGenerator: React.FC<MultiStepGeneratorProps> = ({
             onAddSection={addSection}
             onRemoveSection={removeSection}
             onReorderSections={reorderSections}
-            onNext={() => void handleStep4Generate()}
+            onNext={(latestOutline) => void handleStep4Generate(latestOutline)}
             onBack={shouldAutoSkipTitleSelection ? () => goToStep(1) : previousStep}
           />
         );
@@ -230,7 +230,7 @@ export const MultiStepGenerator: React.FC<MultiStepGeneratorProps> = ({
             outline={outline}
             article={article}
             isGenerating={isGenerating}
-            onGenerate={() => void handleStep4Generate()}
+            onGenerate={() => void handleStep4Generate(outline)}
             onUpdateArticle={updateArticle}
             onBack={previousStep}
           />

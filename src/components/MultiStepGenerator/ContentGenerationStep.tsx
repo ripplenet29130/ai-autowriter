@@ -26,6 +26,7 @@ import toast from 'react-hot-toast';
 import { FactCheckResult } from '../../types/factCheck';
 import { factCheckService } from '../../services/factCheckService';
 import { FactCheckResultsDisplay } from '../FactCheckResultsDisplay';
+import { IS_CLIENT_DEPLOYMENT } from '@aw/config';
 
 interface ContentGenerationStepProps {
     outline: ArticleOutline | undefined;
@@ -66,6 +67,58 @@ export const ContentGenerationStep: React.FC<ContentGenerationStepProps> = ({
             setSelectedConfigId(activeConfigs[0].id);
         }
     }, [activeConfigs, selectedConfigId]);
+
+    React.useEffect(() => {
+        const runAutoFactCheck = async () => {
+            if (!article || !IS_CLIENT_DEPLOYMENT) return;
+            if (article.factCheckResults || isFactChecking) return;
+
+            try {
+                const settings = await factCheckService.getSettings();
+                if (!settings?.perplexity_api_key) return;
+
+                setIsFactChecking(true);
+                setFactCheckResults([]);
+                setFactCheckProgress(null);
+
+                const items = factCheckService.extractFacts(article.content);
+                if (items.length === 0) return;
+
+                const keyword = article.keywords && article.keywords.length > 0
+                    ? article.keywords[0]
+                    : article.title;
+
+                const results = await factCheckService.verifyFacts(items, keyword, undefined, (progress) => {
+                    setFactCheckProgress(progress);
+                });
+                setFactCheckResults(results);
+
+                let nextArticle: Article = {
+                    ...article,
+                    factCheckResults: results
+                };
+
+                if (settings.auto_fix_enabled && factCheckService.hasFixableIssues(results)) {
+                    const fixedContent = await factCheckService.applyFactCheckFixes(article.content, results, keyword);
+                    if (fixedContent && fixedContent.trim()) {
+                        nextArticle = {
+                            ...nextArticle,
+                            content: fixedContent,
+                            wordCount: fixedContent.length
+                        };
+                    }
+                }
+
+                onUpdateArticle(nextArticle);
+            } catch (error) {
+                console.error('Automatic fact check error:', error);
+            } finally {
+                setIsFactChecking(false);
+            }
+        };
+
+        void runAutoFactCheck();
+    }, [article, isFactChecking, onUpdateArticle]);
 
     const handleFactCheck = async () => {
         if (!article) return;

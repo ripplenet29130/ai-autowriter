@@ -1,0 +1,9 @@
+{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@aw/config": ["packages/config/src/index.ts"],
+      "@aw/types": ["packages/types/src/index.ts"]
+    }
+  }
+}

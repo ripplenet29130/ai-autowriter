@@ -8,6 +8,7 @@ import {
     OutlineGenerationRequest
 } from '../types';
 import { realTrendAnalysisService } from './realTrendAnalysisService';
+import { trendAnalysisService } from './trendAnalysisService';
 import { outlineGenerationService } from './outlineGenerationService';
 import { titleGenerationService } from './titleGenerationService';
 import { aiService } from './aiService';
@@ -62,6 +63,8 @@ export class MultiStepGenerationService {
     private ensureFinalSummarySection(outline: ArticleOutline): ArticleOutline {
         const sections = [...outline.sections];
         const existingIndex = sections.findIndex((s) => this.isSummaryTitle(s.title));
+        const userAddedNonSummary = sections.filter((section) => !section.isGenerated && !this.isSummaryTitle(section.title));
+        const lastUserAddedNonSummaryId = userAddedNonSummary[userAddedNonSummary.length - 1]?.id;
 
         const totalWords = Math.max(
             0,
@@ -89,7 +92,12 @@ export class MultiStepGenerationService {
             };
         }
 
-        sections.push(summarySection);
+        if (lastUserAddedNonSummaryId) {
+            const insertionIndex = sections.findIndex((section) => section.id === lastUserAddedNonSummaryId);
+            sections.splice(insertionIndex + 1, 0, summarySection);
+        } else {
+            sections.push(summarySection);
+        }
         const normalizedSections = sections.map((section, index) => ({ ...section, order: index }));
 
         return {
@@ -115,7 +123,6 @@ export class MultiStepGenerationService {
                 return trendData;
             } catch (apiError) {
                 console.warn('Trend API failed. Falling back to mock trend data.', apiError);
-                const { trendAnalysisService } = await import('./trendAnalysisService');
                 const mockTrendData = await trendAnalysisService.analyzeTrends(keyword);
                 return mockTrendData;
             }

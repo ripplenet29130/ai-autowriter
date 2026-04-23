@@ -1,5 +1,6 @@
-﻿import { supabase } from './supabaseClient';
+import { supabase } from './supabaseClient';
 import { FactCheckItem, FactCheckResult } from '../types/factCheck';
+import { IS_CLIENT_DEPLOYMENT } from '@aw/config';
 
 type PerplexityBatchResult = {
   claim_number: number;
@@ -24,8 +25,9 @@ type FactCheckProgress = {
 };
 
 const LOCAL_STORAGE_KEY = 'fact_check_settings_local';
-
-
+const DEFAULT_MAX_ITEMS = 50;
+const DEFAULT_BATCH_SIZE = 10;
+const DEFAULT_MODEL_NAME = 'sonar';
 
 const parseBoolean = (value: string | null | undefined, fallback = false): boolean => {
   if (value == null || value === '') return fallback;
@@ -38,8 +40,6 @@ const parseNumber = (value: string | null | undefined, fallback: number): number
   const n = Number(value);
   return Number.isFinite(n) ? n : fallback;
 };
-
-
 
 const normalizeConfidence = (value: unknown): number => {
   const n = Number(value);
@@ -57,6 +57,7 @@ const hasInvalidAmountPattern = (text: string): boolean => {
     /(約|およそ)?[,，]0{3,}(?:円|万円|千円)/.test(t)
   );
 };
+
 const applyFallbackFixes = (originalContent: string, issues: FactCheckResult[]): string => {
   let next = originalContent;
   const correctionLines: string[] = [];
@@ -67,7 +68,6 @@ const applyFallbackFixes = (originalContent: string, issues: FactCheckResult[]):
     const correct = issue.correctInfo.trim();
     if (!claim || !correct) return;
 
-    // First try a direct replacement of the detected claim.
     if (next.includes(claim)) {
       next = next.replace(claim, `${claim}（修正: ${correct}）`);
     }
@@ -84,6 +84,7 @@ const applyFallbackFixes = (originalContent: string, issues: FactCheckResult[]):
 
   return next;
 };
+
 const getLocalSettings = (): FactCheckSettingsRow | null => {
   if (typeof window === 'undefined') return null;
   try {
@@ -101,8 +102,8 @@ const getLocalSettings = (): FactCheckSettingsRow | null => {
     return {
       enabled: Boolean(parsed.enabled ?? true),
       perplexity_api_key: key,
-      max_items_to_check: parseNumber(String(parsed.maxItemsToCheck ?? '10'), 10),
-      model_name: String(parsed.modelName ?? 'sonar'),
+      max_items_to_check: parseNumber(String(parsed.maxItemsToCheck ?? DEFAULT_MAX_ITEMS), DEFAULT_MAX_ITEMS),
+      model_name: String(parsed.modelName ?? DEFAULT_MODEL_NAME),
       auto_fix_enabled: Boolean(parsed.autoFixEnabled ?? false),
     };
   } catch {
@@ -111,9 +112,27 @@ const getLocalSettings = (): FactCheckSettingsRow | null => {
 };
 
 export const factCheckService = {
+  isClientMode(): boolean {
+    return IS_CLIENT_DEPLOYMENT;
+  },
+
+  enforceSettings(settings: FactCheckSettingsRow | null): FactCheckSettingsRow | null {
+    if (!settings) return null;
+
+    return {
+      ...settings,
+      enabled: this.isClientMode() ? true : settings.enabled,
+      max_items_to_check: this.isClientMode()
+        ? null
+        : Math.max(1, settings.max_items_to_check ?? DEFAULT_MAX_ITEMS),
+      model_name: settings.model_name || DEFAULT_MODEL_NAME,
+      auto_fix_enabled: Boolean(settings.auto_fix_enabled ?? false),
+    };
+  },
+
   async resolveSettings(): Promise<FactCheckSettingsRow | null> {
     const localSettings = getLocalSettings();
-    if (localSettings?.perplexity_api_key) return localSettings;
+    if (localSettings?.perplexity_api_key) return this.enforceSettings(localSettings);
 
     if (!supabase) return null;
 
@@ -132,11 +151,10 @@ export const factCheckService = {
         .maybeSingle();
 
       if (data) {
-        return (data as FactCheckSettingsRow) ?? null;
+        return this.enforceSettings((data as FactCheckSettingsRow) ?? null);
       }
     }
 
-    // 暫定: ログインなしでも app_settings からグローバル設定を読み取る
     const { data: globalRows, error: globalError } = await supabase
       .from('app_settings')
       .select('key, value')
@@ -160,13 +178,13 @@ export const factCheckService = {
     const globalApiKey = map.get('perplexity_api_key');
     if (!globalApiKey) return null;
 
-    return {
+    return this.enforceSettings({
       enabled: parseBoolean(map.get('fact_check_enabled'), true),
       perplexity_api_key: globalApiKey,
-      model_name: map.get('fact_check_model_name') || 'sonar',
-      max_items_to_check: parseNumber(map.get('fact_check_max_items'), 10),
+      model_name: map.get('fact_check_model_name') || DEFAULT_MODEL_NAME,
+      max_items_to_check: parseNumber(map.get('fact_check_max_items'), DEFAULT_MAX_ITEMS),
       auto_fix_enabled: parseBoolean(map.get('fact_check_auto_fix_enabled'), false),
-    };
+    });
   },
 
   extractFacts(content: string, userMarkedText?: string): FactCheckItem[] {
@@ -206,7 +224,7 @@ export const factCheckService = {
           claim,
           context: userMarkedText.slice(start, end),
           priority: 'high',
-          score: 100, // 明示指定は常に最優先
+          score: 100,
         });
       }
     }
@@ -232,25 +250,13 @@ export const factCheckService = {
             score,
           };
         })
-        .filter((c) => c.score >= 3)
-        .sort((a, b) => b.score - a.score);
+        .filter((c) => c.score >= 2)
+        .sort((a, b) => {
+          if (a.priority !== b.priority) return a.priority === 'high' ? -1 : 1;
+          return b.score - a.score;
+        });
 
-      const picked: Candidate[] = [];
-      let highCount = 0;
-      let normalCount = 0;
-      for (const candidate of ranked) {
-        if (candidate.priority === 'high' && highCount < 2) {
-          picked.push(candidate);
-          highCount += 1;
-          continue;
-        }
-        if (candidate.priority === 'normal' && normalCount < 1) {
-          picked.push(candidate);
-          normalCount += 1;
-        }
-        if (picked.length >= 3) break;
-      }
-      candidates.push(...picked);
+      candidates.push(...ranked);
     }
 
     const deduped = new Map<string, Candidate>();
@@ -286,9 +292,11 @@ export const factCheckService = {
     }
 
     const results: FactCheckResult[] = [];
-    const batchSize = 5;
-    const itemsToCheck = items.slice(0, settings.max_items_to_check || 10);
-    const selectedModel = modelName || settings.model_name || 'sonar';
+    const batchSize = DEFAULT_BATCH_SIZE;
+    const maxItems = settings.max_items_to_check;
+    const itemsToCheck = maxItems == null ? items : items.slice(0, maxItems);
+    const selectedModel = modelName || settings.model_name || DEFAULT_MODEL_NAME;
+    const waitMs = selectedModel.includes('sonar-pro') ? 500 : 800;
     onProgress?.({ total: itemsToCheck.length, processed: 0 });
 
     for (let i = 0; i < itemsToCheck.length; i += batchSize) {
@@ -384,7 +392,7 @@ export const factCheckService = {
         });
 
         if (i + batchSize < itemsToCheck.length) {
-          await new Promise((resolve) => setTimeout(resolve, 1200));
+          await new Promise((resolve) => setTimeout(resolve, waitMs));
         }
       } catch (error) {
         console.error('Batch verification error:', error);
@@ -456,7 +464,7 @@ export const factCheckService = {
           Authorization: `Bearer ${settings.perplexity_api_key}`,
         },
         body: JSON.stringify({
-          model: modelName || settings.model_name || 'sonar',
+          model: modelName || settings.model_name || DEFAULT_MODEL_NAME,
           messages: [
             { role: 'system', content: 'You edit Japanese articles to fix factual mistakes while preserving style.' },
             { role: 'user', content: prompt },
@@ -470,22 +478,10 @@ export const factCheckService = {
       const data = await response.json();
       const content: string = data?.choices?.[0]?.message?.content ?? '';
       const cleaned = content.trim().replace(/^```[a-zA-Z]*\s*/, '').replace(/\s*```$/, '');
-      return cleaned || null;
+      return cleaned || applyFallbackFixes(originalContent, issues);
     } catch (error) {
       console.error('Fact check auto-fix failed:', error);
-      return null;
+      return applyFallbackFixes(originalContent, issues);
     }
   },
 };
-
-
-
-
-
-
-
-
-
-
-
-

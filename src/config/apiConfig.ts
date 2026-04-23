@@ -18,6 +18,9 @@ export const API_CONFIG = {
   }
 };
 
+export const DEPLOYMENT_MODE = import.meta.env.VITE_DEPLOYMENT_MODE === 'internal' ? 'internal' : 'client';
+export const IS_CLIENT_DEPLOYMENT = DEPLOYMENT_MODE === 'client';
+
 export const validateApiConfig = () => {
   const requiredKeys = [
     'VITE_GOOGLE_CUSTOM_SEARCH_API_KEY',

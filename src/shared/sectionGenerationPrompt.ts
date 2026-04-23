@@ -17,15 +17,15 @@ interface SectionPromptInput {
 function toneInstruction(tone: Tone): string {
   switch (tone) {
     case 'professional':
-      return '専門的で客観的な文体で、根拠を意識して簡潔に説明してください。';
+      return '丁寧で信頼感のある実務的な文体で書くこと。';
     case 'casual':
-      return '読みやすい会話調で、親しみやすく説明してください。';
+      return '読みやすく親しみやすい文体で書くこと。';
     case 'technical':
-      return '用語を正確に使い、論理的で技術的な説明を優先してください。';
+      return '専門性を保ちつつ、根拠が伝わる明確な文体で書くこと。';
     case 'friendly':
-      return '丁寧でやわらかい語り口で、安心感のある表現にしてください。';
+      return '柔らかく案内的な文体で書くこと。';
     default:
-      return '自然で読みやすい文体で説明してください。';
+      return '自然で読みやすい日本語で書くこと。';
   }
 }
 
@@ -54,7 +54,7 @@ function keywordPreferenceText(keywordPreferences?: Record<string, KeywordPrefer
     .map(([kw]) => kw);
 
   const lines: string[] = [];
-  if (essential.length > 0) lines.push(`- 必須キーワード: ${essential.join('、')}`);
+  if (essential.length > 0) lines.push(`- 必ず自然に含めるキーワード: ${essential.join('、')}`);
   if (ng.length > 0) lines.push(`- 使用禁止キーワード: ${ng.join('、')}`);
   return lines.join('\n');
 }
@@ -67,43 +67,36 @@ export function buildHighQualitySectionPrompt(input: SectionPromptInput): string
   const context = String(input.previousContent || '').trim();
 
   return `
-あなたは日本語SEO記事の編集者です。次の1セクション本文だけを作成してください。
+あなたは日本語SEO記事の執筆者です。次の1セクションだけを執筆してください。
 
 記事タイトル: ${input.articleTitle || '未設定'}
-全体構成:
+全体アウトライン:
 ${input.totalOutline || '未設定'}
 
 今回のセクション: ${input.sectionTitle}
 文体: ${toneInstruction(input.tone)}
-目標文字数: ${input.targetChars}字（許容: ±10%）
+目標文字数: ${input.targetChars}文字前後
 
-キーワード要件:
-- 主キーワード（優先度高）: ${mainKeywords.length > 0 ? mainKeywords.join('、') : 'なし'}
-- 補助キーワード（必要時のみ）: ${subKeywords.length > 0 ? subKeywords.join('、') : 'なし'}
-- キーワードは「自然に入る場合のみ」使用し、無理に全て入れない
-- 同一キーワードの連呼を避け、このセクション内では同一語句の重複を最小限にする
-- キーワードを「」で囲って強調しない
-${prefText ? prefText : ''}
+キーワード方針:
+- 主キーワード: ${mainKeywords.length > 0 ? mainKeywords.join('、') : 'なし'}
+- 補助キーワード: ${subKeywords.length > 0 ? subKeywords.join('、') : 'なし'}
+${prefText || ''}
 
-執筆ルール:
-- 本文のみ出力する（見出し記号 #, ##, ### は出力しない）
-- **（太字マーク）は使用禁止。強調したい場合も ** で囲まないこと
-- 箇条書きは必要時のみ使用し、乱用しない
-- 重複表現や同義反復を避ける
-- SEO語句の列挙調を避け、自然な説明文として読める日本語にする
-- 2〜4段落を目安に、段落ごとに意味の区切りを作る
-- 読者が次のセクションへ進みやすい流れを意識する
-- 医療・金融などの断定が危険な領域では、過度な断定を避ける
-- 文章は必ず完結した文で終えること（途中で切れた文を残さない）
-- 最後の文は必ず句点（。）で終わること
- - 必ず日本語の「です・ます調」で統一し、「だ・である調」を混ぜない
- - 文は必ず完結させ、語尾が「し」「して」「し、」「ため」「など」で終わらないようにする
- - 直前までのセクションと説明が重複しないようにし、同じ役割や効能の説明を繰り返さない
- - このセクションでは、この見出しの話題だけを書く。他セクション向けの内容を混ぜない
-${input.isLead ? '- 導入セクションとして、課題提起と記事で得られる価値を明示する' : ''}
-${input.isLead ? '- 導入文で記事タイトルの文言をそのまま繰り返さない（タイトル引用禁止）' : ''}
-${context ? `直前文脈（重複回避用・全文）:\n${context}` : ''}
-${input.customInstructions ? `追加指示:\n${input.customInstructions}` : ''}
+厳守事項:
+- 提供されたアウトラインに記載された見出し（H2/H3/H4）はすべて使用対象とみなし、省略・統合・新規追加をしないこと
+- 見出し順序はアウトライン通りに維持すること
+- 今回は「${input.sectionTitle}」の本文だけを書くこと
+- 見出し記号（#, ##, ###）は出力しないこと
+- 箇条書きは必要な場合だけ使い、乱用しないこと
+- 他セクションの内容を重複させないこと
+- 情報が不確かな場合は断定しすぎないこと
+- 自然な日本語で、具体性のある本文にすること
+${input.isLead ? '- リード文として、記事全体の導入になる内容にすること' : ''}
+${input.isLead ? '- リード文では記事タイトルをそのまま繰り返し見出し化しないこと' : ''}
 
-本文のみを出力してください。`.trim();
+${context ? `直前までの本文:\n${context}\n` : ''}
+${input.customInstructions ? `追加指示:\n${input.customInstructions}\n` : ''}
+
+出力は今回のセクション本文のみとしてください。
+`.trim();
 }

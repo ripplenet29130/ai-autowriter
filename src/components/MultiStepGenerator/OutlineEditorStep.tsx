@@ -44,7 +44,7 @@ interface OutlineEditorStepProps {
     onAddSection: (section: OutlineSection) => void;
     onRemoveSection: (sectionId: string) => void;
     onReorderSections: (sectionIds: string[]) => void;
-    onNext: () => void;
+    onNext: (outline: ArticleOutline) => void;
     onBack: () => void;
 }
 
@@ -510,7 +510,7 @@ export const OutlineEditorStep: React.FC<OutlineEditorStepProps> = ({
                 </button>
 
                 <button
-                    onClick={onNext}
+                    onClick={() => onNext(outline!)}
                     className="bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white px-10 py-4 rounded-full font-black shadow-xl shadow-blue-100 flex items-center space-x-3 transform hover:scale-105 active:scale-95 transition-all"
                 >
                     <span>本文の執筆を開始</span>
