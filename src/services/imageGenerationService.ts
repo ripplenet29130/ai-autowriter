@@ -1,4 +1,5 @@
 import { supabase } from './supabaseClient';
+import { getCurrentAccountId } from './accountScope';
 
 export interface ImageGenerationOptions {
     prompt: string;
@@ -23,13 +24,19 @@ export const imageGenerationService = {
                 throw new Error('Supabase client is not initialized');
             }
 
-            const { data: activeConfig, error: configError } = await supabase
+            const accountId = getCurrentAccountId();
+            let query = supabase
                 .from('ai_configs')
                 .select('*')
                 .eq('is_active', true)
                 .order('created_at', { ascending: false })
-                .limit(1)
-                .maybeSingle();
+                .limit(1);
+
+            if (accountId) {
+                query = query.eq('account_id', accountId);
+            }
+
+            const { data: activeConfig, error: configError } = await query.maybeSingle();
 
             if (configError) throw configError;
 

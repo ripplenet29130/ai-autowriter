@@ -1,5 +1,6 @@
 import { supabase } from './supabaseClient';
 import { WordPressConfig, AIConfig, ScheduleSettings } from '../types';
+import { getCurrentAccountId, getRequiredAccountId } from './accountScope';
 
 class SupabaseSchedulerService {
   async saveWordPressConfig(config: WordPressConfig): Promise<string> {
@@ -13,11 +14,43 @@ class SupabaseSchedulerService {
     const normalizedCategory = wpConfig.category || wpConfig.defaultCategory || '';
     const normalizedPostType = wpConfig.postType || 'posts';
     const normalizedStyleReferenceUrl = wpConfig.styleReferenceUrl?.trim() || null;
+    const accountId = getRequiredAccountId();
+
+    const { data: account } = await supabase
+      .from('accounts')
+      .select('wordpress_site_limit')
+      .eq('id', accountId)
+      .maybeSingle();
+
+    const { data: existingConfig } = await supabase
+      .from('wordpress_configs')
+      .select('id')
+      .eq('id', configId)
+      .eq('account_id', accountId)
+      .maybeSingle();
+
+    if (!existingConfig) {
+      const { count, error: countError } = await supabase
+        .from('wordpress_configs')
+        .select('*', { count: 'exact', head: true })
+        .eq('account_id', accountId);
+
+      if (countError) {
+        console.error('Error checking WordPress config limit:', countError);
+        throw new Error(`WordPress登録数の確認に失敗しました: ${countError.message}`);
+      }
+
+      const siteLimit = account?.wordpress_site_limit ?? 1;
+      if ((count ?? 0) >= siteLimit) {
+        throw new Error(`WordPress登録上限に達しています。現在の上限は${siteLimit}件です。`);
+      }
+    }
 
     const { data, error } = await supabase
       .from('wordpress_configs')
       .upsert({
         id: configId,
+        account_id: accountId,
         name: wpConfig.name,
         url: wpConfig.url,
         username: wpConfig.username,
@@ -39,6 +72,7 @@ class SupabaseSchedulerService {
       .from('wp_configs')
       .upsert({
         id: configId,
+        account_id: accountId,
         name: wpConfig.name,
         url: wpConfig.url,
         username: wpConfig.username,
@@ -63,14 +97,17 @@ class SupabaseSchedulerService {
 
   async saveScheduleSettings(wpConfigId: string, settings: ScheduleSettings): Promise<void> {
     if (!supabase) return;
+    const accountId = getRequiredAccountId();
 
     const { data: existing } = await supabase
       .from('schedule_settings')
       .select('id')
       .eq('wp_config_id', wpConfigId)
+      .eq('account_id', accountId)
       .maybeSingle();
 
     const scheduleData = {
+      account_id: accountId,
       wp_config_id: wpConfigId,
       status: settings.isActive,
       frequency: settings.frequency,
@@ -83,7 +120,8 @@ class SupabaseSchedulerService {
       const { error } = await supabase
         .from('schedule_settings')
         .update(scheduleData)
-        .eq('id', existing.id);
+        .eq('id', existing.id)
+        .eq('account_id', accountId);
 
       if (error) {
         console.error('Error updating schedule settings:', error);
@@ -103,15 +141,25 @@ class SupabaseSchedulerService {
 
   async loadWordPressConfigs(): Promise<WordPressConfig[]> {
     if (!supabase) return [];
+    const accountId = getCurrentAccountId();
+
+    let configsQuery = supabase
+      .from('wordpress_configs')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    let schedulesQuery = supabase
+      .from('schedule_settings')
+      .select('wp_config_id, status, frequency, post_time, related_keywords, post_status');
+
+    if (accountId) {
+      configsQuery = configsQuery.eq('account_id', accountId);
+      schedulesQuery = schedulesQuery.eq('account_id', accountId);
+    }
 
     const [{ data: configsData, error: configsError }, { data: schedulesData, error: schedulesError }] = await Promise.all([
-      supabase
-        .from('wordpress_configs')
-        .select('*')
-        .order('created_at', { ascending: false }),
-      supabase
-        .from('schedule_settings')
-        .select('wp_config_id, status, frequency, post_time, related_keywords, post_status'),
+      configsQuery,
+      schedulesQuery,
     ]);
 
     if (configsError) {
@@ -155,11 +203,13 @@ class SupabaseSchedulerService {
 
   async deleteWordPressConfig(id: string): Promise<void> {
     if (!supabase) return;
+    const accountId = getRequiredAccountId();
 
     const { error: scheduleError } = await supabase
       .from('schedule_settings')
       .delete()
-      .eq('wp_config_id', id);
+      .eq('wp_config_id', id)
+      .eq('account_id', accountId);
 
     if (scheduleError) {
       console.error('Error deleting schedule settings:', scheduleError);
@@ -169,7 +219,8 @@ class SupabaseSchedulerService {
     const { error } = await supabase
       .from('wordpress_configs')
       .delete()
-      .eq('id', id);
+      .eq('id', id)
+      .eq('account_id', accountId);
 
     if (error) {
       console.error('Error deleting WordPress config:', error);
@@ -179,7 +230,8 @@ class SupabaseSchedulerService {
     const { error: legacyDeleteError } = await supabase
       .from('wp_configs')
       .delete()
-      .eq('id', id);
+      .eq('id', id)
+      .eq('account_id', accountId);
 
     if (legacyDeleteError) {
       console.error('Error deleting legacy wp_config:', legacyDeleteError);
@@ -189,10 +241,11 @@ class SupabaseSchedulerService {
 
   async saveAIConfig(config: AIConfig): Promise<string> {
     if (!supabase) return '';
+    const accountId = getRequiredAccountId();
 
-    const aiData = {
+    const aiData: Record<string, any> = {
+      account_id: accountId,
       provider: config.provider,
-      api_key: config.apiKey,
       model: config.model,
       temperature: config.temperature || 0.7,
       max_tokens: config.maxTokens || 4000,
@@ -201,11 +254,16 @@ class SupabaseSchedulerService {
       images_per_article: config.imagesPerArticle ?? 0,
     };
 
+    if (config.apiKey.trim()) {
+      aiData.api_key = config.apiKey;
+    }
+
     // Check for existing config for this provider
     const { data: existing } = await supabase
       .from('ai_configs')
       .select('id, is_active')
       .eq('provider', config.provider)
+      .eq('account_id', accountId)
       .limit(1)
       .maybeSingle();
 
@@ -213,9 +271,14 @@ class SupabaseSchedulerService {
     const { count } = await supabase
       .from('ai_configs')
       .select('*', { count: 'exact', head: true })
-      .eq('is_active', true);
+      .eq('is_active', true)
+      .eq('account_id', accountId);
 
     const isFirstActive = !count && !existing;
+
+    if (!existing && !aiData.api_key) {
+      throw new Error('APIキーを入力してください');
+    }
 
     const dataToSave = {
       ...aiData,
@@ -253,6 +316,7 @@ class SupabaseSchedulerService {
         .from('ai_configs')
         .delete()
         .eq('provider', config.provider)
+        .eq('account_id', accountId)
         .neq('id', result.data.id);
     }
 
@@ -264,11 +328,18 @@ class SupabaseSchedulerService {
    */
   async loadAIConfigs(): Promise<AIConfig[]> {
     if (!supabase) return [];
+    const accountId = getCurrentAccountId();
 
-    const { data, error } = await supabase
+    let query = supabase
       .from('ai_configs')
       .select('*')
       .order('created_at', { ascending: false });
+
+    if (accountId) {
+      query = query.eq('account_id', accountId);
+    }
+
+    const { data, error } = await query;
 
     if (error) {
       console.error('Error loading AI configs:', error);
@@ -296,11 +367,13 @@ class SupabaseSchedulerService {
    */
   async activateAIConfig(id: string): Promise<void> {
     if (!supabase) return;
+    const accountId = getRequiredAccountId();
 
     // 全ての設定を一旦非アクティブにする（PostgRESTの安全制限を回避するためフィルタを追加）
     const { error: resetError } = await supabase
       .from('ai_configs')
       .update({ is_active: false })
+      .eq('account_id', accountId)
       .neq('id', '00000000-0000-0000-0000-000000000000');
 
     if (resetError) {
@@ -312,7 +385,8 @@ class SupabaseSchedulerService {
     const { error: activateError } = await supabase
       .from('ai_configs')
       .update({ is_active: true })
-      .eq('id', id);
+      .eq('id', id)
+      .eq('account_id', accountId);
 
     if (activateError) {
       console.error('Error activating AI config:', activateError);
@@ -325,14 +399,20 @@ class SupabaseSchedulerService {
    */
   async loadAIConfig(): Promise<AIConfig | null> {
     if (!supabase) return null;
+    const accountId = getCurrentAccountId();
 
-    const { data, error } = await supabase
+    let query = supabase
       .from('ai_configs')
       .select('*')
       .order('is_active', { ascending: false })
       .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
+      .limit(1);
+
+    if (accountId) {
+      query = query.eq('account_id', accountId);
+    }
+
+    const { data, error } = await query.maybeSingle();
 
     if (error || !data) {
       if (error) console.error('Error loading active AI config:', error);
@@ -361,7 +441,8 @@ class SupabaseSchedulerService {
     const { error } = await supabase
       .from('ai_configs')
       .delete()
-      .eq('id', id);
+      .eq('id', id)
+      .eq('account_id', getRequiredAccountId());
 
     if (error) {
       console.error('Error deleting AI config:', error);
@@ -371,8 +452,9 @@ class SupabaseSchedulerService {
 
   async getExecutionHistory(limit = 50) {
     if (!supabase) return [];
+    const accountId = getCurrentAccountId();
 
-    const { data, error } = await supabase
+    let query = supabase
       .from('execution_history')
       .select(`
         *,
@@ -380,6 +462,12 @@ class SupabaseSchedulerService {
       `)
       .order('executed_at', { ascending: false })
       .limit(limit);
+
+    if (accountId) {
+      query = query.eq('account_id', accountId);
+    }
+
+    const { data, error } = await query;
 
     if (error) {
       console.error('Error loading execution history:', error);

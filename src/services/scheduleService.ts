@@ -1,5 +1,6 @@
 import { supabase } from './supabaseClient';
 import { ScheduleSetting } from '../types';
+import { getCurrentAccountId, getRequiredAccountId } from './accountScope';
 
 class ScheduleService {
     private readonly maxSchemaRetryCount = 48;
@@ -36,16 +37,22 @@ class ScheduleService {
             throw new Error('Supabase is not initialized');
         }
         const targetId = String(wpConfigId || '').trim();
+        const accountId = getCurrentAccountId();
         if (!targetId) {
             throw new Error('WordPress設定IDが空です。設定を選択し直してください。');
         }
 
-        const { data: currentWpConfig, error: currentWpConfigError } = await supabase
+        let currentWpConfigQuery = supabase
             .from('wp_configs')
             .select('id')
             .eq('id', targetId)
-            .limit(1)
-            .maybeSingle();
+            .limit(1);
+
+        if (accountId) {
+            currentWpConfigQuery = currentWpConfigQuery.eq('account_id', accountId);
+        }
+
+        const { data: currentWpConfig, error: currentWpConfigError } = await currentWpConfigQuery.maybeSingle();
 
         if (!currentWpConfigError && currentWpConfig?.id) {
             return;
@@ -61,12 +68,17 @@ class ScheduleService {
         }
 
         // Compatibility path: copy matching row from legacy wordpress_configs into wp_configs.
-        const { data: legacyRow, error: legacyError } = await supabase
+        let legacyQuery = supabase
             .from('wordpress_configs')
             .select('id, name, url, username, password, category, is_active, post_type, style_reference_url')
             .eq('id', targetId)
-            .limit(1)
-            .maybeSingle();
+            .limit(1);
+
+        if (accountId) {
+            legacyQuery = legacyQuery.eq('account_id', accountId);
+        }
+
+        const { data: legacyRow, error: legacyError } = await legacyQuery.maybeSingle();
 
         if (legacyError) {
             if (this.isMissingTableError(legacyError, 'wordpress_configs')) {
@@ -87,6 +99,7 @@ class ScheduleService {
 
         let compatPayload: Record<string, any> = {
             id: legacyRow.id,
+            account_id: accountId,
             name: legacyRow.name,
             url: legacyRow.url,
             username: legacyRow.username,
@@ -183,6 +196,7 @@ class ScheduleService {
         }
 
         await this.ensureWpConfigReference(schedule.wp_config_id);
+        const accountId = getRequiredAccountId();
 
         let currentUserId: string | null = null;
         try {
@@ -197,6 +211,7 @@ class ScheduleService {
         const requestedAutoFixEnabled = schedule.fact_check_auto_fix_enabled === true;
         let insertPayload: Record<string, any> = {
             user_id: currentUserId,
+            account_id: accountId,
             ai_config_id: schedule.ai_config_id,
             ai_provider_override: schedule.ai_provider_override || null,
             ai_model_override: schedule.ai_model_override || null,
@@ -284,7 +299,8 @@ class ScheduleService {
         console.log('getSchedules: Fetching schedules...');
         const { data, error } = await supabase
             .from('schedule_settings')
-            .select('*');
+            .select('*')
+            .eq('account_id', getRequiredAccountId());
 
         if (error) {
             console.error('getSchedules: Error fetching schedules:', error);
@@ -304,6 +320,7 @@ class ScheduleService {
             .from('schedule_settings')
             .select('*')
             .eq('id', id)
+            .eq('account_id', getRequiredAccountId())
             .single();
 
         if (error) {
@@ -322,6 +339,7 @@ class ScheduleService {
         if (typeof updates.wp_config_id === 'string' && updates.wp_config_id.trim().length > 0) {
             await this.ensureWpConfigReference(updates.wp_config_id);
         }
+        const accountId = getRequiredAccountId();
 
         let currentUserId: string | null = null;
         try {
@@ -349,6 +367,7 @@ class ScheduleService {
         if (cleanUpdates.ai_model_override === '') cleanUpdates.ai_model_override = null as any;
 
         let updatePayload: Record<string, any> = { ...cleanUpdates };
+        updatePayload.account_id = accountId;
 
         const maxRetries = Math.max(this.maxSchemaRetryCount, Object.keys(updatePayload).length + 2);
         for (let i = 0; i < maxRetries; i += 1) {
@@ -360,6 +379,7 @@ class ScheduleService {
                 .from('schedule_settings')
                 .update(updatePayload)
                 .eq('id', id)
+                .eq('account_id', accountId)
                 .select()
                 .single();
 
@@ -407,7 +427,8 @@ class ScheduleService {
         const { error } = await supabase
             .from('schedule_settings')
             .delete()
-            .eq('id', id);
+            .eq('id', id)
+            .eq('account_id', getRequiredAccountId());
 
         if (error) {
             console.error('Error deleting schedule:', error);
@@ -433,6 +454,7 @@ class ScheduleService {
             .from('schedule_settings')
             .select('*')
             .eq('wp_config_id', wpConfigId)
+            .eq('account_id', getRequiredAccountId())
             .order('created_at', { ascending: false });
 
         if (error) {
@@ -452,6 +474,7 @@ class ScheduleService {
             .from('schedule_settings')
             .select('*')
             .eq('ai_config_id', aiConfigId)
+            .eq('account_id', getRequiredAccountId())
             .order('created_at', { ascending: false });
 
         if (error) {
@@ -470,7 +493,8 @@ class ScheduleService {
         const { data, error } = await supabase
             .from('execution_history')
             .select('keyword_used')
-            .eq('schedule_id', scheduleId);
+            .eq('schedule_id', scheduleId)
+            .eq('account_id', getRequiredAccountId());
 
         if (error) {
             console.error('Error fetching used keywords:', error);
@@ -492,6 +516,7 @@ class ScheduleService {
             .from('execution_history')
             .delete()
             .eq('schedule_id', scheduleId)
+            .eq('account_id', getRequiredAccountId())
             .eq('keyword_used', normalized);
 
         if (error) {
@@ -515,6 +540,7 @@ class ScheduleService {
             .from('execution_history')
             .delete()
             .eq('schedule_id', scheduleId)
+            .eq('account_id', getRequiredAccountId())
             .in('keyword_used', targets);
 
         if (error) {
@@ -531,7 +557,8 @@ class ScheduleService {
         const { data, error } = await supabase
             .from('execution_history')
             .select('article_title')
-            .eq('schedule_id', scheduleId);
+            .eq('schedule_id', scheduleId)
+            .eq('account_id', getRequiredAccountId());
 
         if (error) {
             console.error('Error fetching used titles:', error);
@@ -550,6 +577,7 @@ class ScheduleService {
             .from('execution_history')
             .select('executed_at')
             .eq('schedule_id', scheduleId)
+            .eq('account_id', getRequiredAccountId())
             .order('executed_at', { ascending: false })
             .limit(1)
             .maybeSingle();

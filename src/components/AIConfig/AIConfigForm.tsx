@@ -43,11 +43,13 @@ export const AIConfigForm: React.FC<AIConfigFormProps> = ({
   const [testingConnection, setTestingConnection] = useState(false);
   const [testingImageGeneration, setTestingImageGeneration] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  const hasStoredApiKey = Boolean(initialConfig?.apiKey);
 
   useEffect(() => {
     if (initialConfig) {
       setConfig({
         ...initialConfig,
+        apiKey: '',
         provider,
         imageProvider: getDefaultImageProviderByAIProvider(provider),
       });
@@ -67,7 +69,7 @@ export const AIConfigForm: React.FC<AIConfigFormProps> = ({
   }, [initialConfig, provider]);
 
   const handleSave = () => {
-    if (!config.apiKey.trim()) {
+    if (!config.apiKey.trim() && !hasStoredApiKey) {
       toast.error('APIキーを入力してください');
       return;
     }
@@ -333,8 +335,9 @@ export const AIConfigForm: React.FC<AIConfigFormProps> = ({
               type="password"
               value={config.apiKey}
               onChange={(e) => setConfig((prev) => ({ ...prev, apiKey: e.target.value }))}
-              placeholder="APIキーを入力"
+              placeholder={hasStoredApiKey ? '保存済みです。変更する場合だけ入力' : 'APIキーを入力'}
               className="input-field pr-10"
+              autoComplete="new-password"
             />
             <div className="absolute inset-y-0 right-0 pr-3 flex items-center">{getConnectionStatusIcon()}</div>
           </div>

@@ -235,27 +235,37 @@ Phase 3 メモ:
 - [x] account名を表示する
 - [x] statusを表示する
 - [x] WordPress登録上限を表示する
-- [ ] 登録済みWordPress数を表示する
+- [x] 登録済みWordPress数を表示する
 - [ ] 作成日・更新日を表示する
 
 ### 3. client新規作成
 
-- [ ] client作成フォームを追加する
-- [ ] account名を入力できるようにする
-- [ ] WordPress登録上限数を設定できるようにする
-- [ ] 初期statusを設定できるようにする
-- [ ] feature_flagsを初期化する
-- [ ] Supabase Authユーザー作成手順を決める
-- [ ] profileを作成してaccountへ紐づける
+- [x] client作成フォームを追加する
+- [x] account名を入力できるようにする
+- [x] WordPress登録上限数を設定できるようにする
+- [x] 初期statusを設定できるようにする
+- [x] feature_flagsを初期化する
+- [x] Supabase Authユーザー作成手順を決める
+- [x] profileを作成してaccountへ紐づける
 
 ### 4. client詳細・編集
 
-- [ ] client詳細画面を追加する
-- [ ] account名を編集できるようにする
-- [ ] statusを変更できるようにする
-- [ ] WordPress登録上限数を変更できるようにする
+- [~] client詳細画面を追加する
+- [x] account名を編集できるようにする
+- [x] statusを変更できるようにする
+- [x] WordPress登録上限数を変更できるようにする
 - [ ] feature_flagsを変更できるようにする
-- [ ] 利用停止・再開を操作できるようにする
+- [x] 利用停止・再開を操作できるようにする
+
+Phase 4 メモ:
+
+- `src/components/AdminDashboard.tsx` を追加し、admin用の管理画面を実装済み。
+- 管理画面ではclientアカウントの新規作成、一覧表示、名称編集、status変更、WordPress登録上限変更、月間記事上限変更ができる。
+- clientごとの登録済みWordPress数を `wordpress_configs.account_id` で集計して表示する。
+- `supabase/functions/admin-create-client-user/index.ts` を追加し、admin権限確認後にSupabase Authユーザー、`accounts`、`profiles` をまとめて作成する方針にした。
+- 管理画面の新規作成フォームにログインメールと初期パスワードを追加済み。メールとパスワードを入力した場合はEdge Function経由でログインユーザーまで作成し、未入力の場合は従来通りaccountのみ作成する。
+- Edge Function `admin-create-client-user` はSupabaseリモートへデプロイ済み。
+- `npm run build` は成功。
 
 完了条件:
 
@@ -268,19 +278,20 @@ Phase 3 メモ:
 
 - [x] `articlesService` の取得条件に `account_id` を追加する
 - [x] `articlesService` の作成データに `account_id` を付ける
-- [ ] `supabaseSchedulerService` の取得・保存条件に `account_id` を追加する
-- [ ] `scheduleService` の取得・保存条件に `account_id` を追加する
+- [x] `supabaseSchedulerService` の取得・保存条件に `account_id` を追加する
+- [x] `scheduleService` の取得・保存条件に `account_id` を追加する
 - [x] `promptSetService` の取得・保存条件に `account_id` を追加する
 - [x] `keywordSetService` の取得・保存条件に `account_id` を追加する
 - [x] `titleSetService` の取得・保存条件に `account_id` を追加する
-- [ ] `apiKeyManager` / `ai_configs` 周辺に `account_id` を追加する
+- [x] `apiKeyManager` / `ai_configs` 周辺に `account_id` を追加する
 
 Phase 5 メモ:
 
 - `src/services/accountScope.ts` を追加し、ログイン中accountをサービス層から参照できるようにした。
 - `articlesService`、`promptSetService`、`keywordSetService`、`titleSetService` を `account_id` 対応済み。
+- `supabaseSchedulerService`、`scheduleService`、`aiService`、`imageGenerationService` を `account_id` 対応済み。
+- WordPress登録上限チェックを `supabaseSchedulerService.saveWordPressConfig` に追加済み。
 - `npm run build` は成功。
-- `supabaseSchedulerService`、`scheduleService`、`ai_configs`、WordPress設定周辺は未対応。次に対応する。
 
 ### 2. ストア修正
 
@@ -305,17 +316,24 @@ Phase 5 メモ:
 
 ### 1. 登録制御
 
-- [ ] clientの `wordpress_site_limit` を取得できるようにする
-- [ ] 現在のWordPress登録数を取得できるようにする
-- [ ] 登録数が上限未満の場合だけ新規登録を許可する
-- [ ] 登録数が上限に達した場合は新規登録ボタンを無効化する
-- [ ] 上限到達メッセージを表示する
+- [x] clientの `wordpress_site_limit` を取得できるようにする
+- [x] 現在のWordPress登録数を取得できるようにする
+- [x] 登録数が上限未満の場合だけ新規登録を許可する
+- [x] 登録数が上限に達した場合は新規登録ボタンを無効化する
+- [x] 上限到達メッセージを表示する
 
 ### 2. 管理画面との連携
 
-- [ ] adminが上限数を増減できるようにする
+- [x] adminが上限数を増減できるようにする
 - [ ] 上限数を減らす場合、既存登録数より小さい値を許可するか決める
 - [ ] 既存登録数を下回る上限にする場合の表示仕様を決める
+
+Phase 6 メモ:
+
+- `src/components/WordPressConfig/index.tsx` に登録数 `現在 / 上限` の表示を追加済み。
+- 上限到達時は新規設定ボタンを無効化し、上限到達メッセージを表示する。
+- サービス層でも `supabaseSchedulerService.saveWordPressConfig` で上限超過を止める。
+- 管理画面から `wordpress_site_limit` を変更できる。
 
 完了条件:
 
@@ -326,20 +344,28 @@ Phase 5 メモ:
 
 ### 1. AI設定のaccount対応
 
-- [ ] `ai_configs` に `account_id` が入るようにする
-- [ ] clientは自accountのAI設定だけ取得できるようにする
-- [ ] clientは自accountのAI設定を作成できるようにする
-- [ ] clientは自accountのAI設定を編集できるようにする
-- [ ] clientは自accountのAI設定を削除できるようにする
-- [ ] 有効なAI設定をaccount単位で管理する
+- [x] `ai_configs` に `account_id` が入るようにする
+- [x] clientは自accountのAI設定だけ取得できるようにする
+- [x] clientは自accountのAI設定を作成できるようにする
+- [x] clientは自accountのAI設定を編集できるようにする
+- [x] clientは自accountのAI設定を削除できるようにする
+- [x] 有効なAI設定をaccount単位で管理する
 
 ### 2. APIキー表示の安全化
 
-- [ ] APIキーは一覧や詳細で平文表示しない
-- [ ] `sk-...abcd` のようなマスク表示にする
-- [ ] 編集時はAPIキーを再入力する仕様にする
-- [ ] admin画面でもAPIキー全文を表示しない
+- [x] APIキーは一覧や詳細で平文表示しない
+- [~] `sk-...abcd` のようなマスク表示にする
+- [x] 編集時はAPIキーを再入力する仕様にする
+- [x] admin画面でもAPIキー全文を表示しない
 - [ ] 可能であれば保存時の暗号化方針を検討する
+
+Phase 7 メモ:
+
+- AI設定の編集画面で、保存済みAPIキーを入力欄へ再表示しないように変更済み。
+- 既存AI設定を編集する場合、APIキー欄を空のまま保存すると既存キーを維持し、変更したい場合だけ再入力する。
+- 新規AI設定作成時はAPIキー入力を必須にしている。
+- 接続テストと画像テストは、テスト時に入力されたAPIキーでのみ実行する。
+- `npm run build` は成功。
 
 完了条件:
 
@@ -356,15 +382,15 @@ Phase 5 メモ:
 
 ### 2. 既存ポリシーの置き換え
 
-- [ ] `articles` の `USING (true)` ポリシーを廃止する
-- [ ] `wordpress_configs` の全許可ポリシーを廃止する
-- [ ] `ai_configs` の全許可ポリシーを廃止する
-- [ ] `schedule_settings` の全許可ポリシーを廃止する
-- [ ] `execution_history` の全許可ポリシーを廃止する
-- [ ] `keyword_sets` の全許可ポリシーを廃止する
-- [ ] `prompt_sets` の全許可ポリシーを廃止する
-- [ ] `title_sets` の全許可ポリシーを廃止する
-- [ ] `app_settings` のanon許可ポリシーを廃止する
+- [~] `articles` の `USING (true)` ポリシーを廃止する
+- [~] `wordpress_configs` の全許可ポリシーを廃止する
+- [~] `ai_configs` の全許可ポリシーを廃止する
+- [~] `schedule_settings` の全許可ポリシーを廃止する
+- [~] `execution_history` の全許可ポリシーを廃止する
+- [~] `keyword_sets` の全許可ポリシーを廃止する
+- [~] `prompt_sets` の全許可ポリシーを廃止する
+- [~] `title_sets` の全許可ポリシーを廃止する
+- [~] `app_settings` のanon許可ポリシーを廃止する
 
 ### 3. 新RLSルール
 
@@ -374,6 +400,12 @@ Phase 5 メモ:
 - [ ] clientは自accountのデータだけDELETE可能にする
 - [ ] adminは全accountのデータをSELECT可能にする
 - [ ] adminは必要な管理テーブルをINSERT/UPDATE可能にする
+
+Phase 8 メモ:
+
+- `supabase/migrations/20260429093000_lock_account_rls_policies.sql` を追加済み。
+- このマイグレーションは、主要テーブルの `Allow all` / `Allow public` / anon許可系ポリシーを削除し、`account_id = current_profile_account_id()` ベースのclient用ポリシーとadmin全権限ポリシーへ置き換える。
+- まだリモートDBへは適用していない。RLS強化は画面表示やEdge Functionに影響しやすいため、テスト用clientで確認できる状態を作ってから適用する。
 
 完了条件:
 
@@ -534,11 +566,11 @@ Phase 5 メモ:
 
 - [ ] Vercelアカウントにログインする
 - [ ] GitHubリポジトリをVercelに接続する
-- [ ] Framework PresetがViteになっていることを確認する
-- [ ] Root Directoryをリポジトリ直下に設定する
-- [ ] Install Commandを確認する
-- [ ] Build Commandを `npm run build` に設定する
-- [ ] Output Directoryを `build` に設定する
+- [x] Framework PresetがViteになっていることを確認する
+- [x] Root Directoryをリポジトリ直下に設定する
+- [x] Install Commandを確認する
+- [x] Build Commandを `npm run build` に設定する
+- [x] Output Directoryを `build` に設定する
 - [ ] Node.jsバージョンが `package.json` の `>=20 <24` に合うように設定する
 
 推奨設定:
@@ -548,6 +580,11 @@ Install Command: npm install
 Build Command: npm run build
 Output Directory: build
 ```
+
+Phase 14 メモ:
+
+- `vercel.json` を追加し、Vite、`npm install`、`npm run build`、出力先 `build`、SPA用rewriteを明示した。
+- Vercel上でNode.jsは `package.json` の `>=20 <24` に合うバージョンへ設定する。ローカルではNode 24検知時にビルドスクリプトがNode 22へ切り替えるが、Vercel本番はNode 22系が安全。
 
 ### 3. Vercel環境変数設定
 
@@ -640,13 +677,13 @@ Output Directory: build
 
 最初のリリースで最低限必要なタスク。
 
-- [ ] Phase 1: `accounts` / `profiles` 追加
-- [ ] Phase 2: 主要テーブルに `account_id` 追加
-- [ ] Phase 3: ログインとロール判定
-- [ ] Phase 4: 管理画面の最小版
-- [ ] Phase 5: client側データ分離
-- [ ] Phase 6: WordPress登録数制限
-- [ ] Phase 7: clientのAI API設定権限
+- [x] Phase 1: `accounts` / `profiles` 追加
+- [x] Phase 2: 主要テーブルに `account_id` 追加
+- [x] Phase 3: ログインとロール判定
+- [~] Phase 4: 管理画面の最小版
+- [~] Phase 5: client側データ分離
+- [~] Phase 6: WordPress登録数制限
+- [~] Phase 7: clientのAI API設定権限
 - [ ] Phase 8: RLS修正
 - [ ] Phase 12: admin/client/データ分離テスト
 

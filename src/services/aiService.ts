@@ -8,6 +8,7 @@ import {
 } from "../shared/generationPolicy";
 import { buildSummaryPrompt, buildSupplementPrompt } from "../shared/generationPrompts";
 import { buildHighQualitySectionPrompt } from "../shared/sectionGenerationPrompt";
+import { getCurrentAccountId } from "./accountScope";
 
 /**
  * AI髢｢騾｣繧ｵ繝ｼ繝薙せ
@@ -24,13 +25,19 @@ export class AIService {
     try {
       if (!supabase) throw new Error("Supabase client is not initialized");
 
-      const { data, error } = await supabase
+      const accountId = getCurrentAccountId();
+      let query = supabase
         .from("ai_configs")
         .select("*")
         .order("is_active", { ascending: false })
         .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
+        .limit(1);
+
+      if (accountId) {
+        query = query.eq("account_id", accountId);
+      }
+
+      const { data, error } = await query.maybeSingle();
 
       if (error) {
         console.error("Failed to fetch AI config:", error.message);
