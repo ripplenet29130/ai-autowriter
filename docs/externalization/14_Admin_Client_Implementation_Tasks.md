@@ -38,7 +38,7 @@
 - [x] `USING (true)` / `TO public` / `Allow all access` のポリシーを洗い出す
 - [!] 既存データのバックアップ方針を決める
 - [~] 既存ユーザー、記事、WordPress設定、AI設定の移行方針を決める
-- [!] 初期adminユーザーの作成方法を決める
+- [x] 初期adminユーザーの作成方法を決める
 
 Phase 0 メモ:
 
@@ -54,6 +54,11 @@ Phase 0 メモ:
 - 画像上で `UNRESTRICTED` 表示があるテーブル: `ai_configs`、`articles`、`competitor_research`、`facts_cache`、`schedule_settings`、`schedule_used_keywords`、`scheduler_lock`、`trend_keywords`、`wordpress_configs`、`wp_configs`。外部提供前にRLS見直しが必要。
 - Supabase AuthのUsersにGoogleアカウントが存在する前提。Googleログインユーザーでも `auth.users.id` を `profiles.user_id` に紐づければ、admin/client設計で利用できる。
 - ローカル環境には `supabase` CLI が存在する。Supabase CLIログインまたはアクセストークン設定ができれば、DB状態確認やマイグレーション適用を進めやすい。
+- 初期adminユーザーは `cev29130@gmail.com` とする。Phase 1以降でこのSupabase Authユーザーの `auth.users.id` を `profiles.user_id` に紐づけ、`role = 'admin'` として登録する。
+- Supabase CLIログインとプロジェクトリンクは完了済み。リンク先project refは `jozinzyaiudwxtyjflfm`。
+- `supabase migration list --linked` でリモート接続を確認済み。ただし、ローカルに存在する多数のマイグレーションがremote側の履歴には出ていない。実DBにはテーブルが存在するため、過去にDashboardや別手順で反映された可能性がある。今後のDB変更は新規マイグレーションとして慎重に追加する。
+- `supabase status` はローカルDocker環境確認コマンドのため、Docker未起動で失敗。リモートリンク自体は成功済み。
+- 手動バックアップはDocker Desktop側のAPIエラーで未完了。ユーザー判断により一旦後回し。ただし、リモートDBへ破壊的な変更を適用する前には再度バックアップを検討する。
 
 完了条件:
 
@@ -64,15 +69,15 @@ Phase 0 メモ:
 
 ### 1. accountsテーブル追加
 
-- [ ] `accounts` テーブル作成用マイグレーションを追加する
-- [ ] `id` を主キーとして追加する
-- [ ] `name` を追加する
-- [ ] `status` を追加する
-- [ ] `wordpress_site_limit` を追加する
-- [ ] `feature_flags` を追加する
-- [ ] `monthly_article_limit` を追加する
-- [ ] `created_at` / `updated_at` を追加する
-- [ ] `updated_at` 自動更新トリガーを設定する
+- [x] `accounts` テーブル作成用マイグレーションを追加する
+- [x] `id` を主キーとして追加する
+- [x] `name` を追加する
+- [x] `status` を追加する
+- [x] `wordpress_site_limit` を追加する
+- [x] `feature_flags` を追加する
+- [x] `monthly_article_limit` を追加する
+- [x] `created_at` / `updated_at` を追加する
+- [x] `updated_at` 自動更新トリガーを設定する
 
 推奨カラム:
 
@@ -90,15 +95,15 @@ accounts
 
 ### 2. profilesテーブル追加
 
-- [ ] `profiles` テーブル作成用マイグレーションを追加する
-- [ ] `user_id` をSupabase AuthユーザーIDとして追加する
-- [ ] `account_id` を追加する
-- [ ] `role` を追加する
-- [ ] `display_name` を追加する
-- [ ] `created_at` / `updated_at` を追加する
-- [ ] `role` は `admin` / `client` のみ許可する
-- [ ] `user_id` にユニーク制約を付ける
-- [ ] `account_id` にインデックスを付ける
+- [x] `profiles` テーブル作成用マイグレーションを追加する
+- [x] `user_id` をSupabase AuthユーザーIDとして追加する
+- [x] `account_id` を追加する
+- [x] `role` を追加する
+- [x] `display_name` を追加する
+- [x] `created_at` / `updated_at` を追加する
+- [x] `role` は `admin` / `client` のみ許可する
+- [x] `user_id` にユニーク制約を付ける
+- [x] `account_id` にインデックスを付ける
 
 推奨カラム:
 
@@ -115,9 +120,19 @@ profiles
 
 ### 3. 初期データ投入
 
-- [ ] 既存利用者用の初期accountを作成する
-- [ ] 初期admin用profileを作成する
-- [ ] 既存データを紐づけるための初期 `account_id` を控える
+- [x] 既存利用者用の初期accountを作成する
+- [x] 初期admin用profileを作成する
+- [x] 既存データを紐づけるための初期 `account_id` を控える
+
+Phase 1 メモ:
+
+- ローカルマイグレーション `supabase/migrations/20260429061000_create_accounts_and_profiles.sql` を追加済み。
+- `accounts` と `profiles` の作成、RLS有効化、admin/client判定用関数を含む。
+- 初期adminは `cev29130@gmail.com` のSupabase Authユーザーが存在する場合に `profiles.role = 'admin'` として登録する。
+- リモートDBへ適用済み。`supabase migration list --linked` で `20260429061000` がLocal/Remote両方に表示されることを確認済み。
+- 過去のローカルマイグレーションが実DBには反映済みだがmigration履歴に無い状態だったため、`supabase migration repair --status applied` で履歴補正済み。
+- `supabase db push` の初回実行時に古い未記録マイグレーションが一部実行され、`20260224120000`、`20260224150001`、`20260224150002` が履歴に記録された。その後、残りの過去分は履歴補正し、新規 `20260429061000` のみ適用した。
+- 既存データ紐づけ用の初期accountを作成済み。初期account IDは `00000000-0000-0000-0000-000000000001`、nameは `Default Account`。
 
 完了条件:
 
@@ -129,25 +144,33 @@ profiles
 
 ### 1. account_id追加対象
 
-- [ ] `articles` に `account_id` を追加する
-- [ ] `wordpress_configs` に `account_id` を追加する
-- [ ] `ai_configs` に `account_id` を追加する
-- [ ] `schedule_settings` に `account_id` を追加する
-- [ ] `execution_history` に `account_id` を追加する
-- [ ] `keyword_sets` に `account_id` を追加する
-- [ ] `prompt_sets` に `account_id` を追加する
-- [ ] `title_sets` に `account_id` を追加する
-- [ ] `app_settings` に `account_id` を追加する
-- [ ] `fact_check_settings` に `account_id` を追加する
-- [ ] `generation_regression_results` に `account_id` を追加する
+- [x] `articles` に `account_id` を追加する
+- [x] `wordpress_configs` に `account_id` を追加する
+- [x] `ai_configs` に `account_id` を追加する
+- [x] `schedule_settings` に `account_id` を追加する
+- [x] `execution_history` に `account_id` を追加する
+- [x] `keyword_sets` に `account_id` を追加する
+- [x] `prompt_sets` に `account_id` を追加する
+- [x] `title_sets` に `account_id` を追加する
+- [x] `app_settings` に `account_id` を追加する
+- [x] `fact_check_settings` に `account_id` を追加する
+- [!] `generation_regression_results` に `account_id` を追加する
 
 ### 2. 既存データ移行
 
-- [ ] 初期accountを既存データへ一括設定する
+- [x] 初期accountを既存データへ一括設定する
 - [ ] `account_id` がNULLの既存レコードが残っていないか確認する
 - [ ] 必要なテーブルで `account_id` をNOT NULL化する
-- [ ] `account_id` にインデックスを追加する
-- [ ] `account_id` の外部キー制約を追加する
+- [x] `account_id` にインデックスを追加する
+- [x] `account_id` の外部キー制約を追加する
+
+Phase 2 メモ:
+
+- ローカルマイグレーション `supabase/migrations/20260429072000_add_account_id_to_existing_tables.sql` を追加し、リモートDBへ適用済み。
+- Supabase画像で確認できた既存テーブルも含め、`account_id` を追加した。
+- 既存レコードの `account_id` は `Default Account` に一括設定済み。
+- `generation_regression_results`、`custom_topics`、`generation_prompts` はリモートDBに存在しなかったためスキップされた。
+- まだ `account_id` のNOT NULL化はしていない。アプリ側のaccount対応が完了し、NULLが残らないことを確認してから実施する。
 
 完了条件:
 
@@ -159,29 +182,36 @@ profiles
 
 ### 1. 認証ストア追加
 
-- [ ] `src/store/useAuthStore.ts` を追加する
-- [ ] 現在ログイン中のSupabaseユーザーを保持する
-- [ ] profile情報を保持する
-- [ ] account情報を保持する
-- [ ] `isAdmin` / `isClient` を判定できるようにする
-- [ ] ログアウト処理を追加する
+- [x] `src/store/useAuthStore.ts` を追加する
+- [x] 現在ログイン中のSupabaseユーザーを保持する
+- [x] profile情報を保持する
+- [x] account情報を保持する
+- [x] `isAdmin` / `isClient` を判定できるようにする
+- [x] ログアウト処理を追加する
 
 ### 2. ログイン画面追加
 
-- [ ] `src/components/Login.tsx` を追加する
-- [ ] メールアドレスとパスワードでログインできるようにする
-- [ ] ログインエラーを日本語で表示する
-- [ ] ログイン成功後にprofileを取得する
-- [ ] `admin` は管理画面へ遷移する
-- [ ] `client` は通常アプリ画面へ遷移する
+- [x] `src/components/Login.tsx` を追加する
+- [x] メールアドレスとパスワードでログインできるようにする
+- [x] ログインエラーを日本語で表示する
+- [x] ログイン成功後にprofileを取得する
+- [x] `admin` は管理画面へ遷移する
+- [x] `client` は通常アプリ画面へ遷移する
 
 ### 3. アプリ起動時の認証確認
 
-- [ ] `src/App.tsx` でログイン状態を確認する
-- [ ] 未ログインならログイン画面を表示する
-- [ ] profile未作成ユーザーは利用不可画面を表示する
-- [ ] 停止中accountのclientは利用不可画面を表示する
-- [ ] ログイン済みclientだけ `loadFromSupabase` を実行する
+- [x] `src/App.tsx` でログイン状態を確認する
+- [x] 未ログインならログイン画面を表示する
+- [x] profile未作成ユーザーは利用不可画面を表示する
+- [x] 停止中accountのclientは利用不可画面を表示する
+- [x] ログイン済みclientだけ `loadFromSupabase` を実行する
+
+Phase 3 メモ:
+
+- `src/store/useAuthStore.ts` を追加済み。
+- `src/components/Login.tsx` を追加済み。メール/パスワードとGoogleログインに対応。
+- `src/App.tsx` で未ログイン、profile未設定、admin、client、停止中accountを出し分けるように変更済み。
+- `npm run build` は成功。`npx tsc -b` 単体はPowerShell実行ポリシーで失敗したが、build内の `tsc -b` は成功。
 
 完了条件:
 
@@ -193,18 +223,18 @@ profiles
 
 ### 1. 管理画面ルート追加
 
-- [ ] `/admin` 相当の管理者ビューを追加する
-- [ ] clientは管理者ビューを開けないようにする
-- [ ] 管理画面用のナビゲーションを追加する
-- [ ] 通常アプリ画面と管理画面をUI上で分ける
+- [x] `/admin` 相当の管理者ビューを追加する
+- [x] clientは管理者ビューを開けないようにする
+- [~] 管理画面用のナビゲーションを追加する
+- [x] 通常アプリ画面と管理画面をUI上で分ける
 
 ### 2. client一覧
 
-- [ ] client一覧画面を追加する
-- [ ] `accounts` の一覧を表示する
-- [ ] account名を表示する
-- [ ] statusを表示する
-- [ ] WordPress登録上限を表示する
+- [x] client一覧画面を追加する
+- [x] `accounts` の一覧を表示する
+- [x] account名を表示する
+- [x] statusを表示する
+- [x] WordPress登録上限を表示する
 - [ ] 登録済みWordPress数を表示する
 - [ ] 作成日・更新日を表示する
 
@@ -236,14 +266,21 @@ profiles
 
 ### 1. サービス層の修正
 
-- [ ] `articlesService` の取得条件に `account_id` を追加する
-- [ ] `articlesService` の作成データに `account_id` を付ける
+- [x] `articlesService` の取得条件に `account_id` を追加する
+- [x] `articlesService` の作成データに `account_id` を付ける
 - [ ] `supabaseSchedulerService` の取得・保存条件に `account_id` を追加する
 - [ ] `scheduleService` の取得・保存条件に `account_id` を追加する
-- [ ] `promptSetService` の取得・保存条件に `account_id` を追加する
-- [ ] `keywordSetService` の取得・保存条件に `account_id` を追加する
-- [ ] `titleSetService` の取得・保存条件に `account_id` を追加する
+- [x] `promptSetService` の取得・保存条件に `account_id` を追加する
+- [x] `keywordSetService` の取得・保存条件に `account_id` を追加する
+- [x] `titleSetService` の取得・保存条件に `account_id` を追加する
 - [ ] `apiKeyManager` / `ai_configs` 周辺に `account_id` を追加する
+
+Phase 5 メモ:
+
+- `src/services/accountScope.ts` を追加し、ログイン中accountをサービス層から参照できるようにした。
+- `articlesService`、`promptSetService`、`keywordSetService`、`titleSetService` を `account_id` 対応済み。
+- `npm run build` は成功。
+- `supabaseSchedulerService`、`scheduleService`、`ai_configs`、WordPress設定周辺は未対応。次に対応する。
 
 ### 2. ストア修正
 

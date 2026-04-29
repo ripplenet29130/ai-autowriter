@@ -1,5 +1,6 @@
 import { supabase } from './supabaseClient';
 import { TitleSet } from '../types';
+import { getCurrentAccountId, getRequiredAccountId } from './accountScope';
 
 class TitleSetService {
     /**
@@ -8,10 +9,17 @@ class TitleSetService {
     async getTitleSets(): Promise<TitleSet[]> {
         if (!supabase) return [];
 
-        const { data, error } = await supabase
+        const accountId = getCurrentAccountId();
+        let query = supabase
             .from('title_sets')
             .select('*')
             .order('created_at', { ascending: false });
+
+        if (accountId) {
+            query = query.eq('account_id', accountId);
+        }
+
+        const { data, error } = await query;
 
         if (error) {
             console.error('Error fetching title sets:', error);
@@ -37,6 +45,7 @@ class TitleSetService {
                     updated_at: new Date().toISOString()
                 })
                 .eq('id', set.id)
+                .eq('account_id', getRequiredAccountId())
                 .select()
                 .single();
 
@@ -47,6 +56,7 @@ class TitleSetService {
             const { data, error } = await supabase
                 .from('title_sets')
                 .insert({
+                    account_id: getRequiredAccountId(),
                     name: set.name,
                     titles: set.titles
                 })
@@ -67,7 +77,8 @@ class TitleSetService {
         const { error } = await supabase
             .from('title_sets')
             .delete()
-            .eq('id', id);
+            .eq('id', id)
+            .eq('account_id', getRequiredAccountId());
 
         if (error) {
             console.error('Error deleting title set:', error);

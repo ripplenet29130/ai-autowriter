@@ -1,5 +1,6 @@
 import { supabase } from './supabaseClient';
 import { KeywordSet } from '../types';
+import { getCurrentAccountId, getRequiredAccountId } from './accountScope';
 
 class KeywordSetService {
     /**
@@ -8,10 +9,17 @@ class KeywordSetService {
     async getKeywordSets(): Promise<KeywordSet[]> {
         if (!supabase) return [];
 
-        const { data, error } = await supabase
+        const accountId = getCurrentAccountId();
+        let query = supabase
             .from('keyword_sets')
             .select('*')
             .order('created_at', { ascending: false });
+
+        if (accountId) {
+            query = query.eq('account_id', accountId);
+        }
+
+        const { data, error } = await query;
 
         if (error) {
             console.error('Error fetching keyword sets:', error);
@@ -37,6 +45,7 @@ class KeywordSetService {
                     updated_at: new Date().toISOString()
                 })
                 .eq('id', set.id)
+                .eq('account_id', getRequiredAccountId())
                 .select()
                 .single();
 
@@ -47,6 +56,7 @@ class KeywordSetService {
             const { data, error } = await supabase
                 .from('keyword_sets')
                 .insert({
+                    account_id: getRequiredAccountId(),
                     name: set.name,
                     keywords: set.keywords
                 })
@@ -67,7 +77,8 @@ class KeywordSetService {
         const { error } = await supabase
             .from('keyword_sets')
             .delete()
-            .eq('id', id);
+            .eq('id', id)
+            .eq('account_id', getRequiredAccountId());
 
         if (error) {
             console.error('Error deleting keyword set:', error);

@@ -1,5 +1,6 @@
 import { supabase } from './supabaseClient';
 import { PromptSet } from '../types';
+import { getCurrentAccountId, getRequiredAccountId } from './accountScope';
 
 class PromptSetService {
     /**
@@ -8,10 +9,17 @@ class PromptSetService {
     async getPromptSets(): Promise<PromptSet[]> {
         if (!supabase) return [];
 
-        const { data, error } = await supabase
+        const accountId = getCurrentAccountId();
+        let query = supabase
             .from('prompt_sets')
             .select('*')
             .order('created_at', { ascending: false });
+
+        if (accountId) {
+            query = query.eq('account_id', accountId);
+        }
+
+        const { data, error } = await query;
 
         if (error) {
             console.error('Error fetching prompt sets:', error);
@@ -39,6 +47,7 @@ class PromptSetService {
 
         const dbData = {
             id: set.id,
+            account_id: getRequiredAccountId(),
             name: set.name,
             custom_instructions: set.customInstructions,
             is_default: set.isDefault,
@@ -74,7 +83,8 @@ class PromptSetService {
         const { error } = await supabase
             .from('prompt_sets')
             .delete()
-            .eq('id', id);
+            .eq('id', id)
+            .eq('account_id', getRequiredAccountId());
 
         if (error) {
             console.error('Error deleting prompt set:', error);

@@ -1,5 +1,6 @@
 ﻿import { supabase } from './supabaseClient';
 import { Article } from '../types';
+import { getCurrentAccountId, getRequiredAccountId } from './accountScope';
 
 export interface ArticleFilters {
   status?: string;
@@ -21,9 +22,11 @@ export const articlesService = {
         console.warn('Database disabled: supabase client is null');
         return null;
       }
+      const accountId = getRequiredAccountId();
       const { data, error } = await supabase
         .from('articles')
         .insert([{
+          account_id: accountId,
           title: article.title,
           content: article.content,
           excerpt: article.excerpt || '',
@@ -91,6 +94,7 @@ export const articlesService = {
         .from('articles')
         .update(updateData)
         .eq('id', id)
+        .eq('account_id', getRequiredAccountId())
         .select()
         .single();
 
@@ -112,7 +116,8 @@ export const articlesService = {
       const { error } = await supabase
         .from('articles')
         .delete()
-        .eq('id', id);
+        .eq('id', id)
+        .eq('account_id', getRequiredAccountId());
 
       if (error) {
         console.error('險倅ｺ九・蜑企勁縺ｫ螟ｱ謨励＠縺ｾ縺励◆:', error);
@@ -136,6 +141,7 @@ export const articlesService = {
         .from('articles')
         .select('*')
         .eq('id', id)
+        .eq('account_id', getRequiredAccountId())
         .single();
 
       if (error) {
@@ -161,7 +167,12 @@ export const articlesService = {
         console.warn('Database disabled: skip fetching articles');
         return [];
       }
+      const accountId = getCurrentAccountId();
       let query = supabase.from('articles').select('*');
+
+      if (accountId) {
+        query = query.eq('account_id', accountId);
+      }
 
       if (filters?.status) {
         query = query.eq('status', filters.status);
@@ -211,7 +222,12 @@ export const articlesService = {
         console.warn('Database disabled: supabase client is null');
         return 0;
       }
+      const accountId = getCurrentAccountId();
       let query = supabase.from('articles').select('*', { count: 'exact', head: true });
+
+      if (accountId) {
+        query = query.eq('account_id', accountId);
+      }
 
       if (filters?.status) {
         query = query.eq('status', filters.status);

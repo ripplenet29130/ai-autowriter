@@ -12,15 +12,27 @@ import { ArticlesList } from './components/ArticlesList';
 import { KeywordSettings } from './components/KeywordSettings';
 import { TitleSettings } from './components/TitleSettings';
 import { useAppStore } from './store/useAppStore';
+import { useAuthStore } from './store/useAuthStore';
+import { Login } from './components/Login';
+import { AdminDashboard } from './components/AdminDashboard';
 
 function App() {
   const { activeView, loadFromSupabase } = useAppStore();
+  const { isLoading, user, profile, account, isAdmin, isClient, loadAuth } = useAuthStore();
 
   useEffect(() => {
-    loadFromSupabase().catch(error => {
-      console.error('Failed to load from Supabase:', error);
+    loadAuth().catch(error => {
+      console.error('Failed to load auth state:', error);
     });
   }, []);
+
+  useEffect(() => {
+    if (isClient && account?.status === 'active') {
+      loadFromSupabase().catch(error => {
+        console.error('Failed to load from Supabase:', error);
+      });
+    }
+  }, [isClient, account?.id, account?.status]);
 
   const renderContent = () => {
     try {
@@ -67,6 +79,73 @@ function App() {
   };
 
   try {
+    if (isLoading) {
+      return (
+        <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+          <div className="bg-white border border-gray-200 rounded-lg shadow-sm px-6 py-4 text-gray-600">
+            読み込み中です
+          </div>
+        </div>
+      );
+    }
+
+    if (!user) {
+      return (
+        <Router>
+          <Login />
+          <Toaster position="top-right" />
+        </Router>
+      );
+    }
+
+    if (!profile) {
+      return (
+        <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+          <div className="bg-white border border-gray-200 rounded-lg shadow-sm p-8 max-w-md w-full text-center">
+            <h1 className="text-xl font-bold text-gray-900 mb-3">アカウント設定が未完了です</h1>
+            <p className="text-gray-600">
+              管理者に連絡して、このユーザーに権限を設定してください。
+            </p>
+          </div>
+        </div>
+      );
+    }
+
+    if (isAdmin) {
+      return (
+        <Router>
+          <AdminDashboard />
+          <Toaster position="top-right" />
+        </Router>
+      );
+    }
+
+    if (!isClient || !account) {
+      return (
+        <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+          <div className="bg-white border border-gray-200 rounded-lg shadow-sm p-8 max-w-md w-full text-center">
+            <h1 className="text-xl font-bold text-gray-900 mb-3">利用できないアカウントです</h1>
+            <p className="text-gray-600">
+              clientアカウントの紐づけを確認してください。
+            </p>
+          </div>
+        </div>
+      );
+    }
+
+    if (account.status !== 'active') {
+      return (
+        <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+          <div className="bg-white border border-gray-200 rounded-lg shadow-sm p-8 max-w-md w-full text-center">
+            <h1 className="text-xl font-bold text-gray-900 mb-3">現在利用停止中です</h1>
+            <p className="text-gray-600">
+              利用再開については管理者にお問い合わせください。
+            </p>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <Router>
         <div className="App min-h-screen bg-gray-50">
