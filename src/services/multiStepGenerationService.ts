@@ -19,6 +19,26 @@ import { generateArticleFromOutlineWithSharedCore } from '../shared/articleGener
  * 繝医Ξ繝ｳ繝牙・譫・竊・繧｢繧ｦ繝医Λ繧､繝ｳ逕滓・ 竊・繧ｻ繧ｯ繧ｷ繝ｧ繝ｳ蛻･譛ｬ譁・函謌・竊・險倅ｺ狗ｵ・∩遶九※
  */
 export class MultiStepGenerationService {
+    private resolveFinalTargetWordCount(
+        outline: ArticleOutline,
+        fallbackTargetWordCount?: number
+    ): number {
+        const outlineTotal = outline.sections.reduce(
+            (sum, section) => sum + Math.max(0, section.estimatedWordCount || 0),
+            0
+        );
+
+        if (outlineTotal > 0) {
+            return outlineTotal;
+        }
+
+        if ((outline.estimatedWordCount || 0) > 0) {
+            return outline.estimatedWordCount;
+        }
+
+        return fallbackTargetWordCount || 2000;
+    }
+
     private formatReadableParagraphs(content: string): string {
         let text = (content || '').trim();
         if (!text) return '';
@@ -478,7 +498,10 @@ export class MultiStepGenerationService {
             ...(outline.trendData?.relatedKeywords || []),
         ])).filter(Boolean).slice(0, 3);
 
-        const targetWordCount = options?.targetWordCount || outline.estimatedWordCount || 2000;
+        const targetWordCount = this.resolveFinalTargetWordCount(
+            outline,
+            options?.targetWordCount
+        );
 
         const sharedResult = await generateArticleFromOutlineWithSharedCore({
             outline: {

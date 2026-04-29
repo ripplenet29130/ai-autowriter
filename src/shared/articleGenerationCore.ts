@@ -288,6 +288,16 @@ function extractH2Titles(markdown: string): string[] {
   return titles;
 }
 
+function hasSameH2Sequence(original: string, candidate: string): boolean {
+  const originalH2 = extractH2Titles(original).map(normalizeHeadingKey);
+  const candidateH2 = extractH2Titles(candidate).map(normalizeHeadingKey);
+  if (originalH2.length !== candidateH2.length) return false;
+  for (let i = 0; i < originalH2.length; i += 1) {
+    if (originalH2[i] !== candidateH2[i]) return false;
+  }
+  return true;
+}
+
 function normalizeHeadingKey(value: string): string {
   return String(value || '')
     .replace(/\s+/g, '')
@@ -304,12 +314,7 @@ function isValidPolishedArticle(
   if (!cleanedCandidate) return false;
   if (looksLikeMetaResponse(cleanedCandidate)) return false;
 
-  const originalH2 = extractH2Titles(original).map(normalizeHeadingKey);
-  const candidateH2 = extractH2Titles(cleanedCandidate).map(normalizeHeadingKey);
-  if (originalH2.length !== candidateH2.length) return false;
-  for (let i = 0; i < originalH2.length; i += 1) {
-    if (originalH2[i] !== candidateH2[i]) return false;
-  }
+  if (!hasSameH2Sequence(original, cleanedCandidate)) return false;
 
   const origLen = Math.max(1, countGeneratedChars(original));
   const candLen = Math.max(1, countGeneratedChars(cleanedCandidate));
@@ -600,24 +605,22 @@ async function summarizeToWordCount(
     const summarizedText = await callAI(summaryPrompt, maxTokens);
     const cleaned = sanitizeRewriterOutput(summarizedText, originalContent, isSection);
     if (!cleaned) {
-      return truncateByParagraph(originalContent, targetWordCount);
+      return isSection ? truncateByParagraph(originalContent, targetWordCount) : originalContent;
     }
     if (!isSection) {
-      const originalH2 = (originalContent.match(/^##\s+/gm) || []).length;
-      const cleanedH2 = (cleaned.match(/^##\s+/gm) || []).length;
       const hasDanglingHeading = /(?:^|\n\n)#{1,6}\s+\S+\s*$/.test(cleaned);
       const minLength = Math.max(300, Math.floor(targetWordCount * 0.6));
       if (
         hasDanglingHeading ||
         countGeneratedChars(cleaned) < minLength ||
-        (originalH2 >= 2 && cleanedH2 < 2)
+        !hasSameH2Sequence(originalContent, cleaned)
       ) {
-        return truncateByParagraph(originalContent, targetWordCount);
+        return originalContent;
       }
     }
     return cleaned;
   } catch {
-    return truncateByParagraph(originalContent, targetWordCount);
+    return isSection ? truncateByParagraph(originalContent, targetWordCount) : originalContent;
   }
 }
 

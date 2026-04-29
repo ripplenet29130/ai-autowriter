@@ -147,17 +147,30 @@
 ### 2-1. クライアント固有値の定義
 
 - [ ] `11_Client_Specific_Configuration_Matrix.md` を埋める
-- [ ] ロゴ
-- [ ] アプリ名
-- [ ] 配色
-- [ ] URL
-- [ ] Supabase 接続先
-- [ ] WordPress 接続先
+- [x] ロゴは共通扱いにする
+- [x] アプリ名は共通扱いにする
+- [x] 配色は共通扱いにする
+- [x] URL は導入クライアントごとに Vercel で個別設置する
+- [x] Supabase 接続先は導入クライアントごとに分離し、当社側の Supabase Organization で管理する
+- [x] WordPress 接続先は導入クライアント内の投稿先サイトごとに複数登録・切り替えする
 - [ ] 通知先
 - [ ] パスワード
 - [ ] deployment mode
 - [ ] 表示機能 / 非表示機能
 - [ ] 初期設定時に誰が触るかを定義する
+
+用語メモ:
+
+- 導入クライアント: AutomaticWriter を契約・利用する HP 業者 / Web 制作会社 / Web 運用会社
+- 投稿先サイト: 導入クライアントが管理する顧客の WordPress サイト
+- WordPress 接続先は「導入クライアントごとに 1 つ」ではなく、「投稿先サイトごとに複数登録」する
+
+Supabase 運用メモ:
+
+- 本番外販では、導入クライアントごとに Supabase Project を分ける
+- Supabase アカウント / Organization / 請求は当社側で管理する
+- 当社が初期設定、Edge Functions、DB設定、環境変数連携、保守を行う
+- Supabase 利用料は販売価格または保守費に含め、導入クライアントへ別請求しない
 
 ### 2-2. 共通機能の定義
 
