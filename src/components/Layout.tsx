@@ -1,22 +1,25 @@
-import React from 'react';
+import React, { useEffect, useMemo } from 'react';
 import {
   LayoutDashboard,
   Bot,
   FileText,
-  TrendingUp,
   Calendar,
   Globe,
+  LogOut,
   Zap,
   Settings,
   Tag,
   Heading
 } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
+import { useAuthStore } from '../store/useAuthStore';
 
 export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { activeView, setActiveView } = useAppStore();
+  const { account, user, signOut } = useAuthStore();
+  const featureFlags = account?.feature_flags ?? {};
 
-  const navigationItems = [
+  const navigationItems = useMemo(() => [
     {
       id: 'dashboard',
       label: 'ダッシュボード',
@@ -39,7 +42,8 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
       id: 'scheduler',
       label: 'スケジューラー',
       icon: Calendar,
-      description: '自動投稿スケジュール'
+      description: '自動投稿スケジュール',
+      enabled: featureFlags.scheduler !== false,
     },
     {
       id: 'keywords',
@@ -57,7 +61,8 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
       id: 'wordpress',
       label: 'WordPress設定',
       icon: Globe,
-      description: '投稿先WordPress管理'
+      description: '投稿先WordPress管理',
+      enabled: featureFlags.wordpress_publish !== false,
     },
     {
       id: 'ai-config',
@@ -69,9 +74,18 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
       id: 'settings',
       label: '設定',
       icon: Settings,
-      description: 'API設定とデータ管理'
+      description: 'API設定とデータ管理',
+      enabled: featureFlags.fact_check !== false,
     }
-  ];
+  ], [featureFlags.fact_check, featureFlags.scheduler, featureFlags.wordpress_publish]);
+
+  const visibleNavigationItems = navigationItems.filter((item) => item.enabled !== false);
+
+  useEffect(() => {
+    if (!visibleNavigationItems.some((item) => item.id === activeView)) {
+      setActiveView('dashboard');
+    }
+  }, [activeView, setActiveView, visibleNavigationItems]);
 
   return (
     <div className="min-h-screen bg-gray-50 flex">
@@ -84,7 +98,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
 
         <nav className="p-4">
           <ul className="space-y-2">
-            {navigationItems.map((item) => {
+            {visibleNavigationItems.map((item) => {
               const Icon = item.icon;
               const isActive = activeView === item.id;
 
@@ -112,6 +126,24 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
 
       {/* Main Content */}
       <div className="flex-1 overflow-auto">
+        <header className="bg-white border-b border-gray-200 px-8 py-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-xl font-bold text-gray-900">{account?.name ?? '未設定'}</div>
+            </div>
+            <div className="flex items-center gap-3">
+              <div className="text-sm text-gray-700">{user?.email}</div>
+              <button
+                type="button"
+                onClick={() => signOut()}
+                className="inline-flex items-center gap-2 border border-gray-300 hover:bg-gray-50 text-gray-700 rounded-lg px-3 py-2 text-sm font-medium"
+              >
+                <LogOut className="w-4 h-4" />
+                ログアウト
+              </button>
+            </div>
+          </div>
+        </header>
         <div className="p-8">
           {children}
         </div>

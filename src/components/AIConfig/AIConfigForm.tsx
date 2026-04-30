@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Zap, Save, TestTube, Image, AlertCircle, CheckCircle, X } from 'lucide-react';
 import { AIConfig } from '../../types';
 import toast from 'react-hot-toast';
+import { useAuthStore } from '../../store/useAuthStore';
 
 interface AIConfigFormProps {
   initialConfig?: AIConfig | null;
@@ -16,6 +17,7 @@ export const AIConfigForm: React.FC<AIConfigFormProps> = ({
   onSubmit,
   onCancel,
 }) => {
+  const imageGenerationAllowed = useAuthStore((state) => state.account?.feature_flags?.image_generation !== false);
   const getDefaultImageProviderByAIProvider = (
     aiProvider: 'openai' | 'claude' | 'gemini'
   ): AIConfig['imageProvider'] => {
@@ -77,6 +79,8 @@ export const AIConfigForm: React.FC<AIConfigFormProps> = ({
     onSubmit({
       ...config,
       provider,
+      imageGenerationEnabled: imageGenerationAllowed ? config.imageGenerationEnabled : false,
+      imagesPerArticle: imageGenerationAllowed ? config.imagesPerArticle : 0,
       imageProvider: getDefaultImageProviderByAIProvider(provider),
     });
   };
@@ -398,7 +402,8 @@ export const AIConfigForm: React.FC<AIConfigFormProps> = ({
             <label className="flex items-center">
               <input
                 type="checkbox"
-                checked={config.imageGenerationEnabled || false}
+                checked={imageGenerationAllowed && (config.imageGenerationEnabled || false)}
+                disabled={!imageGenerationAllowed}
                 onChange={(e) =>
                   setConfig((prev) => ({
                     ...prev,
@@ -411,7 +416,9 @@ export const AIConfigForm: React.FC<AIConfigFormProps> = ({
               <span className="ml-2 text-sm font-medium text-gray-700">画像自動生成を有効にする</span>
             </label>
             <p className="text-xs text-gray-500 mt-2">
-              {provider === 'openai'
+              {!imageGenerationAllowed
+                ? '管理者設定により画像生成は利用できません'
+                : provider === 'openai'
                 ? 'OpenAI選択時は DALL-E 3 を使用します'
                 : provider === 'gemini'
                   ? 'Gemini選択時は nanobanana を使用します'
@@ -419,7 +426,7 @@ export const AIConfigForm: React.FC<AIConfigFormProps> = ({
             </p>
           </div>
 
-          {config.imageGenerationEnabled && (
+          {imageGenerationAllowed && config.imageGenerationEnabled && (
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">記事あたりの画像枚数 ({config.imagesPerArticle || 0}枚)</label>
               <input
@@ -442,7 +449,7 @@ export const AIConfigForm: React.FC<AIConfigFormProps> = ({
       </div>
 
       <div className="flex justify-end space-x-3 mt-6 pt-4 border-t border-gray-200">
-        {provider === 'gemini' && config.imageGenerationEnabled && (
+        {imageGenerationAllowed && provider === 'gemini' && config.imageGenerationEnabled && (
           <button
             onClick={handleTestImageGeneration}
             disabled={testingImageGeneration || !config.apiKey.trim()}

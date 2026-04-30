@@ -3,6 +3,7 @@ import { ExternalLink, Info, Key, Save, ShieldCheck } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { supabase } from '../services/supabaseClient';
 import { IS_CLIENT_DEPLOYMENT } from '@aw/config';
+import { getCurrentAccountId, getRequiredAccountId } from '../services/accountScope';
 
 type SettingsState = {
   enabled: boolean;
@@ -47,6 +48,11 @@ export const FactCheckSettings: React.FC = () => {
       setInitialLoading(false);
       return;
     }
+    const accountId = getCurrentAccountId();
+    if (!accountId) {
+      setInitialLoading(false);
+      return;
+    }
 
     try {
       const {
@@ -59,6 +65,7 @@ export const FactCheckSettings: React.FC = () => {
           .from('fact_check_settings')
           .select('*')
           .eq('user_id', user.id)
+          .eq('account_id', accountId)
           .order('updated_at', { ascending: false })
           .limit(1)
           .maybeSingle();
@@ -81,6 +88,7 @@ export const FactCheckSettings: React.FC = () => {
       const { data: globalRows, error: globalError } = await supabase
         .from('app_settings')
         .select('key, value')
+        .eq('account_id', accountId)
         .in('key', [
           'perplexity_api_key',
           'fact_check_enabled',
@@ -133,6 +141,7 @@ export const FactCheckSettings: React.FC = () => {
         toast.success('ファクトチェック設定を保存しました（ローカル設定）');
         return;
       }
+      const accountId = getRequiredAccountId();
 
       const {
         data: { user },
@@ -144,11 +153,13 @@ export const FactCheckSettings: React.FC = () => {
           .from('fact_check_settings')
           .select('id')
           .eq('user_id', user.id)
+          .eq('account_id', accountId)
           .order('updated_at', { ascending: false })
           .limit(1)
           .maybeSingle();
 
         const payload = {
+          account_id: accountId,
           user_id: user.id,
           enabled: IS_CLIENT_DEPLOYMENT ? true : settings.enabled,
           auto_fix_enabled: settings.autoFixEnabled,
@@ -182,10 +193,11 @@ export const FactCheckSettings: React.FC = () => {
 
       for (const item of globalSettingsToSave) {
         const { error } = await supabase.from('app_settings').upsert({
+          account_id: accountId,
           key: item.key,
           value: item.value,
           description: item.description,
-        });
+        }, { onConflict: 'account_id,key' });
         if (error) {
           console.warn(`Failed to save ${item.key} to app_settings:`, error);
         }

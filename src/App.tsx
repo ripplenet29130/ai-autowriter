@@ -1,6 +1,6 @@
 ﻿import { BrowserRouter as Router } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Layout } from './components/Layout';
 import { Dashboard } from './components/Dashboard';
 import { AIGenerator } from './components/AIGenerator/index';
@@ -15,15 +15,42 @@ import { useAppStore } from './store/useAppStore';
 import { useAuthStore } from './store/useAuthStore';
 import { Login } from './components/Login';
 import { AdminDashboard } from './components/AdminDashboard';
+import { supabase } from './services/supabaseClient';
 
 function App() {
   const { activeView, loadFromSupabase } = useAppStore();
   const { isLoading, user, profile, account, isAdmin, isClient, loadAuth } = useAuthStore();
+  const featureFlags = account?.feature_flags ?? {};
+  const [isPasswordRecovery, setIsPasswordRecovery] = useState(() =>
+    new URLSearchParams(window.location.search).get('auth') === 'recovery' ||
+    window.location.hash.includes('type=recovery')
+  );
+
+  const unavailableFeature = (
+    <div className="bg-white border border-gray-200 rounded-lg p-8 text-center">
+      <h2 className="text-lg font-semibold text-gray-900 mb-2">この機能は現在利用できません</h2>
+      <p className="text-gray-600">必要な場合は管理者にお問い合わせください。</p>
+    </div>
+  );
 
   useEffect(() => {
     loadAuth().catch(error => {
       console.error('Failed to load auth state:', error);
     });
+  }, []);
+
+  useEffect(() => {
+    if (!supabase) return;
+
+    const { data } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'PASSWORD_RECOVERY') {
+        setIsPasswordRecovery(true);
+      }
+    });
+
+    return () => {
+      data.subscription.unsubscribe();
+    };
   }, []);
 
   useEffect(() => {
@@ -45,8 +72,10 @@ function App() {
           return <ArticlesList />;
 
         case 'scheduler':
+          if (featureFlags.scheduler === false) return unavailableFeature;
           return <Scheduler />;
         case 'wordpress':
+          if (featureFlags.wordpress_publish === false) return unavailableFeature;
           return <WordPressConfigComponent />;
         case 'ai-config':
           return <AIConfigComponent />;
@@ -55,6 +84,7 @@ function App() {
         case 'titles':
           return <TitleSettings />;
         case 'settings':
+          if (featureFlags.fact_check === false) return unavailableFeature;
           return <SettingsComponent />;
         default:
           return <Dashboard />;
@@ -86,6 +116,15 @@ function App() {
             読み込み中です
           </div>
         </div>
+      );
+    }
+
+    if (isPasswordRecovery) {
+      return (
+        <Router>
+          <Login initialMode="update-password" onPasswordUpdated={() => setIsPasswordRecovery(false)} />
+          <Toaster position="top-right" />
+        </Router>
       );
     }
 

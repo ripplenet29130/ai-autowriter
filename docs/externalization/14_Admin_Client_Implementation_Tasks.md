@@ -163,6 +163,7 @@ Phase 1 メモ:
 - [ ] 必要なテーブルで `account_id` をNOT NULL化する
 - [x] `account_id` にインデックスを追加する
 - [x] `account_id` の外部キー制約を追加する
+- [x] `app_settings` をaccount別に同じkeyを保存できる構造へ変更する
 
 Phase 2 メモ:
 
@@ -171,6 +172,7 @@ Phase 2 メモ:
 - 既存レコードの `account_id` は `Default Account` に一括設定済み。
 - `generation_regression_results`、`custom_topics`、`generation_prompts` はリモートDBに存在しなかったためスキップされた。
 - まだ `account_id` のNOT NULL化はしていない。アプリ側のaccount対応が完了し、NULLが残らないことを確認してから実施する。
+- `supabase/migrations/20260429092500_make_app_settings_account_scoped.sql` を追加し、`app_settings` を `account_id + key` のユニーク制約で保存できる形へ変更済み。リモートDBへ適用済み。
 
 完了条件:
 
@@ -197,6 +199,10 @@ Phase 2 メモ:
 - [x] ログイン成功後にprofileを取得する
 - [x] `admin` は管理画面へ遷移する
 - [x] `client` は通常アプリ画面へ遷移する
+- [x] ログイン画面に「パスワードを忘れた方」を追加する
+- [x] Supabase Authの `resetPasswordForEmail` でリセットメールを送信する
+- [x] リセットURLから戻った時に新しいパスワード入力画面を表示する
+- [x] Supabase Authの `updateUser` で新しいパスワードを保存する
 
 ### 3. アプリ起動時の認証確認
 
@@ -209,8 +215,9 @@ Phase 2 メモ:
 Phase 3 メモ:
 
 - `src/store/useAuthStore.ts` を追加済み。
-- `src/components/Login.tsx` を追加済み。メール/パスワードとGoogleログインに対応。
+- `src/components/Login.tsx` を追加済み。外部提供向けにメール/パスワードログインへ統一し、Googleログインは削除済み。
 - `src/App.tsx` で未ログイン、profile未設定、admin、client、停止中accountを出し分けるように変更済み。
+- パスワードリセット導線を実装済み。ログイン画面からリセットメールを送信し、`?auth=recovery` で戻った場合に新しいパスワード設定画面を表示する。
 - `npm run build` は成功。`npx tsc -b` 単体はPowerShell実行ポリシーで失敗したが、build内の `tsc -b` は成功。
 
 完了条件:
@@ -236,7 +243,7 @@ Phase 3 メモ:
 - [x] statusを表示する
 - [x] WordPress登録上限を表示する
 - [x] 登録済みWordPress数を表示する
-- [ ] 作成日・更新日を表示する
+- [x] 作成日・更新日を表示する
 
 ### 3. client新規作成
 
@@ -254,7 +261,7 @@ Phase 3 メモ:
 - [x] account名を編集できるようにする
 - [x] statusを変更できるようにする
 - [x] WordPress登録上限数を変更できるようにする
-- [ ] feature_flagsを変更できるようにする
+- [x] feature_flagsを変更できるようにする
 - [x] 利用停止・再開を操作できるようにする
 
 Phase 4 メモ:
@@ -382,30 +389,32 @@ Phase 7 メモ:
 
 ### 2. 既存ポリシーの置き換え
 
-- [~] `articles` の `USING (true)` ポリシーを廃止する
-- [~] `wordpress_configs` の全許可ポリシーを廃止する
-- [~] `ai_configs` の全許可ポリシーを廃止する
-- [~] `schedule_settings` の全許可ポリシーを廃止する
-- [~] `execution_history` の全許可ポリシーを廃止する
-- [~] `keyword_sets` の全許可ポリシーを廃止する
-- [~] `prompt_sets` の全許可ポリシーを廃止する
-- [~] `title_sets` の全許可ポリシーを廃止する
-- [~] `app_settings` のanon許可ポリシーを廃止する
+- [x] `articles` の `USING (true)` ポリシーを廃止する
+- [x] `wordpress_configs` の全許可ポリシーを廃止する
+- [x] `ai_configs` の全許可ポリシーを廃止する
+- [x] `schedule_settings` の全許可ポリシーを廃止する
+- [x] `execution_history` の全許可ポリシーを廃止する
+- [x] `keyword_sets` の全許可ポリシーを廃止する
+- [x] `prompt_sets` の全許可ポリシーを廃止する
+- [x] `title_sets` の全許可ポリシーを廃止する
+- [x] `app_settings` のanon許可ポリシーを廃止する
 
 ### 3. 新RLSルール
 
-- [ ] clientは自accountのデータだけSELECT可能にする
-- [ ] clientは自accountのデータだけINSERT可能にする
-- [ ] clientは自accountのデータだけUPDATE可能にする
-- [ ] clientは自accountのデータだけDELETE可能にする
-- [ ] adminは全accountのデータをSELECT可能にする
-- [ ] adminは必要な管理テーブルをINSERT/UPDATE可能にする
+- [x] clientは自accountのデータだけSELECT可能にする
+- [x] clientは自accountのデータだけINSERT可能にする
+- [x] clientは自accountのデータだけUPDATE可能にする
+- [x] clientは自accountのデータだけDELETE可能にする
+- [x] adminは全accountのデータをSELECT可能にする
+- [x] adminは必要な管理テーブルをINSERT/UPDATE可能にする
 
 Phase 8 メモ:
 
 - `supabase/migrations/20260429093000_lock_account_rls_policies.sql` を追加済み。
 - このマイグレーションは、主要テーブルの `Allow all` / `Allow public` / anon許可系ポリシーを削除し、`account_id = current_profile_account_id()` ベースのclient用ポリシーとadmin全権限ポリシーへ置き換える。
-- まだリモートDBへは適用していない。RLS強化は画面表示やEdge Functionに影響しやすいため、テスト用clientで確認できる状態を作ってから適用する。
+- リモートDBへ適用済み。`supabase migration list --linked` で `20260429092500` と `20260429093000` がLocal/Remote両方に表示されることを確認済み。
+- `app_settings`、`fact_check_settings`、`competitor_research` のフロント側参照を `account_id` 対応済み。
+- `npm run build` は成功。
 
 完了条件:
 
@@ -415,11 +424,18 @@ Phase 8 メモ:
 ## Phase 9: Edge Function対応
 
 - [ ] `ai-proxy` がログインユーザーまたはaccountを検証するようにする
-- [ ] `scheduler` がaccount単位でデータを扱うようにする
-- [ ] `scheduler-executor` がscheduleの `account_id` を保持して処理するようにする
-- [ ] WordPress投稿時に対象accountのWordPress設定だけ使うようにする
-- [ ] AI APIキー取得時に対象accountのAI設定だけ使うようにする
-- [ ] service roleを使う処理でもaccount境界を崩さないようにする
+- [~] `scheduler` がaccount単位でデータを扱うようにする
+- [x] `scheduler-executor` がscheduleの `account_id` を保持して処理するようにする
+- [x] WordPress投稿時に対象accountのWordPress設定だけ使うようにする
+- [x] AI APIキー取得時に対象accountのAI設定だけ使うようにする
+- [~] service roleを使う処理でもaccount境界を崩さないようにする
+
+Phase 9 メモ:
+
+- `supabase/functions/scheduler-executor/index.ts` をaccount対応に修正し、リモートへデプロイ済み。
+- スケジュール実行時は `schedule_settings.account_id` / `wordpress_configs.account_id` を基準に、そのaccountのAI設定、Chatwork/API設定、ファクトチェック設定を参照する。
+- `fact_check_results` 保存時にも `account_id` を入れるようにした。
+- service roleはRLSをバイパスするため、今後もEdge Functionごとにaccount境界のコード確認が必要。
 
 完了条件:
 
@@ -430,12 +446,12 @@ Phase 8 メモ:
 
 ### 1. feature_flags
 
-- [ ] `feature_flags` の初期仕様を決める
-- [ ] WordPress投稿機能ON/OFFを実装する
-- [ ] スケジューラーON/OFFを実装する
-- [ ] 画像生成ON/OFFを実装する
-- [ ] ファクトチェックON/OFFを実装する
-- [ ] 無効機能はclient画面で非表示または利用不可にする
+- [x] `feature_flags` の初期仕様を決める
+- [x] WordPress投稿機能ON/OFFを実装する
+- [x] スケジューラーON/OFFを実装する
+- [x] 画像生成ON/OFFを実装する
+- [x] ファクトチェックON/OFFを実装する
+- [x] 無効機能はclient画面で非表示または利用不可にする
 
 推奨初期値:
 
@@ -448,12 +464,20 @@ Phase 8 メモ:
 }
 ```
 
+Phase 10 メモ:
+
+- 管理画面でclientごとの `feature_flags` を編集できるようにした。
+- `wordpress_publish`、`scheduler`、`fact_check` はclient側ナビゲーションの表示/非表示と画面ガードに反映済み。
+- `image_generation` は記事生成画面、AI設定画面、スケジュール設定画面、`scheduler-executor` に反映済み。
+- `scheduler-executor` は画像生成ON/OFF対応版をSupabaseへデプロイ済み。
+- `npm run build` は成功。
+
 ### 2. 利用状況
 
-- [ ] accountごとの記事生成数を集計する
-- [ ] accountごとのWordPress登録数を集計する
-- [ ] accountごとのスケジュール数を集計する
-- [ ] admin画面に利用状況を表示する
+- [x] accountごとの記事生成数を集計する
+- [x] accountごとのWordPress登録数を集計する
+- [x] accountごとのスケジュール数を集計する
+- [x] admin画面に利用状況を表示する
 - [ ] client画面に自分の利用状況を表示する
 
 完了条件:
@@ -539,6 +563,10 @@ Phase 8 メモ:
 - [ ] 本番環境変数を確認する
 - [ ] Supabase Authメール設定を確認する
 - [ ] パスワードリセット導線を確認する
+- [ ] Supabase AuthのRedirect URLsにローカルURLを追加する
+- [ ] Supabase AuthのRedirect URLsにVercel本番URLを追加する
+- [ ] パスワードリセットメールから本番URLへ戻れることを確認する
+- [ ] client自身が管理者に連絡せずパスワード再設定できることを確認する
 - [ ] ロールバック手順を用意する
 - [ ] リリース後の動作確認項目を用意する
 
@@ -684,7 +712,7 @@ Phase 14 メモ:
 - [~] Phase 5: client側データ分離
 - [~] Phase 6: WordPress登録数制限
 - [~] Phase 7: clientのAI API設定権限
-- [ ] Phase 8: RLS修正
+- [x] Phase 8: RLS修正
 - [ ] Phase 12: admin/client/データ分離テスト
 
 後回しにできるタスク。

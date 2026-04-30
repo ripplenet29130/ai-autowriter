@@ -38,6 +38,7 @@ let warnedSchedulerLockUnavailable = false;
 
 interface WordPressConfig {
   id: string;
+  account_id?: string;
   name: string;
   url: string;
   username: string;
@@ -50,6 +51,7 @@ interface WordPressConfig {
 
 interface Schedule {
   id: string;
+  account_id?: string;
   user_id?: string;
   ai_config_id: string;
   ai_provider_override?: string;
@@ -124,6 +126,7 @@ function isWithinScheduleDateRange(schedule: Schedule, now = new Date()): boolea
 
 interface AIConfig {
   id: string;
+  account_id?: string;
   provider: string;
   api_key: string;
   model: string;
@@ -496,6 +499,7 @@ Deno.serve(async (req: Request) => {
         stats.considered += 1;
         const scheduleSetting: Schedule = schedule as any;
         const wpConfig: WordPressConfig = (schedule as any).wordpress_configs;
+        const scheduleAccountId = scheduleSetting.account_id || wpConfig.account_id;
         const timeToUse = scheduleSetting.post_time;
 
         if (!forceExecute && executedWpConfigIds.has(wpConfig.id)) {
@@ -582,9 +586,71 @@ Deno.serve(async (req: Request) => {
           console.log(`Executing schedule for ${wpConfig.name}`);
 
           // Prefer schedule-specific AI config. Fall back to the active config.
+          const accountAiConfigs = normalizedAiConfigs.filter((config) => {
+            if (!scheduleAccountId) return true;
+            return config.account_id === scheduleAccountId;
+          });
+          const accountActiveAiConfig = accountAiConfigs.find((config) => config.is_active) || accountAiConfigs[0];
+
+          if (!accountActiveAiConfig) {
+            stats.failed += 1;
+            console.error(`No AI config found for account ${scheduleAccountId || 'unknown'} schedule ${scheduleSetting.id}`);
+            continue;
+          }
+
+          let accountChatworkApiToken = chatworkApiToken;
+          let accountSerpApiKey = serpApiKey;
+          let accountGoogleApiKey = googleApiKey;
+          let accountSearchEngineId = searchEngineId;
+          let accountImageCostUsdPerImage = imageCostUsdPerImage;
+          let accountImageGenerationAllowed = true;
+
+          if (scheduleAccountId) {
+            const { data: accountAppSettings, error: accountAppSettingsError } = await supabase
+              .from('app_settings')
+              .select('key, value')
+              .eq('account_id', scheduleAccountId)
+              .in('key', [
+                'chatwork_api_token',
+                'serpapi_key',
+                'google_custom_search_api_key',
+                'google_custom_search_engine_id',
+                'image_cost_usd_per_image',
+              ]);
+
+            if (accountAppSettingsError) {
+              console.error(`Error fetching app_settings for account ${scheduleAccountId}:`, accountAppSettingsError);
+            }
+
+            (accountAppSettings || []).forEach((setting: any) => {
+              if (setting.key === 'chatwork_api_token') accountChatworkApiToken = setting.value;
+              if (setting.key === 'serpapi_key') accountSerpApiKey = setting.value;
+              if (setting.key === 'google_custom_search_api_key') accountGoogleApiKey = setting.value;
+              if (setting.key === 'google_custom_search_engine_id') accountSearchEngineId = setting.value;
+              if (setting.key === 'image_cost_usd_per_image') {
+                const n = Number(setting.value);
+                if (Number.isFinite(n) && n >= 0) accountImageCostUsdPerImage = n;
+              }
+            });
+
+            const { data: accountRow, error: accountError } = await supabase
+              .from('accounts')
+              .select('feature_flags')
+              .eq('id', scheduleAccountId)
+              .maybeSingle();
+
+            if (accountError) {
+              console.error(`Error fetching account feature_flags for account ${scheduleAccountId}:`, accountError);
+            }
+
+            accountImageGenerationAllowed = accountRow?.feature_flags?.image_generation !== false;
+          }
+
           const requestedAiConfigId = scheduleSetting.ai_config_id;
-          const requestedAiConfig = requestedAiConfigId ? aiConfigMap.get(requestedAiConfigId) : null;
-          const baseAiConfig = requestedAiConfig || activeAiConfig;
+          const requestedAiConfig = requestedAiConfigId
+            ? accountAiConfigs.find((config) => config.id === requestedAiConfigId) || null
+            : null;
+          const baseAiConfig = requestedAiConfig || accountActiveAiConfig;
           const overrideProvider = String(scheduleSetting.ai_provider_override || '').trim().toLowerCase();
           const overrideModel = String(scheduleSetting.ai_model_override || '').trim();
           let effectiveAiConfig = baseAiConfig;
@@ -595,10 +661,10 @@ Deno.serve(async (req: Request) => {
             );
           } else if (requestedAiConfigId) {
             console.warn(
-              `Schedule AI config not found (${requestedAiConfigId}). Falling back to active config ${activeAiConfig.id}`
+              `Schedule AI config not found (${requestedAiConfigId}). Falling back to active config ${accountActiveAiConfig.id}`
             );
           } else {
-            console.log(`No schedule AI config specified. Using active config ${activeAiConfig.id}`);
+            console.log(`No schedule AI config specified. Using active config ${accountActiveAiConfig.id}`);
           }
 
           if ((overrideProvider && !overrideModel) || (!overrideProvider && overrideModel)) {
@@ -615,16 +681,24 @@ Deno.serve(async (req: Request) => {
           }
 
           try {
+            const effectiveScheduleSetting = accountImageGenerationAllowed
+              ? scheduleSetting
+              : {
+                  ...scheduleSetting,
+                  image_generation_enabled: false,
+                  images_per_article: 0,
+                };
+
             await executeSchedule(
-              scheduleSetting,
+              effectiveScheduleSetting,
               wpConfig,
               effectiveAiConfig,
               supabase,
-              chatworkApiToken,
-              serpApiKey,
-              googleApiKey,
-              searchEngineId,
-              imageCostUsdPerImage,
+              accountChatworkApiToken,
+              accountSerpApiKey,
+              accountGoogleApiKey,
+              accountSearchEngineId,
+              accountImageCostUsdPerImage,
               schedulerStartTime
             );
             stats.executed += 1;
@@ -1998,23 +2072,29 @@ JSON配列のみ（説明文は不要）。要素数は ${targetSections.length}
     try {
       // ファクトチェック設定を取得（user_id が無い場合もグローバル設定でフォールバック）
       const scheduleUserId = (schedule as any).user_id;
+      const scheduleAccountId = (schedule as any).account_id;
       let factCheckSettings: any = null;
 
       if (!scheduleUserId) {
         console.warn(`Schedule ${schedule.id} has no user_id. Falling back to app_settings for fact-check.`);
       } else {
-        const { data: userFactCheckSettings } = await supabase
+        let userFactCheckQuery = supabase
           .from('fact_check_settings')
           .select('*')
           .eq('user_id', scheduleUserId)
           .order('updated_at', { ascending: false })
-          .limit(1)
-          .maybeSingle();
+          .limit(1);
+
+        if (scheduleAccountId) {
+          userFactCheckQuery = userFactCheckQuery.eq('account_id', scheduleAccountId);
+        }
+
+        const { data: userFactCheckSettings } = await userFactCheckQuery.maybeSingle();
         factCheckSettings = userFactCheckSettings;
       }
 
       if (!factCheckSettings) {
-        const { data: globalRows } = await supabase
+        let appSettingsQuery = supabase
           .from('app_settings')
           .select('key, value')
           .in('key', [
@@ -2024,6 +2104,12 @@ JSON配列のみ（説明文は不要）。要素数は ${targetSections.length}
             'fact_check_max_items',
             'fact_check_auto_fix_enabled',
           ]);
+
+        if (scheduleAccountId) {
+          appSettingsQuery = appSettingsQuery.eq('account_id', scheduleAccountId);
+        }
+
+        const { data: globalRows } = await appSettingsQuery;
 
         if (globalRows && globalRows.length > 0) {
           const map = new Map<string, string>();
@@ -2154,6 +2240,7 @@ JSON配列のみ（説明文は不要）。要素数は ${targetSections.length}
 
         // 結果を保存
         const { data: savedReport } = await supabase.from('fact_check_results').insert({
+          account_id: scheduleAccountId,
           schedule_id: schedule.id,
           checked_items: factCheckResults,
           total_checked: itemsToCheck.length,

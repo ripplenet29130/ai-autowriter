@@ -32,7 +32,8 @@ interface AuthState {
   isClient: boolean;
   loadAuth: () => Promise<void>;
   signInWithPassword: (email: string, password: string) => Promise<void>;
-  signInWithGoogle: () => Promise<void>;
+  requestPasswordReset: (email: string) => Promise<void>;
+  updatePassword: (password: string) => Promise<void>;
   signOut: () => Promise<void>;
 }
 
@@ -158,22 +159,38 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     await get().loadAuth();
   },
 
-  signInWithGoogle: async () => {
+  requestPasswordReset: async (email) => {
     if (!supabase) {
       throw new Error('Supabase configuration is missing.');
     }
 
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: {
-        redirectTo: window.location.origin,
-      },
+    set({ error: null });
+
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}?auth=recovery`,
     });
 
     if (error) {
       set({ error: error.message });
       throw error;
     }
+  },
+
+  updatePassword: async (password) => {
+    if (!supabase) {
+      throw new Error('Supabase configuration is missing.');
+    }
+
+    set({ isLoading: true, error: null });
+
+    const { error } = await supabase.auth.updateUser({ password });
+    if (error) {
+      set({ isLoading: false, error: error.message });
+      throw error;
+    }
+
+    window.history.replaceState({}, document.title, window.location.origin);
+    await get().loadAuth();
   },
 
   signOut: async () => {

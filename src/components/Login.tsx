@@ -1,12 +1,29 @@
 import React, { useState } from 'react';
-import { Chrome, Lock } from 'lucide-react';
+import { Lock } from 'lucide-react';
 import { useAuthStore } from '../store/useAuthStore';
 
-export const Login: React.FC = () => {
-  const { signInWithPassword, signInWithGoogle, isLoading, error } = useAuthStore();
+type LoginMode = 'login' | 'forgot' | 'update-password';
+
+interface LoginProps {
+  initialMode?: LoginMode;
+  onPasswordUpdated?: () => void;
+}
+
+export const Login: React.FC<LoginProps> = ({ initialMode = 'login', onPasswordUpdated }) => {
+  const {
+    signInWithPassword,
+    requestPasswordReset,
+    updatePassword,
+    isLoading,
+    error,
+  } = useAuthStore();
+  const [mode, setMode] = useState<LoginMode>(initialMode);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [localError, setLocalError] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
 
   const handlePasswordLogin = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -19,13 +36,51 @@ export const Login: React.FC = () => {
     }
   };
 
-  const handleGoogleLogin = async () => {
+  const handlePasswordResetRequest = async (event: React.FormEvent) => {
+    event.preventDefault();
     setLocalError(null);
+    setMessage(null);
+
+    if (!email.trim()) {
+      setLocalError('メールアドレスを入力してください。');
+      return;
+    }
 
     try {
-      await signInWithGoogle();
-    } catch {
-      setLocalError('Googleログインを開始できませんでした。');
+      await requestPasswordReset(email.trim());
+      setMessage('パスワード再設定メールを送信しました。メール内のリンクから新しいパスワードを設定してください。');
+    } catch (resetError) {
+      const message = resetError instanceof Error
+        ? resetError.message
+        : 'パスワード再設定メールを送信できませんでした。';
+      setLocalError(message);
+    }
+  };
+
+  const handlePasswordUpdate = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setLocalError(null);
+    setMessage(null);
+
+    if (newPassword.length < 8) {
+      setLocalError('新しいパスワードは8文字以上にしてください。');
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      setLocalError('確認用パスワードが一致しません。');
+      return;
+    }
+
+    try {
+      await updatePassword(newPassword);
+      onPasswordUpdated?.();
+      setMessage('パスワードを更新しました。');
+    } catch (updateError) {
+      const message = updateError instanceof Error
+        ? updateError.message
+        : 'パスワードを更新できませんでした。リセットメールのリンクを開き直してください。';
+      setLocalError(message);
     }
   };
 
@@ -38,69 +93,180 @@ export const Login: React.FC = () => {
           </div>
           <div>
             <h1 className="text-xl font-bold text-gray-900">AI Auto Writer</h1>
-            <p className="text-sm text-gray-500">ログインしてください</p>
+            <p className="text-sm text-gray-500">
+              {mode === 'login' && 'ログインしてください'}
+              {mode === 'forgot' && 'パスワード再設定メールを送信します'}
+              {mode === 'update-password' && '新しいパスワードを設定してください'}
+            </p>
           </div>
         </div>
 
-        <form onSubmit={handlePasswordLogin} className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              メールアドレス
-            </label>
-            <input
-              type="email"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-              autoComplete="email"
-              required
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              パスワード
-            </label>
-            <input
-              type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-              autoComplete="current-password"
-              required
-            />
-          </div>
-
-          {(localError || error) && (
-            <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
-              {localError || error}
+        {mode === 'login' && (
+          <form onSubmit={handlePasswordLogin} className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                メールアドレス
+              </label>
+              <input
+                type="email"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                autoComplete="email"
+                required
+              />
             </div>
-          )}
 
-          <button
-            type="submit"
-            disabled={isLoading}
-            className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white font-medium rounded-lg px-4 py-2.5 transition-colors"
-          >
-            ログイン
-          </button>
-        </form>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                パスワード
+              </label>
+              <input
+                type="password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                autoComplete="current-password"
+                required
+              />
+            </div>
 
-        <div className="my-5 flex items-center gap-3">
-          <div className="h-px bg-gray-200 flex-1" />
-          <span className="text-xs text-gray-400">または</span>
-          <div className="h-px bg-gray-200 flex-1" />
-        </div>
+            {(localError || error) && (
+              <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                {localError || error}
+              </div>
+            )}
 
-        <button
-          type="button"
-          onClick={handleGoogleLogin}
-          disabled={isLoading}
-          className="w-full border border-gray-300 hover:bg-gray-50 disabled:bg-gray-100 text-gray-700 font-medium rounded-lg px-4 py-2.5 transition-colors flex items-center justify-center gap-2"
-        >
-          <Chrome className="w-4 h-4" />
-          Googleでログイン
-        </button>
+            {message && (
+              <div className="text-sm text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-2">
+                {message}
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={isLoading}
+              className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white font-medium rounded-lg px-4 py-2.5 transition-colors"
+            >
+              ログイン
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setMode('forgot');
+                setLocalError(null);
+                setMessage(null);
+              }}
+              className="w-full text-sm text-blue-600 hover:text-blue-700 font-medium"
+            >
+              パスワードを忘れた方
+            </button>
+          </form>
+        )}
+
+        {mode === 'forgot' && (
+          <form onSubmit={handlePasswordResetRequest} className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                メールアドレス
+              </label>
+              <input
+                type="email"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                autoComplete="email"
+                required
+              />
+            </div>
+
+            {(localError || error) && (
+              <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                {localError || error}
+              </div>
+            )}
+
+            {message && (
+              <div className="text-sm text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-2">
+                {message}
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={isLoading}
+              className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white font-medium rounded-lg px-4 py-2.5 transition-colors"
+            >
+              再設定メールを送信
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setMode('login');
+                setLocalError(null);
+                setMessage(null);
+              }}
+              className="w-full text-sm text-gray-600 hover:text-gray-800 font-medium"
+            >
+              ログインに戻る
+            </button>
+          </form>
+        )}
+
+        {mode === 'update-password' && (
+          <form onSubmit={handlePasswordUpdate} className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                新しいパスワード
+              </label>
+              <input
+                type="password"
+                value={newPassword}
+                onChange={(event) => setNewPassword(event.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                autoComplete="new-password"
+                required
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                新しいパスワード確認
+              </label>
+              <input
+                type="password"
+                value={confirmPassword}
+                onChange={(event) => setConfirmPassword(event.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                autoComplete="new-password"
+                required
+              />
+            </div>
+
+            {(localError || error) && (
+              <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                {localError || error}
+              </div>
+            )}
+
+            {message && (
+              <div className="text-sm text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-2">
+                {message}
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={isLoading}
+              className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white font-medium rounded-lg px-4 py-2.5 transition-colors"
+            >
+              パスワードを更新
+            </button>
+          </form>
+        )}
+
       </div>
     </div>
   );

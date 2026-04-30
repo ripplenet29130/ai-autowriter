@@ -1,4 +1,5 @@
 import { supabase } from './supabaseClient';
+import { getCurrentAccountId } from './accountScope';
 
 export interface CompetitorArticle {
     title: string;
@@ -68,11 +69,14 @@ class CompetitorResearchService {
      */
     private async getCachedResearch(keyword: string): Promise<CompetitorResearchResult | null> {
         if (!supabase) return null;
+        const accountId = getCurrentAccountId();
+        if (!accountId) return null;
 
         const { data, error } = await supabase
             .from('competitor_research')
             .select('*')
             .eq('keyword', keyword)
+            .eq('account_id', accountId)
             .maybeSingle();
 
         if (error || !data) {
@@ -92,10 +96,13 @@ class CompetitorResearchService {
      */
     async getHistory(limit: number = 10) {
         if (!supabase) return [];
+        const accountId = getCurrentAccountId();
+        if (!accountId) return [];
 
         const { data, error } = await supabase
             .from('competitor_research')
             .select('keyword, created_at')
+            .eq('account_id', accountId)
             .order('created_at', { ascending: false })
             .limit(limit);
 

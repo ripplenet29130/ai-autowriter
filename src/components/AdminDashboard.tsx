@@ -5,6 +5,8 @@ import { Account, useAuthStore } from '../store/useAuthStore';
 
 type AccountRow = Account & {
   wordpress_count?: number;
+  article_count?: number;
+  schedule_count?: number;
   created_at?: string;
   updated_at?: string;
 };
@@ -15,6 +17,13 @@ const defaultFeatureFlags = {
   image_generation: true,
   fact_check: true,
 };
+
+const featureOptions: Array<{ key: keyof typeof defaultFeatureFlags; label: string }> = [
+  { key: 'wordpress_publish', label: 'WP投稿' },
+  { key: 'scheduler', label: '予約' },
+  { key: 'image_generation', label: '画像' },
+  { key: 'fact_check', label: '校正' },
+];
 
 export const AdminDashboard: React.FC = () => {
   const { user, signOut } = useAuthStore();
@@ -63,9 +72,21 @@ export const AdminDashboard: React.FC = () => {
           .select('*', { count: 'exact', head: true })
           .eq('account_id', account.id);
 
+        const { count: articleCount } = await client
+          .from('articles')
+          .select('*', { count: 'exact', head: true })
+          .eq('account_id', account.id);
+
+        const { count: scheduleCount } = await client
+          .from('schedule_settings')
+          .select('*', { count: 'exact', head: true })
+          .eq('account_id', account.id);
+
         return {
           ...account,
           wordpress_count: count ?? 0,
+          article_count: articleCount ?? 0,
+          schedule_count: scheduleCount ?? 0,
         };
       })
     );
@@ -143,7 +164,7 @@ export const AdminDashboard: React.FC = () => {
 
   const updateAccount = async (
     id: string,
-    updates: Partial<Pick<AccountRow, 'name' | 'status' | 'wordpress_site_limit' | 'monthly_article_limit'>>
+    updates: Partial<Pick<AccountRow, 'name' | 'status' | 'wordpress_site_limit' | 'monthly_article_limit' | 'feature_flags'>>
   ) => {
     if (!supabase) return;
 
@@ -165,6 +186,15 @@ export const AdminDashboard: React.FC = () => {
     setMessage('更新しました。');
     await loadAccounts();
     setIsSaving(false);
+  };
+
+  const formatDate = (value?: string) => {
+    if (!value) return '-';
+    return new Intl.DateTimeFormat('ja-JP', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(new Date(value));
   };
 
   return (
@@ -213,44 +243,64 @@ export const AdminDashboard: React.FC = () => {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-6 gap-3">
-            <input
-              value={newAccount.name}
-              onChange={(event) => setNewAccount((prev) => ({ ...prev, name: event.target.value }))}
-              placeholder="client名"
-              className="border border-gray-300 rounded-lg px-3 py-2 md:col-span-2"
-            />
-            <input
-              type="email"
-              value={newAccount.email}
-              onChange={(event) => setNewAccount((prev) => ({ ...prev, email: event.target.value }))}
-              placeholder="ログインメール"
-              className="border border-gray-300 rounded-lg px-3 py-2 md:col-span-2"
-            />
-            <input
-              type="password"
-              value={newAccount.password}
-              onChange={(event) => setNewAccount((prev) => ({ ...prev, password: event.target.value }))}
-              placeholder="初期パスワード"
-              className="border border-gray-300 rounded-lg px-3 py-2 md:col-span-2"
-              autoComplete="new-password"
-            />
-            <input
-              type="number"
-              min={0}
-              value={newAccount.wordpress_site_limit}
-              onChange={(event) => setNewAccount((prev) => ({ ...prev, wordpress_site_limit: Number(event.target.value) }))}
-              className="border border-gray-300 rounded-lg px-3 py-2"
-              aria-label="WordPress登録上限"
-            />
-            <input
-              type="number"
-              min={0}
-              value={newAccount.monthly_article_limit}
-              onChange={(event) => setNewAccount((prev) => ({ ...prev, monthly_article_limit: event.target.value }))}
-              placeholder="月間記事上限"
-              className="border border-gray-300 rounded-lg px-3 py-2"
-            />
+          <div className="space-y-4">
+            <label className="block space-y-1">
+              <span className="block text-sm font-medium text-gray-700">client名</span>
+              <input
+                value={newAccount.name}
+                onChange={(event) => setNewAccount((prev) => ({ ...prev, name: event.target.value }))}
+                placeholder="例: 株式会社サンプル"
+                className="w-full border border-gray-300 rounded-lg px-3 py-2"
+              />
+            </label>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <label className="space-y-1">
+                <span className="block text-sm font-medium text-gray-700">ログインメール</span>
+                <input
+                  type="email"
+                  value={newAccount.email}
+                  onChange={(event) => setNewAccount((prev) => ({ ...prev, email: event.target.value }))}
+                  placeholder="client@example.com"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                />
+              </label>
+              <label className="space-y-1">
+                <span className="block text-sm font-medium text-gray-700">初期パスワード</span>
+                <input
+                  type="password"
+                  value={newAccount.password}
+                  onChange={(event) => setNewAccount((prev) => ({ ...prev, password: event.target.value }))}
+                  placeholder="8文字以上"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                  autoComplete="new-password"
+                />
+              </label>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <label className="space-y-1">
+                <span className="block text-sm font-medium text-gray-700">WordPress登録数上限</span>
+                <input
+                  type="number"
+                  min={0}
+                  value={newAccount.wordpress_site_limit}
+                  onChange={(event) => setNewAccount((prev) => ({ ...prev, wordpress_site_limit: Number(event.target.value) }))}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                />
+              </label>
+              <label className="space-y-1">
+                <span className="block text-sm font-medium text-gray-700">月間記事上限</span>
+                <input
+                  type="number"
+                  min={0}
+                  value={newAccount.monthly_article_limit}
+                  onChange={(event) => setNewAccount((prev) => ({ ...prev, monthly_article_limit: event.target.value }))}
+                  placeholder="無制限"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                />
+              </label>
+            </div>
           </div>
 
           <div className="flex justify-end mt-4">
@@ -305,20 +355,23 @@ export const AdminDashboard: React.FC = () => {
                   <th className="text-left px-4 py-3 font-medium text-gray-600">名前</th>
                   <th className="text-left px-4 py-3 font-medium text-gray-600">状態</th>
                   <th className="text-left px-4 py-3 font-medium text-gray-600">WordPress</th>
+                  <th className="text-left px-4 py-3 font-medium text-gray-600">利用状況</th>
                   <th className="text-left px-4 py-3 font-medium text-gray-600">月間記事上限</th>
+                  <th className="text-left px-4 py-3 font-medium text-gray-600">機能</th>
+                  <th className="text-left px-4 py-3 font-medium text-gray-600">更新日</th>
                   <th className="text-left px-4 py-3 font-medium text-gray-600">操作</th>
                 </tr>
               </thead>
               <tbody>
                 {isLoading ? (
                   <tr>
-                    <td colSpan={5} className="px-4 py-8 text-center text-gray-500">
+                    <td colSpan={8} className="px-4 py-8 text-center text-gray-500">
                       読み込み中です
                     </td>
                   </tr>
                 ) : accounts.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="px-4 py-8 text-center text-gray-500">
+                    <td colSpan={8} className="px-4 py-8 text-center text-gray-500">
                       アカウントがありません
                     </td>
                   </tr>
@@ -326,66 +379,114 @@ export const AdminDashboard: React.FC = () => {
                   accounts.map((account) => (
                     <tr key={account.id} className="border-b border-gray-100 last:border-b-0">
                       <td className="px-4 py-3">
-                        <input
-                          value={account.name}
-                          onChange={(event) =>
-                            setAccounts((prev) =>
-                              prev.map((item) => item.id === account.id ? { ...item, name: event.target.value } : item)
-                            )
-                          }
-                          className="border border-gray-300 rounded-lg px-3 py-2 min-w-56"
-                        />
+                        <label className="space-y-1">
+                          <span className="block text-xs font-medium text-gray-500">client名</span>
+                          <input
+                            value={account.name}
+                            onChange={(event) =>
+                              setAccounts((prev) =>
+                                prev.map((item) => item.id === account.id ? { ...item, name: event.target.value } : item)
+                              )
+                            }
+                            className="border border-gray-300 rounded-lg px-3 py-2 min-w-56"
+                          />
+                        </label>
                       </td>
                       <td className="px-4 py-3">
-                        <select
-                          value={account.status}
-                          onChange={(event) =>
-                            updateAccount(account.id, { status: event.target.value as Account['status'] })
-                          }
-                          className="border border-gray-300 rounded-lg px-3 py-2"
-                        >
-                          <option value="active">利用中</option>
-                          <option value="suspended">停止中</option>
-                        </select>
+                        <label className="space-y-1">
+                          <span className="block text-xs font-medium text-gray-500">利用状態</span>
+                          <select
+                            value={account.status}
+                            onChange={(event) =>
+                              updateAccount(account.id, { status: event.target.value as Account['status'] })
+                            }
+                            className="border border-gray-300 rounded-lg px-3 py-2"
+                          >
+                            <option value="active">利用中</option>
+                            <option value="suspended">停止中</option>
+                          </select>
+                        </label>
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">
-                          <input
-                            type="number"
-                            min={0}
-                            value={account.wordpress_site_limit}
-                            onChange={(event) =>
-                              setAccounts((prev) =>
-                                prev.map((item) => item.id === account.id
-                                  ? { ...item, wordpress_site_limit: Number(event.target.value) }
-                                  : item)
-                              )
-                            }
-                            className="border border-gray-300 rounded-lg px-3 py-2 w-24"
-                          />
+                          <label className="space-y-1">
+                            <span className="block text-xs font-medium text-gray-500">登録上限</span>
+                            <input
+                              type="number"
+                              min={0}
+                              value={account.wordpress_site_limit}
+                              onChange={(event) =>
+                                setAccounts((prev) =>
+                                  prev.map((item) => item.id === account.id
+                                    ? { ...item, wordpress_site_limit: Number(event.target.value) }
+                                    : item)
+                                )
+                              }
+                              className="border border-gray-300 rounded-lg px-3 py-2 w-24"
+                            />
+                          </label>
                           <span className="text-gray-500">
                             登録済み {account.wordpress_count ?? 0}
                           </span>
                         </div>
                       </td>
+                      <td className="px-4 py-3 text-gray-600">
+                        <div>記事 {account.article_count ?? 0}</div>
+                        <div>予約 {account.schedule_count ?? 0}</div>
+                      </td>
                       <td className="px-4 py-3">
-                        <input
-                          type="number"
-                          min={0}
-                          value={account.monthly_article_limit ?? ''}
-                          onChange={(event) =>
-                            setAccounts((prev) =>
-                              prev.map((item) => item.id === account.id
-                                ? {
-                                    ...item,
-                                    monthly_article_limit: event.target.value ? Number(event.target.value) : null,
-                                  }
-                                : item)
-                            )
-                          }
-                          placeholder="無制限"
-                          className="border border-gray-300 rounded-lg px-3 py-2 w-28"
-                        />
+                        <label className="space-y-1">
+                          <span className="block text-xs font-medium text-gray-500">月間記事上限</span>
+                          <input
+                            type="number"
+                            min={0}
+                            value={account.monthly_article_limit ?? ''}
+                            onChange={(event) =>
+                              setAccounts((prev) =>
+                                prev.map((item) => item.id === account.id
+                                  ? {
+                                      ...item,
+                                      monthly_article_limit: event.target.value ? Number(event.target.value) : null,
+                                    }
+                                  : item)
+                              )
+                            }
+                            placeholder="無制限"
+                            className="border border-gray-300 rounded-lg px-3 py-2 w-28"
+                          />
+                        </label>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="grid grid-cols-2 gap-2 min-w-48">
+                          {featureOptions.map((feature) => (
+                            <label key={feature.key} className="inline-flex items-center gap-1.5 text-xs text-gray-600">
+                              <input
+                                type="checkbox"
+                                checked={Boolean((account.feature_flags ?? defaultFeatureFlags)[feature.key])}
+                                onChange={(event) =>
+                                  setAccounts((prev) =>
+                                    prev.map((item) => item.id === account.id
+                                      ? {
+                                          ...item,
+                                          feature_flags: {
+                                            ...defaultFeatureFlags,
+                                            ...(item.feature_flags ?? {}),
+                                            [feature.key]: event.target.checked,
+                                          },
+                                        }
+                                      : item)
+                                  )
+                                }
+                                className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                              />
+                              <span>{feature.label}</span>
+                            </label>
+                          ))}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-gray-500 whitespace-nowrap">
+                        <div>{formatDate(account.updated_at)}</div>
+                        <div className="text-xs">作成 {formatDate(account.created_at)}</div>
                       </td>
                       <td className="px-4 py-3">
                         <button
@@ -395,6 +496,10 @@ export const AdminDashboard: React.FC = () => {
                             name: account.name,
                             wordpress_site_limit: account.wordpress_site_limit,
                             monthly_article_limit: account.monthly_article_limit,
+                            feature_flags: {
+                              ...defaultFeatureFlags,
+                              ...(account.feature_flags ?? {}),
+                            },
                           })}
                           className="inline-flex items-center gap-2 bg-gray-900 hover:bg-gray-800 disabled:bg-gray-400 text-white rounded-lg px-3 py-2 text-sm font-medium"
                         >

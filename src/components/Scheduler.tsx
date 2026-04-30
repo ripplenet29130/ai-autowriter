@@ -6,6 +6,8 @@ import { supabase } from '../services/supabaseClient';
 import { ScheduleSetting } from '../types';
 import { useAppStore } from '../store/useAppStore';
 import { PromptSetManager } from './AIGenerator/PromptSetManager';
+import { getCurrentAccountId } from '../services/accountScope';
+import { useAuthStore } from '../store/useAuthStore';
 import toast from 'react-hot-toast';
 import { Play } from 'lucide-react';
 
@@ -44,6 +46,7 @@ const getProviderModelOptions = (provider: string): string[] => {
 };
 
 export const Scheduler: React.FC = () => {
+  const imageGenerationAllowed = useAuthStore((state) => state.account?.feature_flags?.image_generation !== false);
   const { aiConfigs, wordPressConfigs, keywordSets, titleSets, promptSets, loadKeywordSets, loadTitleSets, loadPromptSets } = useAppStore();
   const [schedules, setSchedules] = useState<ScheduleSetting[]>([]);
   const [usedKeywordsMap, setUsedKeywordsMap] = useState<Record<string, string[]>>({});
@@ -240,6 +243,11 @@ export const Scheduler: React.FC = () => {
       setDefaultFactCheckAutoFixEnabled(false);
       return;
     }
+    const accountId = getCurrentAccountId();
+    if (!accountId) {
+      setDefaultFactCheckAutoFixEnabled(false);
+      return;
+    }
 
     try {
       const {
@@ -252,6 +260,7 @@ export const Scheduler: React.FC = () => {
           .from('fact_check_settings')
           .select('auto_fix_enabled')
           .eq('user_id', user.id)
+          .eq('account_id', accountId)
           .order('updated_at', { ascending: false })
           .limit(1)
           .maybeSingle();
@@ -264,6 +273,7 @@ export const Scheduler: React.FC = () => {
         .from('app_settings')
         .select('key, value')
         .eq('key', 'fact_check_auto_fix_enabled')
+        .eq('account_id', accountId)
         .limit(1);
 
       const raw = String(globalRows?.[0]?.value ?? '').toLowerCase();
@@ -1225,15 +1235,25 @@ export const Scheduler: React.FC = () => {
             <input
               type="checkbox"
               id="image_generation_enabled"
-              checked={formData.image_generation_enabled ?? false}
-              onChange={(e) => setFormData({ ...formData, image_generation_enabled: e.target.checked })}
+              checked={imageGenerationAllowed && (formData.image_generation_enabled ?? false)}
+              disabled={!imageGenerationAllowed}
+              onChange={(e) => setFormData({
+                ...formData,
+                image_generation_enabled: e.target.checked,
+                images_per_article: e.target.checked ? formData.images_per_article : 0,
+              })}
               className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
             />
             <label htmlFor="image_generation_enabled" className="text-sm font-medium text-gray-700">
               画像生成を有効化（スケジュール単位）
             </label>
           </div>
-          {(formData.image_generation_enabled ?? false) && (
+          {!imageGenerationAllowed && (
+            <p className="text-xs text-orange-600">
+              管理者設定により画像生成は利用できません。
+            </p>
+          )}
+          {imageGenerationAllowed && (formData.image_generation_enabled ?? false) && (
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 記事あたりの画像枚数 ({formData.images_per_article ?? 0}枚)

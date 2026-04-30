@@ -3,6 +3,7 @@ import { Key, Check, AlertCircle, ExternalLink, MessageSquare } from 'lucide-rea
 import { apiKeyManager } from '../services/apiKeyManager';
 import { realTrendAnalysisService } from '../services/realTrendAnalysisService';
 import { supabase } from '../services/supabaseClient';
+import { getCurrentAccountId, getRequiredAccountId } from '../services/accountScope';
 import toast from 'react-hot-toast';
 
 export const ApiKeySettings: React.FC = () => {
@@ -30,10 +31,14 @@ export const ApiKeySettings: React.FC = () => {
         // Chatwork API KeyをDBから読み込み
         const loadChatworkKey = async () => {
             if (!supabase) return;
+            const accountId = getCurrentAccountId();
+            if (!accountId) return;
+
             const { data } = await supabase
                 .from('app_settings')
                 .select('value')
                 .eq('key', 'chatwork_api_token')
+                .eq('account_id', accountId)
                 .maybeSingle();
 
             if (data) {
@@ -51,6 +56,7 @@ export const ApiKeySettings: React.FC = () => {
             toast.error('データベース接続エラー');
             return;
         }
+        const accountId = getRequiredAccountId();
 
         // ローカル設定のAPIキーを保存
         if (serpApiKey) apiKeyManager.setApiKey('serpapi', serpApiKey);
@@ -70,10 +76,11 @@ export const ApiKeySettings: React.FC = () => {
                 const { error } = await supabase
                     .from('app_settings')
                     .upsert({
+                        account_id: accountId,
                         key: apiKey.key,
                         value: apiKey.value,
                         description: apiKey.description
-                    });
+                    }, { onConflict: 'account_id,key' });
 
                 if (error) {
                     console.error(`Failed to save ${apiKey.key}:`, error);

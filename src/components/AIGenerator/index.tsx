@@ -12,6 +12,7 @@ import { MultiStepGenerator } from '../MultiStepGenerator';
 import { useMultiStepGeneration } from '../../hooks/useMultiStepGeneration';
 import { FactCheckResultsDisplay } from '../FactCheckResultsDisplay';
 import { factCheckService } from '../../services/factCheckService';
+import { useAuthStore } from '../../store/useAuthStore';
 import type { FactCheckResult } from '../../types';
 import type { FactCheckItem } from '../../types/factCheck';
 import type { Article, ArticleGoal } from '../../types';
@@ -21,6 +22,7 @@ import toast from 'react-hot-toast';
  * AI記事生成メインコンポーネント
  */
 export const AIGenerator: React.FC = () => {
+    const imageGenerationAllowed = useAuthStore((state) => state.account?.feature_flags?.image_generation !== false);
     const { addArticle, updateArticle, wordPressConfigs, promptSets, titleSets, keywordSets, aiConfigs, aiConfig } = useAppStore();
     const { isGenerating, generatedArticle, generateArticle, clearArticle, setGeneratedArticle } = useArticleGeneration();
     const { executeAutoMode, isGenerating: isAutoGenerating } = useMultiStepGeneration();
@@ -82,7 +84,7 @@ export const AIGenerator: React.FC = () => {
                 await aiService.loadActiveConfig();
                 const config = aiService.getActiveConfig();
                 if (config) {
-                    const enabled = config.imageGenerationEnabled ?? false;
+                    const enabled = imageGenerationAllowed && (config.imageGenerationEnabled ?? false);
                     setImageGenEnabled(enabled);
                     setImageProvider((config.imageProvider as 'nanobanana' | 'dalle3') || 'nanobanana');
                     if (!enabled) {
@@ -94,7 +96,7 @@ export const AIGenerator: React.FC = () => {
             }
         };
         loadImageConfig();
-    }, []);
+    }, [imageGenerationAllowed]);
 
     React.useEffect(() => {
         const loadFactCheckSettings = async () => {
@@ -1105,9 +1107,14 @@ export const AIGenerator: React.FC = () => {
                             <span>5枚</span>
                             <span>10枚</span>
                         </div>
-                        {!imageGenEnabled && (
+                        {!imageGenerationAllowed && (
                             <p className="text-xs text-orange-600 mt-2">
-                                ⚠️ AI設定で画像生成が無効になっています
+                                管理者設定により画像生成は利用できません
+                            </p>
+                        )}
+                        {imageGenerationAllowed && !imageGenEnabled && (
+                            <p className="text-xs text-orange-600 mt-2">
+                                AI設定で画像生成が無効になっています
                             </p>
                         )}
                         {imageGenEnabled && imagesPerArticle > 0 && (

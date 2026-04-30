@@ -1,6 +1,7 @@
 import { supabase } from './supabaseClient';
 import { FactCheckItem, FactCheckResult } from '../types/factCheck';
 import { IS_CLIENT_DEPLOYMENT } from '@aw/config';
+import { getCurrentAccountId } from './accountScope';
 
 type PerplexityBatchResult = {
   claim_number: number;
@@ -135,6 +136,8 @@ export const factCheckService = {
     if (localSettings?.perplexity_api_key) return this.enforceSettings(localSettings);
 
     if (!supabase) return null;
+    const accountId = getCurrentAccountId();
+    if (!accountId) return null;
 
     const {
       data: { user },
@@ -146,6 +149,7 @@ export const factCheckService = {
         .from('fact_check_settings')
         .select('*')
         .eq('user_id', user.id)
+        .eq('account_id', accountId)
         .order('updated_at', { ascending: false })
         .limit(1)
         .maybeSingle();
@@ -158,6 +162,7 @@ export const factCheckService = {
     const { data: globalRows, error: globalError } = await supabase
       .from('app_settings')
       .select('key, value')
+      .eq('account_id', accountId)
       .in('key', [
         'perplexity_api_key',
         'fact_check_enabled',

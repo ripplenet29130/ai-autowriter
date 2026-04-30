@@ -1,6 +1,7 @@
 ﻿import { AIConfig, GenerationPrompt } from "../types";
 import { supabase } from "./supabaseClient";
 import { imageGenerationService } from "./imageGenerationService";
+import { useAuthStore } from "../store/useAuthStore";
 import {
   DEFAULT_WORD_COUNT_TOLERANCE,
   getWordCountBounds,
@@ -265,7 +266,9 @@ JSON蠖｢蠑上・驟榊・・域枚蟄怜・縺ｮ驟榊・・峨〒蜃ｺ蜉�
         ? prompt.imagesPerArticle
         : (this.config.imagesPerArticle || 0);
 
-      if (this.config.imageGenerationEnabled && imageCount > 0) {
+      const imageGenerationAllowed = useAuthStore.getState().account?.feature_flags?.image_generation !== false;
+
+      if (imageGenerationAllowed && this.config.imageGenerationEnabled && imageCount > 0) {
         console.log('Starting image generation...', {
           count: imageCount,
           provider: this.config.imageProvider
