@@ -11,6 +11,8 @@ import { SettingsComponent } from './components/Settings';
 import { ArticlesList } from './components/ArticlesList';
 import { KeywordSettings } from './components/KeywordSettings';
 import { TitleSettings } from './components/TitleSettings';
+import { ClientTemplates } from './components/ClientTemplates';
+import { ClientAccount } from './components/ClientAccount';
 import { useAppStore } from './store/useAppStore';
 import { useAuthStore } from './store/useAuthStore';
 import { Login } from './components/Login';
@@ -74,6 +76,13 @@ function App() {
         case 'scheduler':
           if (featureFlags.scheduler === false) return unavailableFeature;
           return <Scheduler />;
+        case 'templates':
+          return <ClientTemplates />;
+        case 'connections':
+          if (featureFlags.wordpress_publish === false) return unavailableFeature;
+          return <SettingsComponent />;
+        case 'account':
+          return <ClientAccount />;
         case 'wordpress':
           if (featureFlags.wordpress_publish === false) return unavailableFeature;
           return <WordPressConfigComponent />;
@@ -84,7 +93,6 @@ function App() {
         case 'titles':
           return <TitleSettings />;
         case 'settings':
-          if (featureFlags.fact_check === false) return unavailableFeature;
           return <SettingsComponent />;
         default:
           return <Dashboard />;

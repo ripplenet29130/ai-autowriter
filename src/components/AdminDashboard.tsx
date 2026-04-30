@@ -14,7 +14,7 @@ type AccountRow = Account & {
 const defaultFeatureFlags = {
   wordpress_publish: true,
   scheduler: true,
-  image_generation: true,
+  image_generation: false,
   fact_check: true,
 };
 

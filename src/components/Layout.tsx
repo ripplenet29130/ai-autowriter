@@ -4,12 +4,10 @@ import {
   Bot,
   FileText,
   Calendar,
-  Globe,
   LogOut,
-  Zap,
-  Settings,
-  Tag,
-  Heading
+  BookOpen,
+  Plug,
+  UserCircle,
 } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
 import { useAuthStore } from '../store/useAuthStore';
@@ -22,62 +20,49 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
   const navigationItems = useMemo(() => [
     {
       id: 'dashboard',
-      label: 'ダッシュボード',
+      label: 'ホーム',
       icon: LayoutDashboard,
-      description: '概要とシステム状態'
+      description: '運用状況と次の操作'
     },
     {
       id: 'generator',
-      label: 'AI記事生成',
+      label: '記事作成',
       icon: Bot,
-      description: 'AIで記事を自動生成'
+      description: '確認しながら作成・おまかせ作成'
     },
     {
       id: 'articles',
-      label: '記事一覧',
+      label: '記事管理',
       icon: FileText,
       description: '生成済み記事の管理'
     },
     {
       id: 'scheduler',
-      label: 'スケジューラー',
+      label: '予約投稿',
       icon: Calendar,
       description: '自動投稿スケジュール',
       enabled: featureFlags.scheduler !== false,
     },
     {
-      id: 'keywords',
-      label: 'キーワード設定',
-      icon: Tag,
-      description: 'プリセットキーワード管理'
+      id: 'templates',
+      label: 'テンプレート',
+      icon: BookOpen,
+      description: 'キーワード・タイトル管理'
     },
     {
-      id: 'titles',
-      label: 'タイトルリスト設定',
-      icon: Heading,
-      description: 'プリセットタイトル管理'
-    },
-    {
-      id: 'wordpress',
-      label: 'WordPress設定',
-      icon: Globe,
-      description: '投稿先WordPress管理',
+      id: 'connections',
+      label: '接続設定',
+      icon: Plug,
+      description: 'WordPress・AI・通知設定',
       enabled: featureFlags.wordpress_publish !== false,
     },
     {
-      id: 'ai-config',
-      label: 'AI設定',
-      icon: Zap,
-      description: 'AI API設定'
-    },
-    {
-      id: 'settings',
-      label: '設定',
-      icon: Settings,
-      description: 'API設定とデータ管理',
-      enabled: featureFlags.fact_check !== false,
+      id: 'account',
+      label: 'アカウント',
+      icon: UserCircle,
+      description: '利用状況とログアウト'
     }
-  ], [featureFlags.fact_check, featureFlags.scheduler, featureFlags.wordpress_publish]);
+  ], [featureFlags.scheduler, featureFlags.wordpress_publish]);
 
   const visibleNavigationItems = navigationItems.filter((item) => item.enabled !== false);
 

@@ -45,7 +45,7 @@ export const TrendAnalysisStep: React.FC<TrendAnalysisStepProps> = ({
     return (
       <div className="flex flex-col items-center justify-center py-16">
         <Loader2 className="w-12 h-12 text-blue-600 animate-spin mb-4" />
-        <p className="text-lg font-medium text-gray-900">トレンド分析中...</p>
+            <p className="text-lg font-medium text-gray-900">キーワード検索中...</p>
         <p className="text-sm text-gray-500 mt-2">競合記事・関連キーワード・トピックを収集中です</p>
       </div>
     );
@@ -56,7 +56,7 @@ export const TrendAnalysisStep: React.FC<TrendAnalysisStepProps> = ({
       <div>
         <h3 className="text-xl font-bold text-gray-900 flex items-center space-x-2">
           <TrendingUp className="w-6 h-6 text-blue-600" />
-          <span>トレンド分析結果</span>
+                    <span>キーワード検索結果</span>
         </h3>
         <p className="text-gray-600 mt-1">キーワード「{trendData.keyword}」の競合分析結果です</p>
       </div>

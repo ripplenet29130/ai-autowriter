@@ -12,7 +12,6 @@ import { MultiStepGenerator } from '../MultiStepGenerator';
 import { useMultiStepGeneration } from '../../hooks/useMultiStepGeneration';
 import { FactCheckResultsDisplay } from '../FactCheckResultsDisplay';
 import { factCheckService } from '../../services/factCheckService';
-import { useAuthStore } from '../../store/useAuthStore';
 import type { FactCheckResult } from '../../types';
 import type { FactCheckItem } from '../../types/factCheck';
 import type { Article, ArticleGoal } from '../../types';
@@ -22,7 +21,6 @@ import toast from 'react-hot-toast';
  * AI記事生成メインコンポーネント
  */
 export const AIGenerator: React.FC = () => {
-    const imageGenerationAllowed = useAuthStore((state) => state.account?.feature_flags?.image_generation !== false);
     const { addArticle, updateArticle, wordPressConfigs, promptSets, titleSets, keywordSets, aiConfigs, aiConfig } = useAppStore();
     const { isGenerating, generatedArticle, generateArticle, clearArticle, setGeneratedArticle } = useArticleGeneration();
     const { executeAutoMode, isGenerating: isAutoGenerating } = useMultiStepGeneration();
@@ -71,32 +69,6 @@ export const AIGenerator: React.FC = () => {
 
     // Target Word Count State
     const [targetWordCount, setTargetWordCount] = useState<number>(2000);
-
-    // Images Per Article State
-    const [imagesPerArticle, setImagesPerArticle] = useState<number>(0);
-    const [imageGenEnabled, setImageGenEnabled] = useState<boolean>(true);
-    const [imageProvider, setImageProvider] = useState<'nanobanana' | 'dalle3'>('nanobanana');
-
-    // AI設定から画像生成の有効/無効を取得
-    React.useEffect(() => {
-        const loadImageConfig = async () => {
-            try {
-                await aiService.loadActiveConfig();
-                const config = aiService.getActiveConfig();
-                if (config) {
-                    const enabled = imageGenerationAllowed && (config.imageGenerationEnabled ?? false);
-                    setImageGenEnabled(enabled);
-                    setImageProvider((config.imageProvider as 'nanobanana' | 'dalle3') || 'nanobanana');
-                    if (!enabled) {
-                        setImagesPerArticle(0);
-                    }
-                }
-            } catch (e) {
-                console.warn('AI設定の読み込みに失敗:', e);
-            }
-        };
-        loadImageConfig();
-    }, [imageGenerationAllowed]);
 
     React.useEffect(() => {
         const loadFactCheckSettings = async () => {
@@ -350,7 +322,7 @@ export const AIGenerator: React.FC = () => {
             articleGoal,
             customInstructions: buildEffectiveCustomInstructions(selectedPromptSet?.customInstructions, articleGoal),
             targetWordCount,
-            imagesPerArticle
+            imagesPerArticle: 0
         });
         if (article) {
             addArticle(article);
@@ -407,7 +379,7 @@ export const AIGenerator: React.FC = () => {
                 selectedTitle: selectedTitle || undefined,
                 targetWordCount,
                 customInstructions: buildEffectiveCustomInstructions(selectedPromptSet?.customInstructions, articleGoal),
-                imagesPerArticle: imageGenEnabled ? imagesPerArticle : 0 // 画像生成設定を追加
+                imagesPerArticle: 0
             });
 
             if (article) {
@@ -419,7 +391,7 @@ export const AIGenerator: React.FC = () => {
         }
 
         // --- これ以降は対話モード (Interactive Mode) ---
-        // 対話モードは必ずキーワード検索（Step1: トレンド分析）から開始する
+        // 対話モードは必ずキーワード検索から開始する
         if (finalKeywords.length === 0 && (contentSourceMode === 'title' || contentSourceMode === 'both') && selectedTitleSetId && selectedTitle) {
             const inferred = titleModeKeyword;
             if (inferred) {
@@ -1086,49 +1058,6 @@ export const AIGenerator: React.FC = () => {
                             プリセットを選択するか、カスタム文字数を入力してください
                         </p>
                     </div>
-
-                    {/* Images Per Article */}
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                            記事あたりの画像枚数 ({imagesPerArticle}枚)
-                        </label>
-                        <input
-                            type="range"
-                            min="0"
-                            max="10"
-                            step="1"
-                            value={imagesPerArticle}
-                            onChange={(e) => setImagesPerArticle(parseInt(e.target.value))}
-                            disabled={isGenerating || isAutoGenerating || !imageGenEnabled}
-                            className="w-full"
-                        />
-                        <div className="flex justify-between text-xs text-gray-500 mt-1">
-                            <span>0 (無効)</span>
-                            <span>5枚</span>
-                            <span>10枚</span>
-                        </div>
-                        {!imageGenerationAllowed && (
-                            <p className="text-xs text-orange-600 mt-2">
-                                管理者設定により画像生成は利用できません
-                            </p>
-                        )}
-                        {imageGenerationAllowed && !imageGenEnabled && (
-                            <p className="text-xs text-orange-600 mt-2">
-                                AI設定で画像生成が無効になっています
-                            </p>
-                        )}
-                        {imageGenEnabled && imagesPerArticle > 0 && (
-                            <p className="text-xs text-purple-600 mt-2">
-                                {imageProvider === 'dalle3'
-                                    ? `💡 DALL-E 3使用時: 約${(imagesPerArticle * 11).toFixed(1)}円/記事`
-                                    : `💡 nanobanana使用時: 約${(imagesPerArticle * 5.5).toFixed(1)}円/記事`}
-                            </p>
-                        )}
-                        <p className="text-xs text-gray-500 mt-1">
-                            ※ 目安単価: nanobanana 約5.5円/枚、DALL-E 3 約11円/枚
-                        </p>
-                    </div>
-
 
                     {/* Generate Button */}
                     <button

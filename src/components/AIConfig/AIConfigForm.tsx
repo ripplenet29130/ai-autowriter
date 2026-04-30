@@ -1,8 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { Zap, Save, TestTube, Image, AlertCircle, CheckCircle, X } from 'lucide-react';
+import { Zap, Save, TestTube, AlertCircle, CheckCircle, X } from 'lucide-react';
 import { AIConfig } from '../../types';
 import toast from 'react-hot-toast';
-import { useAuthStore } from '../../store/useAuthStore';
 
 interface AIConfigFormProps {
   initialConfig?: AIConfig | null;
@@ -17,15 +16,6 @@ export const AIConfigForm: React.FC<AIConfigFormProps> = ({
   onSubmit,
   onCancel,
 }) => {
-  const imageGenerationAllowed = useAuthStore((state) => state.account?.feature_flags?.image_generation !== false);
-  const getDefaultImageProviderByAIProvider = (
-    aiProvider: 'openai' | 'claude' | 'gemini'
-  ): AIConfig['imageProvider'] => {
-    if (aiProvider === 'openai') return 'dalle3';
-    if (aiProvider === 'gemini') return 'nanobanana';
-    return 'nanobanana';
-  };
-
   const [config, setConfig] = useState<AIConfig>({
     provider,
     apiKey: '',
@@ -37,13 +27,12 @@ export const AIConfigForm: React.FC<AIConfigFormProps> = ({
           : 'gemini-2.5-flash',
     temperature: 0.7,
     maxTokens: 4000,
-    imageGenerationEnabled: true,
-    imageProvider: getDefaultImageProviderByAIProvider(provider),
-    imagesPerArticle: 3,
+    imageGenerationEnabled: false,
+    imageProvider: 'nanobanana',
+    imagesPerArticle: 0,
   });
 
   const [testingConnection, setTestingConnection] = useState(false);
-  const [testingImageGeneration, setTestingImageGeneration] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const hasStoredApiKey = Boolean(initialConfig?.apiKey);
 
@@ -53,7 +42,9 @@ export const AIConfigForm: React.FC<AIConfigFormProps> = ({
         ...initialConfig,
         apiKey: '',
         provider,
-        imageProvider: getDefaultImageProviderByAIProvider(provider),
+        imageGenerationEnabled: false,
+        imageProvider: 'nanobanana',
+        imagesPerArticle: 0,
       });
     } else {
       setConfig((prev) => ({
@@ -65,7 +56,9 @@ export const AIConfigForm: React.FC<AIConfigFormProps> = ({
             : provider === 'claude'
               ? 'claude-4-5-sonnet-20250929'
               : 'gemini-2.5-flash',
-        imageProvider: getDefaultImageProviderByAIProvider(provider),
+        imageGenerationEnabled: false,
+        imageProvider: 'nanobanana',
+        imagesPerArticle: 0,
       }));
     }
   }, [initialConfig, provider]);
@@ -79,9 +72,9 @@ export const AIConfigForm: React.FC<AIConfigFormProps> = ({
     onSubmit({
       ...config,
       provider,
-      imageGenerationEnabled: imageGenerationAllowed ? config.imageGenerationEnabled : false,
-      imagesPerArticle: imageGenerationAllowed ? config.imagesPerArticle : 0,
-      imageProvider: getDefaultImageProviderByAIProvider(provider),
+      imageGenerationEnabled: false,
+      imagesPerArticle: 0,
+      imageProvider: 'nanobanana',
     });
   };
 
@@ -170,57 +163,6 @@ export const AIConfigForm: React.FC<AIConfigFormProps> = ({
       toast.error(`接続テストでエラーが発生しました: ${error.message}`);
     } finally {
       setTestingConnection(false);
-    }
-  };
-
-  const handleTestImageGeneration = async () => {
-    if (provider !== 'gemini') {
-      toast.error('画像テストはGemini設定でのみ利用できます');
-      return;
-    }
-
-    if (!config.apiKey.trim()) {
-      toast.error('APIキーを入力してください');
-      return;
-    }
-
-    setTestingImageGeneration(true);
-
-    try {
-      const modelName = 'gemini-2.0-flash-preview-image-generation';
-      const testPrompt = 'テスト用のシンプルな図を1枚生成してください。';
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${config.apiKey}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: testPrompt }] }],
-            generationConfig: { temperature: 0.2, maxOutputTokens: 256 },
-            responseModalities: ['TEXT', 'IMAGE'],
-          }),
-        }
-      );
-
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        const errorMessage = data?.error?.message || response.statusText || 'Unknown error';
-        toast.error(`画像生成テストエラー: ${errorMessage}`);
-        return;
-      }
-
-      const imagePart = data?.candidates?.[0]?.content?.parts?.find((part: any) => part.inlineData || part.inline_data);
-      const inlineData = imagePart?.inlineData || imagePart?.inline_data;
-      if (!inlineData?.data) {
-        toast.error('画像データを取得できませんでした');
-        return;
-      }
-
-      toast.success('画像生成テスト成功');
-    } catch (error: any) {
-      toast.error(`画像生成テストでエラーが発生しました: ${error.message}`);
-    } finally {
-      setTestingImageGeneration(false);
     }
   };
 
@@ -391,84 +333,7 @@ export const AIConfigForm: React.FC<AIConfigFormProps> = ({
         </div>
       </div>
 
-      <div className="bg-gray-50 rounded-xl p-4 mt-6 border border-gray-200">
-        <h3 className="text-sm font-semibold text-gray-900 mb-4 flex items-center space-x-2">
-          <Image className="w-4 h-4" />
-          <span>画像生成設定</span>
-        </h3>
-
-        <div className="space-y-4">
-          <div>
-            <label className="flex items-center">
-              <input
-                type="checkbox"
-                checked={imageGenerationAllowed && (config.imageGenerationEnabled || false)}
-                disabled={!imageGenerationAllowed}
-                onChange={(e) =>
-                  setConfig((prev) => ({
-                    ...prev,
-                    imageGenerationEnabled: e.target.checked,
-                    imageProvider: e.target.checked ? getDefaultImageProviderByAIProvider(provider) : prev.imageProvider,
-                  }))
-                }
-                className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-              />
-              <span className="ml-2 text-sm font-medium text-gray-700">画像自動生成を有効にする</span>
-            </label>
-            <p className="text-xs text-gray-500 mt-2">
-              {!imageGenerationAllowed
-                ? '管理者設定により画像生成は利用できません'
-                : provider === 'openai'
-                ? 'OpenAI選択時は DALL-E 3 を使用します'
-                : provider === 'gemini'
-                  ? 'Gemini選択時は nanobanana を使用します'
-                  : '現在のAI設定に応じて画像プロバイダーを選択します'}
-            </p>
-          </div>
-
-          {imageGenerationAllowed && config.imageGenerationEnabled && (
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">記事あたりの画像枚数 ({config.imagesPerArticle || 0}枚)</label>
-              <input
-                type="range"
-                min="0"
-                max="10"
-                step="1"
-                value={config.imagesPerArticle || 0}
-                onChange={(e) => setConfig((prev) => ({ ...prev, imagesPerArticle: parseInt(e.target.value || '0', 10) }))}
-                className="w-full"
-              />
-              <div className="flex justify-between text-xs text-gray-500 mt-1">
-                <span>0 (無効)</span>
-                <span>5枚</span>
-                <span>10枚</span>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-
       <div className="flex justify-end space-x-3 mt-6 pt-4 border-t border-gray-200">
-        {imageGenerationAllowed && provider === 'gemini' && config.imageGenerationEnabled && (
-          <button
-            onClick={handleTestImageGeneration}
-            disabled={testingImageGeneration || !config.apiKey.trim()}
-            className="btn-secondary flex items-center space-x-2 disabled:opacity-50"
-          >
-            {testingImageGeneration ? (
-              <>
-                <div className="w-4 h-4 border-2 border-gray-600 border-t-transparent rounded-full animate-spin"></div>
-                <span>画像テスト中...</span>
-              </>
-            ) : (
-              <>
-                <Image className="w-4 h-4" />
-                <span>画像テスト（1枚）</span>
-              </>
-            )}
-          </button>
-        )}
-
         <button
           onClick={handleTestConnection}
           disabled={testingConnection || !config.apiKey.trim()}

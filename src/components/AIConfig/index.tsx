@@ -110,9 +110,6 @@ export const AIConfigComponent: React.FC = () => {
                                     <div className="border-t border-gray-100 pt-3 flex flex-col gap-3">
                                         <div className="text-xs text-gray-500">
                                             <p>Model: <span className="font-medium">{config.model}</span></p>
-                                            {config.imageGenerationEnabled && (
-                                                <p className="text-blue-600 mt-1">画像生成: ON</p>
-                                            )}
                                         </div>
 
                                         {!isActive && (

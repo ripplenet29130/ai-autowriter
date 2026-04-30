@@ -144,7 +144,7 @@ export const MultiStepGenerator: React.FC<MultiStepGeneratorProps> = ({
           return (
             <div className="flex flex-col items-center justify-center py-16">
               <div className="w-12 h-12 border-4 border-purple-200 border-t-purple-600 rounded-full animate-spin mb-4" />
-              <p className="text-lg font-medium text-gray-900">トレンド分析を実行中...</p>
+            <p className="text-lg font-medium text-gray-900">キーワード検索を実行中...</p>
               <p className="text-sm text-gray-500 mt-2">キーワードから検索需要と競合情報を取得しています</p>
             </div>
           );
@@ -153,7 +153,7 @@ export const MultiStepGenerator: React.FC<MultiStepGeneratorProps> = ({
         if (!trendData) {
           return (
             <div className="flex flex-col items-center justify-center py-16 text-center">
-              <p className="text-lg font-medium text-gray-900">トレンド分析が未実行です</p>
+            <p className="text-lg font-medium text-gray-900">キーワード検索が未実行です</p>
               <p className="text-sm text-gray-500 mt-2">キーワードを分析してから次のステップへ進みます</p>
               <div className="mt-6 flex items-center gap-3">
                 <button
@@ -161,7 +161,7 @@ export const MultiStepGenerator: React.FC<MultiStepGeneratorProps> = ({
                   disabled={keywords.length === 0}
                   className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  トレンド分析を実行
+            キーワード検索を実行
                 </button>
                 <button onClick={onBack} className="btn-secondary">
                   戻る

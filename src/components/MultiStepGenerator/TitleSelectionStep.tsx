@@ -60,7 +60,7 @@ export const TitleSelectionStep: React.FC<TitleSelectionStepProps> = ({
           <Type className="w-8 h-8 text-blue-600" />
         </div>
         <h3 className="text-lg font-semibold text-gray-900 mb-2">タイトル候補を作成しましょう</h3>
-        <p className="text-gray-600 mb-6">トレンド分析結果をもとに、候補タイトルを生成できます。</p>
+            <p className="text-gray-600 mb-6">キーワード検索結果をもとに、候補タイトルを生成できます。</p>
         <button onClick={onGenerate} disabled={isLoading} className="btn-primary flex items-center space-x-2 mx-auto">
           <Sparkles className="w-4 h-4" />
           <span>タイトル候補を生成</span>

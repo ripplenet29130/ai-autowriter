@@ -7,7 +7,6 @@ import { ScheduleSetting } from '../types';
 import { useAppStore } from '../store/useAppStore';
 import { PromptSetManager } from './AIGenerator/PromptSetManager';
 import { getCurrentAccountId } from '../services/accountScope';
-import { useAuthStore } from '../store/useAuthStore';
 import toast from 'react-hot-toast';
 import { Play } from 'lucide-react';
 
@@ -46,7 +45,6 @@ const getProviderModelOptions = (provider: string): string[] => {
 };
 
 export const Scheduler: React.FC = () => {
-  const imageGenerationAllowed = useAuthStore((state) => state.account?.feature_flags?.image_generation !== false);
   const { aiConfigs, wordPressConfigs, keywordSets, titleSets, promptSets, loadKeywordSets, loadTitleSets, loadPromptSets } = useAppStore();
   const [schedules, setSchedules] = useState<ScheduleSetting[]>([]);
   const [usedKeywordsMap, setUsedKeywordsMap] = useState<Record<string, string[]>>({});
@@ -1151,7 +1149,7 @@ export const Scheduler: React.FC = () => {
             </p>
           </div>
 
-          {/* ファクトチェック設定 */}
+          {/* 事実確認（ベータ）設定 */}
           <div className="border-t border-gray-200 pt-4">
             <div className="flex items-center space-x-2 mb-3">
               <input
@@ -1162,9 +1160,12 @@ export const Scheduler: React.FC = () => {
                 className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
               />
               <label htmlFor="enable_fact_check" className="text-sm font-medium text-gray-700">
-                Perplexityによるファクトチェックを有効化
+                事実確認（ベータ）を有効化
               </label>
             </div>
+            <p className="text-xs text-gray-500 mb-3">
+              AIによる補助確認です。公開前に必ず内容をご確認ください。
+            </p>
 
             {formData.enable_fact_check && (
               <div>
@@ -1229,51 +1230,6 @@ export const Scheduler: React.FC = () => {
               </div>
             )}
           </div>
-
-          {/* 画像生成設定 */}
-          <div className="flex items-center space-x-2">
-            <input
-              type="checkbox"
-              id="image_generation_enabled"
-              checked={imageGenerationAllowed && (formData.image_generation_enabled ?? false)}
-              disabled={!imageGenerationAllowed}
-              onChange={(e) => setFormData({
-                ...formData,
-                image_generation_enabled: e.target.checked,
-                images_per_article: e.target.checked ? formData.images_per_article : 0,
-              })}
-              className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-            />
-            <label htmlFor="image_generation_enabled" className="text-sm font-medium text-gray-700">
-              画像生成を有効化（スケジュール単位）
-            </label>
-          </div>
-          {!imageGenerationAllowed && (
-            <p className="text-xs text-orange-600">
-              管理者設定により画像生成は利用できません。
-            </p>
-          )}
-          {imageGenerationAllowed && (formData.image_generation_enabled ?? false) && (
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                記事あたりの画像枚数 ({formData.images_per_article ?? 0}枚)
-              </label>
-              <input
-                type="range"
-                min="0"
-                max="10"
-                step="1"
-                value={formData.images_per_article ?? 0}
-                onChange={(e) => setFormData({ ...formData, images_per_article: parseInt(e.target.value, 10) || 0 })}
-                className="w-full"
-              />
-              <div className="flex justify-between text-xs text-gray-500 mt-1">
-                <span>0 (無効)</span>
-                <span>5枚</span>
-                <span>10枚</span>
-              </div>
-            </div>
-          )}
 
           {/* スケジュール有効化 */}
           <div className="flex items-center space-x-2">
@@ -1468,7 +1424,7 @@ export const Scheduler: React.FC = () => {
                     </div>
 
                     {/* Additional Info Block (Moved to bottom) */}
-                    {(schedule.start_date || schedule.chatwork_room_id || promptSetName || schedule.enable_fact_check || schedule.image_generation_enabled !== undefined) && (
+                    {(schedule.start_date || schedule.chatwork_room_id || promptSetName || schedule.enable_fact_check) && (
                       <div className="mb-4 pt-4 border-t border-gray-100 flex flex-wrap gap-6">
                         {schedule.start_date && (
                           <div className="flex items-center space-x-2 text-sm">
@@ -1511,18 +1467,6 @@ export const Scheduler: React.FC = () => {
                                   schedule.article_goal === 'authority' ? '専門性重視' :
                                     schedule.article_goal === 'comparison' ? '比較向け' :
                                       schedule.article_goal === 'conversion' ? '導線重視' : '標準'}
-                          </span>
-                        </div>
-
-                        <div className="flex items-center space-x-2 text-sm">
-                          <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Image:</span>
-                          <span className={`text-xs px-2 py-0.5 rounded border ${(schedule.image_generation_enabled ?? false)
-                            ? 'text-blue-700 bg-blue-50 border-blue-100'
-                            : 'text-gray-600 bg-gray-50 border-gray-200'
-                            }`}>
-                            {(schedule.image_generation_enabled ?? false)
-                              ? `Enabled (${schedule.images_per_article ?? 0}枚)`
-                              : 'Disabled'}
                           </span>
                         </div>
 
