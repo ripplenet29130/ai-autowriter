@@ -38,40 +38,50 @@ export const PromptSetManager: React.FC<PromptSetManagerProps> = ({
         setEditInstructions(ps.customInstructions);
     };
 
-    const handleSave = () => {
+    const handleSave = async () => {
         if (!editName.trim() || !editInstructions.trim()) {
             toast.error('名前と指示内容は必須です');
             return;
         }
 
-        if (isCreating) {
-            const newPromptSet: PromptSet = {
-                id: uuidv4(),
-                name: editName,
-                customInstructions: editInstructions,
-                createdAt: new Date(),
-                isDefault: false
-            };
-            addPromptSet(newPromptSet);
-            toast.success('プロンプトセットを作成しました');
-            setIsCreating(false);
-        } else if (editingId) {
-            updatePromptSet(editingId, {
-                name: editName,
-                customInstructions: editInstructions
-            });
-            toast.success('プロンプトセットを更新しました');
-            setEditingId(null);
+        try {
+            if (isCreating) {
+                const newPromptSet: PromptSet = {
+                    id: uuidv4(),
+                    name: editName,
+                    customInstructions: editInstructions,
+                    createdAt: new Date(),
+                    isDefault: false
+                };
+                await addPromptSet(newPromptSet);
+                toast.success('プロンプトセットを作成しました');
+                setIsCreating(false);
+            } else if (editingId) {
+                await updatePromptSet(editingId, {
+                    name: editName,
+                    customInstructions: editInstructions
+                });
+                toast.success('プロンプトセットを更新しました');
+                setEditingId(null);
+            }
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'プロンプトセットの保存に失敗しました';
+            toast.error(message);
         }
     };
 
-    const handleDelete = (id: string) => {
+    const handleDelete = async (id: string) => {
         if (confirm('本当に削除しますか？')) {
-            deletePromptSet(id);
-            toast.success('プロンプトセットを削除しました');
-            if (editingId === id) {
-                setEditingId(null);
-                setIsCreating(false);
+            try {
+                await deletePromptSet(id);
+                toast.success('プロンプトセットを削除しました');
+                if (editingId === id) {
+                    setEditingId(null);
+                    setIsCreating(false);
+                }
+            } catch (error) {
+                const message = error instanceof Error ? error.message : 'プロンプトセットの削除に失敗しました';
+                toast.error(message);
             }
         }
     };

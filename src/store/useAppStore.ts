@@ -196,6 +196,7 @@ export const useAppStore = create<AppState>()(
           }
         } catch (error) {
           console.error('Error adding prompt set:', error);
+          throw error;
         }
       },
 
@@ -213,6 +214,7 @@ export const useAppStore = create<AppState>()(
           }
         } catch (error) {
           console.error('Error updating prompt set:', error);
+          throw error;
         }
       },
 
@@ -224,6 +226,7 @@ export const useAppStore = create<AppState>()(
           }));
         } catch (error) {
           console.error('Error deleting prompt set:', error);
+          throw error;
         }
       },
 
