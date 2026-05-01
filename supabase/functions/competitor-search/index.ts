@@ -125,11 +125,30 @@ serve(async (req) => {
       ? Math.floor(validArticles.reduce((s, a) => s + a.wordCount, 0) / validArticles.length)
       : 0;
 
+    // 複数記事に共通するトピックを抽出（2記事以上に登場した見出しを優先）
+    const headingCount = new Map<string, number>();
+    const headingOriginal = new Map<string, string>();
+    for (const article of validArticles) {
+      const seen = new Set<string>();
+      for (const h of article.headings) {
+        const normalized = h.replace(/[　\s]+/g, '').replace(/[!！?？。、]/g, '').toLowerCase();
+        if (!normalized || normalized.length < 4 || seen.has(normalized)) continue;
+        seen.add(normalized);
+        headingCount.set(normalized, (headingCount.get(normalized) || 0) + 1);
+        if (!headingOriginal.has(normalized)) headingOriginal.set(normalized, h);
+      }
+    }
+    // 2記事以上に登場したものを優先、残りは出現数順で補完
+    const sorted = [...headingCount.entries()].sort((a, b) => b[1] - a[1]);
+    const commonTopics = sorted
+      .map(([key]) => headingOriginal.get(key) ?? key)
+      .slice(0, 12);
+
     return new Response(
       JSON.stringify({
         topArticles: validArticles,
         averageLength,
-        commonTopics: [] // 必要に応じて抽出
+        commonTopics
       }),
       {
         headers: { ...corsHeaders, "Content-Type": "application/json" },

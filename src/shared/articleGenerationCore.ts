@@ -6,6 +6,7 @@ import { buildSummaryPrompt, buildSupplementPrompt } from './generationPrompts.t
 import { buildSchedulerOutlinePrompt } from './multiStepPromptTemplates.ts';
 import { parseOutlineSections, parseOutlineTitle } from './outlineParser.ts';
 import { buildHighQualitySectionPrompt } from './sectionGenerationPrompt.ts';
+import type { ArticleStructureType } from '../types';
 
 type Tone = 'professional' | 'casual' | 'technical' | 'friendly';
 
@@ -45,6 +46,7 @@ export interface GenerateOutlineWithSharedCoreParams {
   competitorHeadings?: string[];
   relatedKeywords?: string[];
   tone?: string;
+  articleStructureType?: ArticleStructureType;
 }
 
 export interface GenerateArticleWithSharedCoreParams {
@@ -1140,7 +1142,7 @@ function flattenHeadingLevelsForMediumLength(
 ): SharedOutlineSection[] {
   if (!Array.isArray(sections) || sections.length === 0) return sections;
   if (!Number.isFinite(targetWordCount) || targetWordCount <= 0) return sections;
-  if (targetWordCount > 2200) return sections;
+  if (targetWordCount > 1200) return sections;
   return sections.map((section) => ({ ...section, level: 2 }));
 }
 
@@ -1153,6 +1155,78 @@ function canonicalizeHeading(title: string): string {
 
 function isSummaryLikeTitle(title: string): boolean {
   return SUMMARY_TITLE_PATTERN.test(String(title || '').trim());
+}
+
+function isCountermeasureTopic(keyword: string, fixedTitle?: string | null): boolean {
+  const text = `${keyword || ''} ${fixedTitle || ''}`;
+  return /(対策|改善|解決|防ぐ|抑制|備える|換気|遮熱|断熱|冷却|暑さ|温度|リスク|方法)/i.test(text);
+}
+
+function inferSubjectTerm(keyword: string, fixedTitle?: string | null): string {
+  const text = `${fixedTitle || ''} ${keyword || ''}`;
+  const subjectMatch = text.match(/[A-Za-z0-9ぁ-んァ-ン一-龠]{2,12}(?:倉庫|工場|店舗|施設|設備|機械|システム|サービス|ツール|会社|業者)/);
+  if (subjectMatch) return subjectMatch[0].trim();
+
+  return String(keyword || '')
+    .split(/[、,｜|/／\s]+/)
+    .map((item) => item.trim())
+    .find((item) => item.length >= 2 && item.length <= 12) || '';
+}
+
+function isWeakOutlineTitle(title: string): boolean {
+  const t = String(title || '').trim();
+  if (!t) return true;
+  if (isSummaryLikeTitle(t)) return false;
+  if (t.length <= 7) return true;
+  return /(?:とは[？?]?|活用方法|種類と特徴|選び方と注意点|よくある疑問|重要ポイント|基礎知識|基礎)$/i.test(t);
+}
+
+function scoreOutlineSections(
+  sections: SharedOutlineSection[],
+  keyword: string,
+  fixedTitle?: string | null
+): number {
+  if (!Array.isArray(sections) || sections.length === 0) return Number.NEGATIVE_INFINITY;
+
+  const nonLead = sections.filter((section) => !section.isLead && !isSummaryLikeTitle(section.title));
+  let score = sections.length * 10;
+
+  for (const section of nonLead) {
+    const title = String(section.title || '').trim();
+    const description = String(section.description || '').trim();
+    if (title.length >= 12) score += 3;
+    if (description.length >= 18) score += 2;
+    if (/(理由|原因|メカニズム|確認|優先|組み合わせ|併用|費用|施工|安全|注意|判断|比較|選び方|手順|失敗|リスク|導入前)/.test(title)) {
+      score += 5;
+    }
+    if (/(換気|遮熱|断熱|冷却|排出|抑える|防ぐ|守る|改善|導入|施工)/.test(title)) {
+      score += 3;
+    }
+    if (isWeakOutlineTitle(title)) score -= 18;
+  }
+
+  const allTitles = nonLead.map((section) => section.title).join(' / ');
+  const subjectTerm = inferSubjectTerm(keyword, fixedTitle);
+  if (subjectTerm) {
+    const repeatedSubjectCount = nonLead.filter((section) => String(section.title || '').includes(subjectTerm)).length;
+    if (repeatedSubjectCount > 2) {
+      score -= (repeatedSubjectCount - 2) * 12;
+    }
+  }
+
+  if (isCountermeasureTopic(keyword, fixedTitle)) {
+    const checks = [
+      /(理由|原因|メカニズム)/,
+      /(まず|確認|優先|判断)/,
+      /(組み合わせ|併用|使い分け)/,
+      /(費用|施工|安全|導入前|注意)/,
+    ];
+    for (const pattern of checks) {
+      score += pattern.test(allTitles) ? 10 : -10;
+    }
+  }
+
+  return score;
 }
 
 function hasSummaryHeading(content: string): boolean {
@@ -1560,20 +1634,23 @@ export async function generateOutlineWithSharedCore(
     targetWordCount: params.targetWordCount,
     fixedTitle: params.fixedTitle,
     customInstructions: params.customInstructions,
-    competitorHeadings: params.competitorHeadings || []
+    competitorHeadings: params.competitorHeadings || [],
+    relatedKeywords: params.relatedKeywords || [],
+    articleStructureType: params.articleStructureType
   });
 
   const maxAttempts = 4;
   const minimumSectionCount = params.targetWordCount <= 1200
-    ? 4
+    ? 5
     : params.targetWordCount <= 2200
-      ? 5
+      ? 7
       : params.targetWordCount <= 3200
-        ? 6
-        : 7;
+        ? 8
+        : 9;
   const minimumNonLeadCount = Math.max(3, minimumSectionCount - 1);
   let resolvedTitle = params.fixedTitle || `${params.keyword} について`;
   let bestSections: SharedOutlineSection[] = [];
+  let bestScore = Number.NEGATIVE_INFINITY;
   const attemptDiagnostics: string[] = [];
 
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
@@ -1584,8 +1661,10 @@ export async function generateOutlineWithSharedCore(
         '- 出力形式を厳守し、Section(Lead/H2/H3) の形で返してください。',
         '- 導入とまとめ以外の見出しを最低3つ作成してください。',
         '- 見出しはキーワード連呼を避け、自然な日本語で具体化してください。',
+        '- 「夏の活用方法」「種類と特徴」「選び方と注意点」「よくある疑問」のような浅い見出しを避けてください。',
+        '- 対策記事では、原因、優先順位、組み合わせ方、費用・施工・安全面の注意点を入れてください。',
         params.relatedKeywords && params.relatedKeywords.length > 0
-          ? `- 関連語を反映: ${params.relatedKeywords.slice(0, 6).join('、')}`
+          ? `- 関連語はそのまま見出しにせず、主題に沿って整理: ${params.relatedKeywords.slice(0, 6).join('、')}`
           : '',
         attempt >= 2
           ? '- 形式を守れない場合はJSONのみで返してください: {"title":"...","sections":[{"level":"lead|h2|h3","title":"...","description":"...","estimatedWordCount":300}]}'
@@ -1593,7 +1672,7 @@ export async function generateOutlineWithSharedCore(
       ].filter(Boolean).join('\n');
 
     const prompt = retryInstruction ? `${basePrompt}\n\n${retryInstruction}` : basePrompt;
-    const text = await params.callAI(prompt, 1500);
+    const text = await params.callAI(prompt, 1800);
     let parsedSections = parseOutlineSections(text, 400, false);
     const parsedFromJson = parsedSections.length <= 1 ? parseOutlineSectionsFromJson(text, 400) : { sections: [] as ParsedOutlineLikeSection[] };
     if (parsedFromJson.sections.length > parsedSections.length) {
@@ -1613,14 +1692,21 @@ export async function generateOutlineWithSharedCore(
       estimatedWordCount: section.estimatedWordCount
     }));
     const normalized = normalizeOutlineSections(mapped, params.targetWordCount);
-    attemptDiagnostics.push(`attempt${attempt + 1}: parsed=${parsedSections.length}, normalized=${normalized.length}`);
+    const qualityScore = scoreOutlineSections(normalized, params.keyword, params.fixedTitle);
+    attemptDiagnostics.push(`attempt${attempt + 1}: parsed=${parsedSections.length}, normalized=${normalized.length}, score=${qualityScore}`);
 
-    if (normalized.length > bestSections.length) {
+    if (
+      qualityScore > bestScore ||
+      (qualityScore === bestScore && normalized.length > bestSections.length)
+    ) {
       bestSections = normalized;
+      bestScore = qualityScore;
     }
     const nonLeadCount = normalized.filter((section) => !section.isLead).length;
-    if (normalized.length >= minimumSectionCount && nonLeadCount >= minimumNonLeadCount) {
+    const minimumQualityScore = isCountermeasureTopic(params.keyword, params.fixedTitle) ? 70 : 45;
+    if (normalized.length >= minimumSectionCount && nonLeadCount >= minimumNonLeadCount && qualityScore >= minimumQualityScore) {
       bestSections = normalized;
+      bestScore = qualityScore;
       break;
     }
   }
