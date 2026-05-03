@@ -92,7 +92,7 @@ export const Login: React.FC<LoginProps> = ({ initialMode = 'login', onPasswordU
             <Lock className="w-5 h-5" />
           </div>
           <div>
-            <h1 className="text-xl font-bold text-gray-900">AI Auto Writer</h1>
+            <h1 className="text-xl font-bold text-gray-900">AI Auto Writer ver.3.0</h1>
             <p className="text-sm text-gray-500">
               {mode === 'login' && 'ログインしてください'}
               {mode === 'forgot' && 'パスワード再設定メールを送信します'}

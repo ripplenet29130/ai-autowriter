@@ -439,7 +439,7 @@ export const ContentGenerationStep: React.FC<ContentGenerationStepProps> = ({
                             <span className="text-xl font-black text-gray-900">{progressPercent}%</span>
                         </div>
                     </div>
-                    <h3 className="text-2xl font-black text-gray-900 mb-2">最高品質の文章を紡いでいます</h3>
+                    <h3 className="text-2xl font-black text-gray-900 mb-2">本文を生成しています</h3>
                     <p className="text-gray-500">
                         {completedCount} / {totalCount} セクションが完了しました
                     </p>

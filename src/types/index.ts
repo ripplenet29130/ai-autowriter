@@ -27,6 +27,7 @@ export interface Article {
   wordCount?: number;
   targetWordCount?: number;
   articleGoal?: ArticleGoal;
+  articleStructureType?: ArticleStructureType;
   trendData?: TrendAnalysisResult;
   factCheckResults?: FactCheckResult[];
 }
@@ -96,6 +97,7 @@ export interface GenerationPrompt {
   isLead?: boolean;
   customInstructions?: string;
   articleGoal?: ArticleGoal;
+  articleStructureType?: ArticleStructureType;
   imagesPerArticle?: number; // 險倅ｺ九≠縺溘ｊ縺ｮ逕ｻ蜒冗函謌先椢謨ｰ
 }
 
@@ -180,6 +182,14 @@ export type ArticleGoal =
   | 'comparison'
   | 'conversion';
 
+export type ArticleStructureType =
+  | 'standard'
+  | 'problem_solution'
+  | 'comparison'
+  | 'practical'
+  | 'seo_comprehensive'
+  | 'conversion';
+
 export interface TitleSuggestion {
   id: string;
   title: string;
@@ -235,6 +245,7 @@ export interface CompetitorArticle {
   headings: string[];
   metaDescription: string;
   publishDate?: Date;
+  excerpt?: string;
 }
 
 export interface GeographicTrend {
@@ -333,6 +344,7 @@ export interface OutlineGenerationRequest {
   selectedTitle?: string; // 縺薙％縺ｫ霑ｽ蜉
   customInstructions?: string;
   targetWordCount?: number; // 逶ｮ讓呎枚蟄玲焚・域焚蛟､・・
+  articleStructureType?: ArticleStructureType;
 }
 
 /**

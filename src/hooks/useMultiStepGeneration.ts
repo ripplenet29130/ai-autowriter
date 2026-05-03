@@ -7,7 +7,8 @@ import {
     StepResult,
     MultiStepGenerationState,
     OutlineSection,
-    KeywordPreference
+    KeywordPreference,
+    ArticleStructureType
 } from '../types';
 import { multiStepGenerationService } from '../services/multiStepGenerationService';
 import toast from 'react-hot-toast';
@@ -162,6 +163,7 @@ export function useMultiStepGeneration() {
             keywordPreferences?: Record<string, KeywordPreference>;
             customInstructions?: string;
             targetWordCount?: number; // 追加
+            articleStructureType?: ArticleStructureType;
         }
     ): Promise<ArticleOutline | null> => {
         try {
@@ -176,7 +178,8 @@ export function useMultiStepGeneration() {
                     ...options,
                     keywordPreferences: options?.keywordPreferences || state.keywordPreferences,
                     customInstructions: options?.customInstructions,
-                    targetWordCount: options?.targetWordCount // 追加
+                    targetWordCount: options?.targetWordCount, // 追加
+                    articleStructureType: options?.articleStructureType
                 }
             );
 
@@ -305,6 +308,7 @@ export function useMultiStepGeneration() {
             selectedTitle?: string;
             targetWordCount?: number;
             customInstructions?: string;
+            articleStructureType?: ArticleStructureType;
             imagesPerArticle?: number; // 追加
         }
     ): Promise<Article | null> => {

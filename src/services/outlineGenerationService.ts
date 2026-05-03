@@ -14,8 +14,8 @@ function safeWordCountTarget(total?: number, fallback = 300): number {
 
 function resolveMinimumSectionCount(targetWordCount: number): number {
   if (targetWordCount <= 1200) return 4;
-  if (targetWordCount <= 2200) return 5;
-  if (targetWordCount <= 3200) return 6;
+  if (targetWordCount <= 2500) return 5;
+  if (targetWordCount <= 3500) return 6;
   return 7;
 }
 
@@ -37,6 +37,35 @@ function normalizeTitleKey(title: string): string {
     .replace(/[ 　\t]/g, '')
     .replace(/[!！?？:：・]/g, '')
     .toLowerCase();
+}
+
+function inferSubjectTerm(mainKeyword: string, selectedTitle?: string): string {
+  const text = `${selectedTitle || ''} ${mainKeyword || ''}`;
+  const subjectMatch = text.match(/[A-Za-z0-9ぁ-んァ-ン一-龠]{2,12}(?:倉庫|工場|店舗|施設|設備|機械|システム|サービス|ツール|会社|業者)/);
+  if (subjectMatch) return subjectMatch[0].trim();
+
+  const firstToken = String(mainKeyword || '')
+    .split(/[、,｜|/／\s]+/)
+    .map((item) => item.trim())
+    .find((item) => item.length >= 2 && item.length <= 12);
+
+  return firstToken || '';
+}
+
+function normalizeRelatedKeywordForOutline(keyword: string, subjectTerm: string): string {
+  let normalized = String(keyword || '').trim();
+  if (!normalized) return '';
+
+  if (subjectTerm) {
+    normalized = normalized
+      .replace(new RegExp(subjectTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  return normalized
+    .replace(/^[\s・、,／/｜|]+|[\s・、,／/｜|]+$/g, '')
+    .trim();
 }
 
 function rebalanceSectionWordCounts(
@@ -91,7 +120,7 @@ function flattenHeadingLevelsForMediumLength(
 ): OutlineSection[] {
   if (!Array.isArray(sections) || sections.length === 0) return sections;
   if (!Number.isFinite(targetWordCount) || targetWordCount <= 0) return sections;
-  if (targetWordCount > 2200) return sections;
+  if (targetWordCount > 1200) return sections;
   return sections.map((section) => ({ ...section, level: 2 }));
 }
 
@@ -152,36 +181,6 @@ function enforceMinimumSections(
     };
   }
 
-  if (normalized.length < minimum) {
-    const existing = new Set(normalized.map((section) => normalizeTitleKey(section.title)));
-    const candidates = [
-      `${keyword}の比較ポイント`,
-      `${keyword}の判断基準`,
-      `${keyword}の実践手順`,
-      `${keyword}で失敗しない注意点`,
-      `${keyword}の費用と継続の考え方`,
-    ];
-    const insertAt = Math.max(1, normalized.length - 1);
-    let cursor = 0;
-    while (normalized.length < minimum) {
-      const candidate = candidates[cursor] || `${keyword}の実践ポイント${cursor + 1}`;
-      cursor += 1;
-      const key = normalizeTitleKey(candidate);
-      if (existing.has(key)) continue;
-      existing.add(key);
-      normalized.splice(normalized.length - 1, 0, {
-        id: uuidv4(),
-        title: candidate,
-        level: 2,
-        description: `${candidate}を解説します。`,
-        estimatedWordCount: Math.max(180, Math.floor(targetWordCount / minimum)),
-        order: insertAt,
-        isGenerated: false,
-        isLead: false,
-      });
-    }
-  }
-
   normalized = rebalanceSectionWordCounts(normalized, targetWordCount)
     .map((section, index) => ({ ...section, order: index }));
 
@@ -191,30 +190,6 @@ function enforceMinimumSections(
   return normalized;
 }
 
-function buildFallbackSections(keyword: string, targetWordCount: number): OutlineSection[] {
-  const sectionCount = targetWordCount >= 2500 ? 6 : targetWordCount >= 1500 ? 5 : 4;
-  const perSection = Math.max(180, Math.floor(targetWordCount / sectionCount));
-
-  const titles = [
-    'リード',
-    `${keyword}の基礎`,
-    `${keyword}の重要ポイント`,
-    `${keyword}の実践方法`,
-    `${keyword}の注意点`,
-    'まとめ',
-  ].slice(0, sectionCount);
-
-  return titles.map((title, index) => ({
-    id: uuidv4(),
-    title,
-    level: 2,
-    description: `${title}について解説します。`,
-    estimatedWordCount: perSection,
-    order: index,
-    isGenerated: false,
-    isLead: index === 0,
-  }));
-}
 
 export class OutlineGenerationService {
   async generateOutline(request: OutlineGenerationRequest): Promise<ArticleOutline> {
@@ -230,27 +205,59 @@ export class OutlineGenerationService {
     try {
       await aiService.loadActiveConfig();
 
-      const competitorHeadings = request.trendData?.competitorAnalysis?.topArticles
-        ?.flatMap((article) => article?.headings || [])
-        ?.filter((heading) => String(heading || '').trim().length > 0)
-        ?.slice(0, 15) || [];
+      const competitorArticles = (request.trendData?.competitorAnalysis?.topArticles || [])
+        .filter((a) => a?.title)
+        .slice(0, 3)
+        .map((a) => {
+          const headings = (a.headings || [])
+            .map((h) => String(h || '').trim())
+            .filter((h) => h.length > 0)
+            .slice(0, 6);
+          const excerpt = String(
+            (a as any).excerpt ||
+            (a as any).metaDescription ||
+            ''
+          ).trim();
 
+          return {
+            title: String(a.title || '').trim(),
+            headings,
+            excerpt: excerpt.slice(0, 400),
+          };
+        })
+        .filter((a) => a.title && (a.excerpt.length > 0 || a.headings.length > 0));
+
+      if (competitorArticles.length === 0) {
+        throw new Error('競合記事の見出しまたは本文抜粋が取得できていません。キーワード検索を再実行してください。');
+      }
+
+      const competitorHeadings = competitorArticles
+        .flatMap((article) => article.headings)
+        .filter((heading) => heading.length > 0)
+        .slice(0, 15);
+
+      const subjectTerm = inferSubjectTerm(mainKeyword, request.selectedTitle);
       const relatedKeywords = Array.from(new Set([
         ...(request.keywords || []).slice(1),
         ...((request.trendData?.relatedKeywords || [])
           .map((k) => String(k || '').trim())
           .filter((k) => k.length > 0)
           .slice(0, 12))
-      ]));
+      ]
+        .map((keyword) => normalizeRelatedKeywordForOutline(keyword, subjectTerm))
+        .filter((keyword) => keyword.length > 0 && normalizeTitleKey(keyword) !== normalizeTitleKey(subjectTerm))
+      )).slice(0, 12);
 
       const outline = await generateOutlineWithAutoModeStyle({
         keyword: mainKeyword,
         targetWordCount,
         fixedTitle: request.selectedTitle || null,
         customInstructions: request.customInstructions,
+        articleStructureType: request.articleStructureType,
         relatedKeywords,
         tone: request.tone,
         competitorHeadings,
+        competitorArticles,
         callAI: (prompt, maxTokens) => aiService.generateRawText(prompt, maxTokens),
       });
 
@@ -267,11 +274,7 @@ export class OutlineGenerationService {
       }));
       sections = enforceMinimumSections(sections, mainKeyword, targetWordCount);
     } catch (error) {
-      console.warn('Outline generation fallback:', error);
-    }
-
-    if (sections.length === 0) {
-      sections = buildFallbackSections(mainKeyword, targetWordCount);
+      throw error;
     }
 
     sections = enforceMinimumSections(sections, mainKeyword, targetWordCount);

@@ -5,7 +5,8 @@ import {
     OutlineSection,
     TrendAnalysisResult,
     SectionGenerationRequest,
-    OutlineGenerationRequest
+    OutlineGenerationRequest,
+    ArticleStructureType
 } from '../types';
 import { realTrendAnalysisService } from './realTrendAnalysisService';
 import { trendAnalysisService } from './trendAnalysisService';
@@ -182,6 +183,7 @@ export class MultiStepGenerationService {
             keywordPreferences?: Record<string, import('../types').KeywordPreference>;
             customInstructions?: string;
             targetWordCount?: number; // 霑ｽ蜉
+            articleStructureType?: ArticleStructureType;
         }
     ): Promise<ArticleOutline> {
         try {
@@ -196,7 +198,8 @@ export class MultiStepGenerationService {
                 selectedTitle: options?.selectedTitle, // 縺薙ｌ繧定ｿｽ蜉
                 keywordPreferences: options?.keywordPreferences,
                 customInstructions: options?.customInstructions,
-                targetWordCount: options?.targetWordCount // 霑ｽ蜉
+                targetWordCount: options?.targetWordCount, // 霑ｽ蜉
+                articleStructureType: options?.articleStructureType
             };
 
             let outline = await outlineGenerationService.generateOutline(request);
@@ -397,6 +400,7 @@ export class MultiStepGenerationService {
             selectedTitle?: string;
             targetWordCount?: number;
             customInstructions?: string;
+            articleStructureType?: ArticleStructureType;
             imagesPerArticle?: number; // 逕ｻ蜒乗椢謨ｰ繧定ｿｽ蜉
             onStepComplete?: (step: number, data: any) => void;
         }
@@ -433,6 +437,7 @@ export class MultiStepGenerationService {
                 selectedTitle,
                 targetWordCount,
                 customInstructions: options?.customInstructions,
+                articleStructureType: options?.articleStructureType,
             }
         );
         options?.onStepComplete?.(3, outline);

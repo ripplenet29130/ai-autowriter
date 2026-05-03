@@ -1,13 +1,15 @@
 import React, { useState } from 'react';
-import { BookOpen, Heading, Tag } from 'lucide-react';
+import { BookOpen, Heading, MessageSquare, Tag } from 'lucide-react';
 import { KeywordSettings } from './KeywordSettings';
+import { PromptSettings } from './PromptSettings';
 import { TitleSettings } from './TitleSettings';
 
-type TemplateTab = 'keywords' | 'titles';
+type TemplateTab = 'keywords' | 'titles' | 'prompts';
 
 const tabs: Array<{ id: TemplateTab; label: string; icon: React.ComponentType<{ className?: string }> }> = [
   { id: 'keywords', label: 'キーワード', icon: Tag },
   { id: 'titles', label: 'タイトル', icon: Heading },
+  { id: 'prompts', label: 'プロンプト', icon: MessageSquare },
 ];
 
 export const ClientTemplates: React.FC = () => {
@@ -19,7 +21,7 @@ export const ClientTemplates: React.FC = () => {
         <BookOpen className="w-8 h-8 text-gray-700" />
         <div>
           <h2 className="text-2xl font-bold text-gray-900">テンプレート</h2>
-          <p className="text-gray-600">記事作成で使うキーワードとタイトル候補を管理します。</p>
+          <p className="text-gray-600">記事作成で使用するキーワード、タイトル、プロンプトを管理します。</p>
         </div>
       </div>
 
@@ -46,7 +48,9 @@ export const ClientTemplates: React.FC = () => {
         })}
       </div>
 
-      {activeTab === 'keywords' ? <KeywordSettings /> : <TitleSettings />}
+      {activeTab === 'keywords' && <KeywordSettings />}
+      {activeTab === 'titles' && <TitleSettings />}
+      {activeTab === 'prompts' && <PromptSettings />}
     </div>
   );
 };

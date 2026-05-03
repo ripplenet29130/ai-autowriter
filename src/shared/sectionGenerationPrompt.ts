@@ -5,6 +5,8 @@ interface SectionPromptInput {
   articleTitle?: string;
   totalOutline?: string;
   sectionTitle: string;
+  sectionLevel?: number;
+  childHeadings?: string[];
   previousContent?: string;
   keywords?: string[];
   tone: Tone;
@@ -65,6 +67,29 @@ export function buildHighQualitySectionPrompt(input: SectionPromptInput): string
   const subKeywords = keywordList.slice(2, 5);
   const prefText = keywordPreferenceText(input.keywordPreferences);
   const context = String(input.previousContent || '').trim();
+  const sectionLevel = input.sectionLevel || 2;
+  const childHeadings = (input.childHeadings || [])
+    .map((heading) => String(heading || '').trim())
+    .filter(Boolean);
+  const sectionRoleInstruction = (() => {
+    if (input.isLead) {
+      return [
+        '- リード文として、記事全体の導入になる内容にすること',
+        '- リード文では記事タイトルをそのまま繰り返し見出し化しないこと',
+      ].join('\n');
+    }
+    if (sectionLevel === 2 && childHeadings.length > 0) {
+      return [
+        `- このH2には後続のH3があります: ${childHeadings.join('、')}`,
+        '- このH2本文では章全体の導入と要点整理に留め、H3で扱う詳細を先取りしすぎないこと',
+        '- H3の見出し名を本文中で不自然に列挙しないこと',
+      ].join('\n');
+    }
+    if (sectionLevel >= 3) {
+      return '- このH3本文では、親H2の中の具体論としてテーマを絞って説明すること';
+    }
+    return '- このH2本文では、見出しテーマに対する要点を過不足なく説明すること';
+  })();
 
   return `
 あなたは日本語SEO記事の執筆者です。次の1セクションだけを執筆してください。
@@ -73,7 +98,7 @@ export function buildHighQualitySectionPrompt(input: SectionPromptInput): string
 全体アウトライン:
 ${input.totalOutline || '未設定'}
 
-今回のセクション: ${input.sectionTitle}
+今回のセクション: ${input.sectionTitle} (${sectionLevel === 2 ? 'H2' : 'H3'})
 文体: ${toneInstruction(input.tone)}
 目標文字数: ${input.targetChars}文字前後
 
@@ -91,8 +116,7 @@ ${prefText || ''}
 - 他セクションの内容を重複させないこと
 - 情報が不確かな場合は断定しすぎないこと
 - 自然な日本語で、具体性のある本文にすること
-${input.isLead ? '- リード文として、記事全体の導入になる内容にすること' : ''}
-${input.isLead ? '- リード文では記事タイトルをそのまま繰り返し見出し化しないこと' : ''}
+${sectionRoleInstruction}
 
 ${context ? `直前までの本文:\n${context}\n` : ''}
 ${input.customInstructions ? `追加指示:\n${input.customInstructions}\n` : ''}

@@ -67,7 +67,11 @@ export const TrendAnalysisStep: React.FC<TrendAnalysisStepProps> = ({
           <span>競合サイトの上位記事</span>
         </h4>
         <div className="grid grid-cols-1 gap-4">
-          {trendData.competitorAnalysis.topArticles.map((article, index) => (
+          {trendData.competitorAnalysis.topArticles.length === 0 ? (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-800">
+              競合サイトの取得結果が0件でした。コンソールの <span className="font-mono">[competitor debug]</span> ログでAPIレスポンスを確認してください。
+            </div>
+          ) : trendData.competitorAnalysis.topArticles.map((article, index) => (
             <div key={index} className="bg-white border border-gray-200 rounded-xl hover:shadow-md transition-all divide-y divide-gray-100 overflow-hidden">
               <div className="p-5">
                 <div className="flex justify-between items-start mb-2">

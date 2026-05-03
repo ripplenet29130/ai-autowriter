@@ -48,7 +48,36 @@ serve(async (req) => {
     }
 
     const searchData = await searchRes.json();
+    console.log("SerpAPI response summary:", {
+      hasError: Boolean(searchData.error),
+      error: searchData.error,
+      organicCount: Array.isArray(searchData.organic_results) ? searchData.organic_results.length : 0,
+      keys: Object.keys(searchData || {}).slice(0, 12),
+    });
+    if (searchData.error) {
+      throw new Error(`SerpAPI response error: ${searchData.error}`);
+    }
+
     const results = searchData.organic_results || [];
+    if (results.length === 0) {
+      console.warn(`SerpAPI organic_results is empty for keyword="${keyword}"`);
+      return new Response(JSON.stringify({
+        error: "SerpAPIの検索結果が0件でした",
+        debug: {
+          keyword,
+          serpApiError: searchData.error || null,
+          organicCount: 0,
+          searchMetadata: searchData.search_metadata || null,
+          searchInformation: searchData.search_information || null,
+        },
+        topArticles: [],
+        averageLength: 0,
+        commonTopics: [],
+      }), {
+        status: 502,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
     const topArticles: CompetitorArticle[] = [];
 
@@ -120,16 +149,44 @@ serve(async (req) => {
 
     const scrapedResults = await Promise.all(scrapePromises);
 
-    const validArticles = scrapedResults.filter(a => a !== null) as CompetitorArticle[];
+    const validArticles = scrapedResults
+      .filter(a => a !== null)
+      .filter(a => a.title && a.url) as CompetitorArticle[];
+    console.log("Competitor scrape summary:", {
+      keyword,
+      requestedLimit: limit,
+      serpResults: results.length,
+      validArticles: validArticles.length,
+      titles: validArticles.map((a) => a.title).slice(0, 5),
+    });
     const averageLength = validArticles.length > 0
       ? Math.floor(validArticles.reduce((s, a) => s + a.wordCount, 0) / validArticles.length)
       : 0;
+
+    // 複数記事に共通するトピックを抽出（2記事以上に登場した見出しを優先）
+    const headingCount = new Map<string, number>();
+    const headingOriginal = new Map<string, string>();
+    for (const article of validArticles) {
+      const seen = new Set<string>();
+      for (const h of article.headings) {
+        const normalized = h.replace(/[　\s]+/g, '').replace(/[!！?？。、]/g, '').toLowerCase();
+        if (!normalized || normalized.length < 4 || seen.has(normalized)) continue;
+        seen.add(normalized);
+        headingCount.set(normalized, (headingCount.get(normalized) || 0) + 1);
+        if (!headingOriginal.has(normalized)) headingOriginal.set(normalized, h);
+      }
+    }
+    // 2記事以上に登場したものを優先、残りは出現数順で補完
+    const sorted = [...headingCount.entries()].sort((a, b) => b[1] - a[1]);
+    const commonTopics = sorted
+      .map(([key]) => headingOriginal.get(key) ?? key)
+      .slice(0, 12);
 
     return new Response(
       JSON.stringify({
         topArticles: validArticles,
         averageLength,
-        commonTopics: [] // 必要に応じて抽出
+        commonTopics
       }),
       {
         headers: { ...corsHeaders, "Content-Type": "application/json" },

@@ -7,13 +7,14 @@ import { TrendAnalysisStep } from './TrendAnalysisStep';
 import { TitleSelectionStep } from './TitleSelectionStep';
 import { OutlineEditorStep } from './OutlineEditorStep';
 import { ContentGenerationStep } from './ContentGenerationStep';
-import { Article, ArticleGoal, GenerationStep } from '../../types';
+import { Article, ArticleGoal, ArticleStructureType, GenerationStep } from '../../types';
 
 interface MultiStepGeneratorProps {
   keywords: string[];
   tone: 'professional' | 'casual' | 'technical' | 'friendly';
   length: 'short' | 'medium' | 'long';
   articleGoal?: ArticleGoal;
+  articleStructureType?: ArticleStructureType;
   customInstructions?: string;
   selectedTitleSetId?: string;
   selectedTitle?: string;
@@ -27,6 +28,7 @@ export const MultiStepGenerator: React.FC<MultiStepGeneratorProps> = ({
   tone,
   length,
   articleGoal,
+  articleStructureType,
   customInstructions,
   selectedTitleSetId,
   selectedTitle,
@@ -118,6 +120,7 @@ export const MultiStepGenerator: React.FC<MultiStepGeneratorProps> = ({
       selectedTitle: localSelectedTitle || undefined,
       customInstructions,
       targetWordCount,
+      articleStructureType,
     });
   };
 
@@ -132,6 +135,7 @@ export const MultiStepGenerator: React.FC<MultiStepGeneratorProps> = ({
 
     if (result) {
       result.articleGoal = articleGoal || 'standard';
+      result.articleStructureType = articleStructureType || 'standard';
       addArticle(result);
       onComplete(result);
     }

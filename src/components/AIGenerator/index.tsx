@@ -12,9 +12,11 @@ import { MultiStepGenerator } from '../MultiStepGenerator';
 import { useMultiStepGeneration } from '../../hooks/useMultiStepGeneration';
 import { FactCheckResultsDisplay } from '../FactCheckResultsDisplay';
 import { factCheckService } from '../../services/factCheckService';
+import { titleKeywordInferenceService } from '../../services/titleKeywordInferenceService';
+import type { TitleKeywordInference } from '../../services/titleKeywordInferenceService';
 import type { FactCheckResult } from '../../types';
 import type { FactCheckItem } from '../../types/factCheck';
-import type { Article, ArticleGoal } from '../../types';
+import type { Article, ArticleGoal, ArticleStructureType } from '../../types';
 import toast from 'react-hot-toast';
 
 /**
@@ -30,7 +32,8 @@ export const AIGenerator: React.FC = () => {
     const [keywords, setKeywords] = useState<string[]>([]);
     const [tone, setTone] = useState<'professional' | 'casual' | 'technical' | 'friendly'>('professional');
     const [length, setLength] = useState<'short' | 'medium' | 'long'>('medium');
-    const [articleGoal, setArticleGoal] = useState<ArticleGoal>('standard');
+    const articleGoal: ArticleGoal = 'standard';
+    const [articleStructureType, setArticleStructureType] = useState<ArticleStructureType>('standard');
     const [generationMode, setGenerationMode] = useState<'auto' | 'interactive'>('interactive');
     const [showMultiStep, setShowMultiStep] = useState(false);
     const [useDefaultAIConfig, setUseDefaultAIConfig] = useState(true);
@@ -62,6 +65,7 @@ export const AIGenerator: React.FC = () => {
     // Title Set State
     const [selectedTitleSetId, setSelectedTitleSetId] = useState<string>('');
     const [selectedTitle, setSelectedTitle] = useState<string>('');
+    const [titleContextInstructions, setTitleContextInstructions] = useState<string>('');
 
     // Keyword Set State
     const [selectedKeywordSetId, setSelectedKeywordSetId] = useState<string>('');
@@ -69,6 +73,40 @@ export const AIGenerator: React.FC = () => {
 
     // Target Word Count State
     const [targetWordCount, setTargetWordCount] = useState<number>(2000);
+
+    const articleStructureOptions: Array<{ value: ArticleStructureType; label: string; description: string }> = [
+        {
+            value: 'standard',
+            label: '標準解説型',
+            description: '基礎知識 → 原因 → 具体策 → 選び方 → 注意点 → まとめ',
+        },
+        {
+            value: 'problem_solution',
+            label: '課題解決型',
+            description: '悩み → 原因 → 解決策 → 選び方 → 導入手順 → 注意点 → まとめ',
+        },
+        {
+            value: 'comparison',
+            label: '比較・選定型',
+            description: '選ぶ前の前提 → 比較軸 → 向き不向き → 選び方 → 注意点 → まとめ',
+        },
+        {
+            value: 'practical',
+            label: '実務ノウハウ型',
+            description: '現場の課題 → 実践手順 → 失敗例 → 改善策 → 運用ポイント → まとめ',
+        },
+        {
+            value: 'seo_comprehensive',
+            label: 'SEO網羅型',
+            description: '基礎知識 → 原因 → 具体策 → 比較 → 選び方 → よくある疑問 → まとめ',
+        },
+        {
+            value: 'conversion',
+            label: '問い合わせ導線型',
+            description: '課題提起 → 放置リスク → 解決策 → 導入メリット → 相談前の確認点 → まとめ',
+        },
+    ];
+    const selectedStructureDescription = articleStructureOptions.find(option => option.value === articleStructureType)?.description || '';
 
     React.useEffect(() => {
         const loadFactCheckSettings = async () => {
@@ -246,67 +284,33 @@ export const AIGenerator: React.FC = () => {
         setKeywords(keywords.filter(k => k !== keyword));
     };
 
-    const buildArticleGoalInstructions = (goal: ArticleGoal): string => {
-        switch (goal) {
-            case 'beginner':
-                return [
-                    '記事の目的は初心者向けです。',
-                    '- 専門用語は短くかみ砕いて説明する',
-                    '- 前提知識がない読者でも理解できる順序で書く',
-                    '- いきなり比較や結論だけに飛ばず、基礎から整理する'
-                ].join('\n');
-            case 'practical':
-                return [
-                    '記事の目的は実務重視です。',
-                    '- 一般論の羅列で終わらせず、現場の判断材料を優先する',
-                    '- 各見出しで具体例、判断場面、失敗例のいずれかを入れる',
-                    '- 比較を書くときは、どんな条件ならどちらが向くかまで述べる',
-                    '- 読者が次に何を確認すべきか分かるように書く'
-                ].join('\n');
-            case 'seo':
-                return [
-                    '記事の目的はSEO重視です。',
-                    '- 見出しごとに読者の疑問へ直接答える',
-                    '- 網羅性を保ちつつ、要点がすぐ分かる構成にする',
-                    '- 抽象表現の繰り返しを避け、検索意図に沿って整理する'
-                ].join('\n');
-            case 'authority':
-                return [
-                    '記事の目的は専門性重視です。',
-                    '- 条件差、例外、注意点を省略しない',
-                    '- 断定だけで終わらせず、どの条件でそう言えるかを書く',
-                    '- 実務での判断に使える解像度を優先する',
-                    '- 抽象語でまとめず、論点ごとの結論を明確にする'
-                ].join('\n');
-            case 'comparison':
-                return [
-                    '記事の目的は比較・選定向けです。',
-                    '- 違いの説明だけで終わらせず、どんな条件ならどちらが向くかまで述べる',
-                    '- 比較軸を明示し、それぞれの向き不向きを整理する',
-                    '- 読者が選べるように判断基準を入れる'
-                ].join('\n');
-            case 'conversion':
-                return [
-                    '記事の目的は問い合わせ導線向けです。',
-                    '- 読者の課題を整理し、検討時の確認ポイントを明確にする',
-                    '- 過剰に煽らず、導入判断に必要な情報を優先する',
-                    '- メリットだけでなく注意点や条件差も書く'
-                ].join('\n');
-            default:
-                return [
-                    '記事の目的は標準です。',
-                    '- 教科書的な総論の羅列にしない',
-                    '- 同じ内容の言い換えを繰り返さない',
-                    '- 各見出しで結論が先に分かる構成にする',
-                    '- 読者が実務や意思決定に使える情報を優先する'
-                ].join('\n');
-        }
-    };
-
-    const buildEffectiveCustomInstructions = (base?: string, goal?: ArticleGoal) => {
-        const parts = [base?.trim(), buildArticleGoalInstructions(goal || articleGoal)]
+    const buildEffectiveCustomInstructions = (base?: string) => {
+        const parts = [base?.trim(), titleContextInstructions.trim()]
             .filter((value): value is string => Boolean(value && value.trim()));
         return parts.join('\n\n');
+    };
+
+    const buildTitleContextInstructions = (analysis?: TitleKeywordInference | null) => {
+        if (!analysis) return '';
+
+        return [
+            '【タイトル解析】',
+            `主キーワード: ${analysis.mainKeyword}`,
+            analysis.subKeywords.length > 0 ? `補助キーワード: ${analysis.subKeywords.join('、')}` : '',
+            `検索意図: ${analysis.searchIntent}`,
+            `想定読者: ${analysis.targetAudience}`,
+            `記事タイプ: ${analysis.articleType}`,
+            '固定タイトルと検索意図を優先し、見出しと本文がタイトルから逸れないようにしてください。'
+        ].filter(Boolean).join('\n');
+    };
+
+    const mergeKeywords = (primary: string, secondary: string[] = []) => {
+        const merged: string[] = [];
+        [primary, ...secondary].forEach((keyword) => {
+            const trimmed = keyword.trim();
+            if (trimmed && !merged.includes(trimmed)) merged.push(trimmed);
+        });
+        return merged;
     };
 
     const handleGenerate = async (finalKeywords: string[]) => {
@@ -320,7 +324,8 @@ export const AIGenerator: React.FC = () => {
             tone,
             length,
             articleGoal,
-            customInstructions: buildEffectiveCustomInstructions(selectedPromptSet?.customInstructions, articleGoal),
+            articleStructureType,
+            customInstructions: buildEffectiveCustomInstructions(selectedPromptSet?.customInstructions),
             targetWordCount,
             imagesPerArticle: 0
         });
@@ -331,7 +336,7 @@ export const AIGenerator: React.FC = () => {
 
     const handleStartGeneration = async () => {
         let finalKeywords = [...keywords];
-        const titleModeKeyword = selectedTitle ? selectedTitle.split(/[？?！!：:]/)[0].trim() : '';
+        let titleAnalysis: TitleKeywordInference | null = null;
 
         // 入力フィールドに値がある場合はそれも追加
         if ((contentSourceMode === 'keyword' || contentSourceMode === 'both') && inputValue.trim()) {
@@ -343,6 +348,21 @@ export const AIGenerator: React.FC = () => {
             }
         }
 
+        if ((contentSourceMode === 'title' || contentSourceMode === 'both') && selectedTitleSetId && selectedTitle) {
+            await applySelectedAIConfig();
+            toast.loading('タイトルからキーワードと検索意図を解析中...', { id: 'title-inference' });
+            titleAnalysis = await titleKeywordInferenceService.inferFromTitle(selectedTitle);
+            toast.success('タイトル解析が完了しました', { id: 'title-inference' });
+
+            const titleKeywords = mergeKeywords(titleAnalysis.mainKeyword, titleAnalysis.subKeywords);
+            finalKeywords = contentSourceMode === 'title'
+                ? titleKeywords
+                : mergeKeywords(titleAnalysis.mainKeyword, [...finalKeywords, ...titleAnalysis.subKeywords]);
+            setTitleContextInstructions(buildTitleContextInstructions(titleAnalysis));
+        } else {
+            setTitleContextInstructions('');
+        }
+
         // 自動モード実行 (最優先)
         if (generationMode === 'auto') {
             if (contentSourceMode === 'title' || contentSourceMode === 'both') {
@@ -350,12 +370,10 @@ export const AIGenerator: React.FC = () => {
                     toast.error('タイトルセットと使用するタイトルを選択してください');
                     return;
                 }
-                if (finalKeywords.length === 0 && titleModeKeyword) {
-                    finalKeywords = [titleModeKeyword];
-                }
             } else if (contentSourceMode === 'keyword' && selectedTitleSetId && selectedTitle) {
                 // タイトルセット選択時はコンテキストとしてタイトルを使用
                 if (finalKeywords.length === 0) {
+                    const titleModeKeyword = selectedTitle.split(/[？?！!：:]/)[0].trim();
                     finalKeywords = [titleModeKeyword];
                 }
             }
@@ -371,19 +389,25 @@ export const AIGenerator: React.FC = () => {
 
             // プロンプトセットの取得
             const selectedPromptSet = promptSets.find(ps => ps.id === selectedPromptSetId);
-            await applySelectedAIConfig();
+            if (!titleAnalysis) {
+                await applySelectedAIConfig();
+            }
 
             const article = await executeAutoMode(finalKeywords, {
                 tone,
                 targetLength: length,
                 selectedTitle: selectedTitle || undefined,
                 targetWordCount,
-                customInstructions: buildEffectiveCustomInstructions(selectedPromptSet?.customInstructions, articleGoal),
+                articleStructureType,
+                customInstructions: [
+                    selectedPromptSet?.customInstructions?.trim(),
+                    buildTitleContextInstructions(titleAnalysis)
+                ].filter(Boolean).join('\n\n'),
                 imagesPerArticle: 0
             });
 
             if (article) {
-                const articleWithGoal = { ...article, articleGoal };
+                const articleWithGoal = { ...article, articleGoal, articleStructureType };
                 setGeneratedArticle(articleWithGoal);
                 addArticle(articleWithGoal);
             }
@@ -392,22 +416,17 @@ export const AIGenerator: React.FC = () => {
 
         // --- これ以降は対話モード (Interactive Mode) ---
         // 対話モードは必ずキーワード検索から開始する
-        if (finalKeywords.length === 0 && (contentSourceMode === 'title' || contentSourceMode === 'both') && selectedTitleSetId && selectedTitle) {
-            const inferred = titleModeKeyword;
-            if (inferred) {
-                finalKeywords = [inferred];
-                setKeywords(finalKeywords);
-            }
-        }
-
         if (finalKeywords.length === 0) {
             toast.error((contentSourceMode === 'title' || contentSourceMode === 'both')
                 ? '対話モードでは、タイトルから推定したキーワードが必要です。タイトルを選び直してください'
                 : '対話モードでは最初にキーワードを入力してください');
             return;
         }
-        await applySelectedAIConfig();
+        if (!titleAnalysis) {
+            await applySelectedAIConfig();
+        }
 
+        setKeywords(finalKeywords);
         setShowMultiStep(true);
     };
 
@@ -602,7 +621,7 @@ export const AIGenerator: React.FC = () => {
                 tone: generatedArticle.tone,
                 length: generatedArticle.length,
                 articleGoal: generatedArticle.articleGoal || articleGoal,
-                customInstructions: buildEffectiveCustomInstructions(customInstructions, generatedArticle.articleGoal || articleGoal)
+                customInstructions: buildEffectiveCustomInstructions(customInstructions)
             });
 
             if (regenerated) {
@@ -615,7 +634,7 @@ export const AIGenerator: React.FC = () => {
     };
 
     const handleMultiStepComplete = (article: Article) => {
-        setGeneratedArticle({ ...article, articleGoal } as any);
+        setGeneratedArticle({ ...article, articleGoal, articleStructureType } as any);
         setShowMultiStep(false);
     };
 
@@ -626,7 +645,8 @@ export const AIGenerator: React.FC = () => {
                 tone={tone}
                 length={length}
                 articleGoal={articleGoal}
-                customInstructions={buildEffectiveCustomInstructions(promptSets.find(ps => ps.id === selectedPromptSetId)?.customInstructions, articleGoal)}
+                articleStructureType={articleStructureType}
+                customInstructions={buildEffectiveCustomInstructions(promptSets.find(ps => ps.id === selectedPromptSetId)?.customInstructions)}
                 selectedTitleSetId={selectedTitleSetId}
                 selectedTitle={selectedTitle}
                 targetWordCount={targetWordCount}
@@ -985,22 +1005,21 @@ export const AIGenerator: React.FC = () => {
 
                     <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">
-                            記事の目的
+                            記事タイプ（構成）
                         </label>
                         <select
-                            value={articleGoal}
-                            onChange={(e) => setArticleGoal(e.target.value as ArticleGoal)}
+                            value={articleStructureType}
+                            onChange={(e) => setArticleStructureType(e.target.value as ArticleStructureType)}
                             disabled={isGenerating || isAutoGenerating}
                             className="input-field"
                         >
-                            <option value="standard">標準</option>
-                            <option value="beginner">初心者向け</option>
-                            <option value="practical">実務重視</option>
-                            <option value="seo">SEO重視</option>
-                            <option value="authority">専門性重視</option>
-                            <option value="comparison">比較・選定向け</option>
-                            <option value="conversion">問い合わせ導線向け</option>
+                            {articleStructureOptions.map(option => (
+                                <option key={option.value} value={option.value}>{option.label}</option>
+                            ))}
                         </select>
+                        <p className="mt-2 text-xs text-gray-500 leading-relaxed">
+                            構成: {selectedStructureDescription}
+                        </p>
                     </div>
 
                     {/* Target Word Count */}
@@ -1033,14 +1052,14 @@ export const AIGenerator: React.FC = () => {
                             </button>
                             <button
                                 type="button"
-                                onClick={() => setTargetWordCount(4000)}
-                                className={`px-3 py-2 text-sm rounded-md border transition-colors ${targetWordCount === 4000
+                                onClick={() => setTargetWordCount(3000)}
+                                className={`px-3 py-2 text-sm rounded-md border transition-colors ${targetWordCount === 3000
                                     ? 'bg-purple-600 text-white border-purple-600'
                                     : 'bg-white text-gray-700 border-gray-300 hover:border-purple-400'
                                     }`}
                                 disabled={isGenerating}
                             >
-                                4,000字
+                                3,000字
                             </button>
                         </div>
                         <input

@@ -11,18 +11,10 @@ export class HybridTrendAnalysisService {
   }): Promise<TrendAnalysisResult> {
     const validation = apiKeyManager.validateConfiguration();
     
-    if (validation.isValid) {
-      console.log('Using real API services for trend analysis');
-      try {
-        return await realTrendAnalysisService.analyzeTrends(keyword, options);
-      } catch (error) {
-        console.warn('Real API failed, falling back to mock data:', error);
-        return await trendAnalysisService.analyzeTrends(keyword, options);
-      }
-    } else {
-      console.log('API keys not configured, using mock data');
-      return await trendAnalysisService.analyzeTrends(keyword, options);
+    if (!validation.isValid) {
+      throw new Error(`APIキーが設定されていません。接続設定でSerpAPIキーを設定してください。不足: ${validation.missingServices.join(', ')}`);
     }
+    return await realTrendAnalysisService.analyzeTrends(keyword, options);
   }
 
   async getKeywordSuggestions(seedKeyword: string, count: number = 20) {
