@@ -7,6 +7,7 @@ type AccountRow = Account & {
   wordpress_count?: number;
   article_count?: number;
   schedule_count?: number;
+  login_email?: string | null;
   created_at?: string;
   updated_at?: string;
 };
@@ -24,6 +25,28 @@ const featureOptions: Array<{ key: keyof typeof defaultFeatureFlags; label: stri
   { key: 'image_generation', label: '画像' },
   { key: 'fact_check', label: '校正' },
 ];
+
+const getSupabaseErrorMessage = async (error: unknown) => {
+  if (!error) return null;
+  const maybeContext = (error as { context?: unknown }).context;
+
+  if (maybeContext instanceof Response) {
+    try {
+      const body = await maybeContext.clone().json();
+      if (typeof body?.error === 'string') return body.error;
+      if (typeof body?.message === 'string') return body.message;
+    } catch {
+      try {
+        const text = await maybeContext.clone().text();
+        if (text) return text;
+      } catch {
+        // Fall through to the generic error below.
+      }
+    }
+  }
+
+  return error instanceof Error ? error.message : String(error);
+};
 
 export const AdminDashboard: React.FC = () => {
   const { user, signOut } = useAuthStore();
@@ -65,6 +88,20 @@ export const AdminDashboard: React.FC = () => {
     }
 
     const rows = ((data as AccountRow[]) ?? []);
+    const accountIds = rows.map((account) => account.id);
+    const { data: profilesData } = accountIds.length
+      ? await client
+          .from('profiles')
+          .select('account_id,login_email')
+          .eq('role', 'client')
+          .in('account_id', accountIds)
+      : { data: [] };
+    const emailByAccountId = new Map(
+      ((profilesData as Array<{ account_id: string | null; login_email: string | null }>) ?? [])
+        .filter((profile) => profile.account_id)
+        .map((profile) => [profile.account_id as string, profile.login_email])
+    );
+
     const rowsWithCounts = await Promise.all(
       rows.map(async (account) => {
         const { count } = await client
@@ -84,6 +121,7 @@ export const AdminDashboard: React.FC = () => {
 
         return {
           ...account,
+          login_email: emailByAccountId.get(account.id) ?? null,
           wordpress_count: count ?? 0,
           article_count: articleCount ?? 0,
           schedule_count: scheduleCount ?? 0,
@@ -148,7 +186,7 @@ export const AdminDashboard: React.FC = () => {
           });
 
     if (insertError) {
-      setError(insertError.message);
+      setError(await getSupabaseErrorMessage(insertError));
       setIsSaving(false);
       return;
     }
@@ -390,6 +428,9 @@ export const AdminDashboard: React.FC = () => {
                             }
                             className="border border-gray-300 rounded-lg px-3 py-2 min-w-56"
                           />
+                          <div className="text-xs text-gray-500">
+                            {account.login_email || 'ログインメール未登録'}
+                          </div>
                         </label>
                       </td>
                       <td className="px-4 py-3">

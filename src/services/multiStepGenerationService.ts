@@ -480,7 +480,8 @@ export class MultiStepGenerationService {
     }
 
     private generateFallbackContent(section: OutlineSection): string {
-        return `## ${section.title}\n\n${section.description || '詳細を執筆中です。'}`;
+        const headingPrefix = section.level === 3 ? '###' : '##';
+        return `${headingPrefix} ${section.title}\n\n${section.description || '詳細を執筆中です。'}`;
     }
 
     async generateArticleFromPreparedOutline(
@@ -513,7 +514,7 @@ export class MultiStepGenerationService {
                 title: outline.title,
                 sections: outline.sections.map((section) => ({
                     title: section.title,
-                    level: 2,
+                    level: section.level === 3 ? 3 : 2,
                     description: section.description || '',
                     isLead: !!section.isLead,
                     estimatedWordCount: section.estimatedWordCount || 250,
@@ -545,7 +546,7 @@ export class MultiStepGenerationService {
 
             const formatted = generated.isLead
                 ? generated.content
-                : `## ${generated.title}\n\n${generated.content}`;
+                : `${generated.level === 3 ? '###' : '##'} ${generated.title}\n\n${generated.content}`;
 
             sectionContents.set(section.id, formatted);
             section.content = generated.content;

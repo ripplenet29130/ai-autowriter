@@ -10,6 +10,8 @@ import type { ArticleStructureType } from '../types';
 
 type Tone = 'professional' | 'casual' | 'technical' | 'friendly';
 
+const FINAL_ARTICLE_WORD_COUNT_TOLERANCE = 0.18;
+
 export interface SharedOutlineSection {
   title: string;
   level: number;
@@ -1036,11 +1038,37 @@ function clampNumber(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, Math.round(value)));
 }
 
+function normalizeOutlineDescription(section: SharedOutlineSection): string {
+  const raw = String(section.description || '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/[、,，・／/]+$/g, '')
+    .trim();
+  const title = String(section.title || '').trim();
+
+  const fallback = (() => {
+    if (section.isLead) return '記事全体の導入と読むメリットを示す';
+    if (isSummaryLikeTitle(title)) return '記事全体の要点を総括する';
+    if (section.level === 3) return `${title}の具体的な判断材料を整理する`;
+    return `${title}の全体像と判断ポイントを整理する`;
+  })();
+
+  if (!raw) return fallback;
+  if (raw.length < 6) return fallback;
+  if (/(?:や|と|が|を|は|に|で|へ|も|から|まで|による|に応じた|に合わせた|を踏まえた|するための|した|しやすい)$/.test(raw)) {
+    return fallback;
+  }
+  return raw;
+}
+
 function normalizeOutlineSections(
   sections: SharedOutlineSection[],
   targetWordCount: number
 ): SharedOutlineSection[] {
-  const normalized = sections.map((section) => ({ ...section }));
+  const normalized = sections.map((section) => ({
+    ...section,
+    description: normalizeOutlineDescription(section),
+  }));
 
   const edgeBounds = getEdgeSectionBounds(targetWordCount);
   const leadWordCount = edgeBounds.base;
@@ -1235,6 +1263,158 @@ function canonicalizeHeading(title: string): string {
 
 function isSummaryLikeTitle(title: string): boolean {
   return SUMMARY_TITLE_PATTERN.test(String(title || '').trim());
+}
+
+function isWeakH3Title(title: string): boolean {
+  const t = String(title || '').trim();
+  if (!t) return true;
+  const normalized = canonicalizeHeading(t);
+  if (normalized.length <= 2) return true;
+  return /^(物流|効率|品質|安全|費用|コスト|方法|対策|課題|効果|種類|比較|選び方|注意点|ポイント|メリット|デメリット|概要|基本|導入)$/.test(normalized);
+}
+
+function getTargetH3Count(targetWordCount: number): number {
+  if (!Number.isFinite(targetWordCount) || targetWordCount < 1800) return 0;
+  if (targetWordCount < 2600) return 9;
+  if (targetWordCount < 3600) return 12;
+  return 15;
+}
+
+function getHardMinimumH3Count(targetWordCount: number): number {
+  const targetH3Count = getTargetH3Count(targetWordCount);
+  if (targetH3Count <= 0) return 0;
+  return Math.min(targetH3Count, 2);
+}
+
+function countH3Sections(sections: SharedOutlineSection[]): number {
+  return sections.filter((section) => !section.isLead && section.level === 3).length;
+}
+
+function findParentH2Index(sections: SharedOutlineSection[], childIndex: number): number {
+  for (let i = childIndex - 1; i >= 0; i -= 1) {
+    const section = sections[i];
+    if (!section.isLead && section.level === 2 && !isSummaryLikeTitle(section.title)) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+function countChildH3(sections: SharedOutlineSection[], h2Index: number): number {
+  let count = 0;
+  for (let i = h2Index + 1; i < sections.length; i += 1) {
+    const section = sections[i];
+    if (section.isLead || section.level === 2) break;
+    if (section.level === 3) count += 1;
+  }
+  return count;
+}
+
+function shouldSplitH2IntoH3(section: SharedOutlineSection): boolean {
+  const title = String(section.title || '');
+  const description = String(section.description || '');
+  const combined = `${title} ${description}`;
+  if (section.estimatedWordCount >= 420) return true;
+  if (/[・、／/]|(?:と|や|から|まで).*(?:と|や|まで)/.test(title)) return true;
+  return /(原因|理由|リスク|選択肢|比較|選び方|判断基準|注意点|ポイント|手順|方法|対策|導入効果|費用|安全)/.test(combined);
+}
+
+function selectH2IndexesForH3Supplement(
+  sections: SharedOutlineSection[],
+  targetWordCount: number,
+  targetH3Count: number
+): number[] {
+  if (targetH3Count <= 0) return [];
+  const currentH3Count = countH3Sections(sections);
+  const missing = Math.max(0, targetH3Count - currentH3Count);
+  if (missing === 0) return [];
+
+  const candidates = sections
+    .map((section, index) => ({ section, index }))
+    .filter(({ section, index }) => (
+      !section.isLead &&
+      section.level === 2 &&
+      !isSummaryLikeTitle(section.title) &&
+      countChildH3(sections, index) < 3
+    ))
+    .map(({ section, index }) => ({
+      index,
+      score:
+        (shouldSplitH2IntoH3(section) ? 100 : 0) +
+        Math.max(0, section.estimatedWordCount - 260) +
+        (targetWordCount >= 1800 ? 20 : 0) -
+        countChildH3(sections, index) * 40,
+    }))
+    .sort((a, b) => b.score - a.score);
+
+  const selected: number[] = [];
+  for (const candidate of candidates) {
+    if (selected.length >= Math.max(1, missing)) break;
+    const section = sections[candidate.index];
+    if (!section) continue;
+    const currentChildren = countChildH3(sections, candidate.index);
+    const plannedChildren = selected.filter((index) => index === candidate.index).length;
+    const capacity = Math.max(0, 3 - currentChildren - plannedChildren);
+    const desired = shouldSplitH2IntoH3(section) ? 3 : 2;
+    const addCount = Math.min(capacity, desired, missing - selected.length);
+    for (let i = 0; i < addCount; i += 1) {
+      selected.push(candidate.index);
+    }
+  }
+  return selected.slice(0, missing);
+}
+
+function ensureOutlineDescriptions(sections: SharedOutlineSection[]): SharedOutlineSection[] {
+  return sections.map((section) => {
+    if (section.description && section.description.trim()) return section;
+    if (section.isLead) {
+      return { ...section, description: '記事全体の導入と読むメリットを示す' };
+    }
+    if (isSummaryLikeTitle(section.title)) {
+      return { ...section, description: '記事全体の要点を総括' };
+    }
+    if (section.level === 2) {
+      return { ...section, description: 'この章の全体像と判断ポイントを整理する' };
+    }
+    return { ...section, description: '具体的な論点を掘り下げる' };
+  });
+}
+
+function rebalanceParentAndChildH3WordCounts(
+  sections: SharedOutlineSection[],
+  targetWordCount: number
+): SharedOutlineSection[] {
+  if (!Array.isArray(sections) || sections.length === 0) return sections;
+  const adjusted = sections.map((section) => ({ ...section }));
+  const parentToChildren = new Map<number, number[]>();
+
+  for (let i = 0; i < adjusted.length; i += 1) {
+    if (adjusted[i].level !== 3) continue;
+    const parentIndex = findParentH2Index(adjusted, i);
+    if (parentIndex < 0) continue;
+    const list = parentToChildren.get(parentIndex) || [];
+    list.push(i);
+    parentToChildren.set(parentIndex, list);
+  }
+
+  for (const [parentIndex, childIndexes] of parentToChildren.entries()) {
+    const parent = adjusted[parentIndex];
+    if (!parent || childIndexes.length === 0) continue;
+    const total = parent.estimatedWordCount + childIndexes.reduce((sum, index) => sum + adjusted[index].estimatedWordCount, 0);
+    const parentTarget = clampNumber(
+      Math.round(total * 0.28),
+      120,
+      targetWordCount >= 2200 ? 220 : 190
+    );
+    const childTotal = Math.max(childIndexes.length * 120, total - parentTarget);
+    const perChild = Math.max(120, Math.round(childTotal / childIndexes.length));
+    parent.estimatedWordCount = parentTarget;
+    for (const childIndex of childIndexes) {
+      adjusted[childIndex].estimatedWordCount = perChild;
+    }
+  }
+
+  return adjusted;
 }
 
 function isCountermeasureTopic(keyword: string, fixedTitle?: string | null): boolean {
@@ -1563,6 +1743,211 @@ async function supplementOutlineSectionsWithAI(
   return { sections: combined, added: extracted.length, usedAI: true };
 }
 
+async function supplementH3SectionsWithAI(
+  sections: SharedOutlineSection[],
+  keyword: string,
+  targetWordCount: number,
+  targetH3Count: number,
+  callAI: SharedCallAI
+): Promise<{ sections: SharedOutlineSection[]; added: number }> {
+  const normalized = normalizeOutlineSections(sections, targetWordCount);
+  const currentH3Count = countH3Sections(normalized);
+  if (targetH3Count <= 0 || currentH3Count >= targetH3Count) {
+    return { sections: normalized, added: 0 };
+  }
+
+  const targetH2Indexes = selectH2IndexesForH3Supplement(normalized, targetWordCount, targetH3Count);
+  if (targetH2Indexes.length === 0) {
+    return { sections: normalized, added: 0 };
+  }
+
+  const missing = targetH3Count - currentH3Count;
+  const perH3 = Math.max(140, Math.floor(Math.max(1200, targetWordCount) / Math.max(6, normalized.length + missing)));
+  const targetCounts = targetH2Indexes.reduce((map, index) => {
+    map.set(index, (map.get(index) || 0) + 1);
+    return map;
+  }, new Map<number, number>());
+  const targetPlans = Array.from(targetCounts.entries())
+    .map(([index, needed]) => ({ index, needed, section: normalized[index] }))
+    .filter((plan) => plan.section);
+  const prompt = [
+    `キーワード「${keyword}」の記事アウトラインに小見出し（H3）が不足しています。`,
+    `目標はH3合計${targetH3Count}個です。現在${currentH3Count}個なので、H3を合計${missing}個追加してください。`,
+    'H3は必ず指定したH2の直下に入る小見出しとして作ってください。',
+    '追加対象ごとのNeededH3の数を必ず守ってください。',
+    '1つの主要H2につきH3が合計3個になるように追加してください。',
+    '同じParentH2にH3を3個まで追加して構いません。',
+    'H2と同じ内容の言い換えではなく、本文を分割しやすい具体的な論点にしてください。',
+    '「物流」「安全」「品質」「効率」のような単語だけのH3は禁止です。必ず何を論じるか分かる具体的な見出しにしてください。',
+    'Descriptionは短い名詞句または短文として完結させ、読点「、」や「や」「と」「した」で終えないでください。',
+    'まとめ・導入のH3は作らないでください。',
+    '',
+    '追加対象のH2と必要数:',
+    ...targetPlans.map(({ section, needed }) => {
+      return [
+        `- ParentH2: ${section.title}`,
+        `  NeededH3: ${needed}`,
+        `  Description: ${section.description || ''}`,
+      ].join('\n');
+    }),
+    '',
+    '既存アウトライン:',
+    ...normalized.map((section) => {
+      if (section.isLead) return `Lead: ${section.title}`;
+      return `${section.level === 3 ? 'H3' : 'H2'}: ${section.title}`;
+    }),
+    '',
+    '出力形式（この形式のみ）:',
+    'ParentH2: [追加対象H2の見出し]',
+    'H3: [小見出し]',
+    'Description: [扱う内容の要点（30字以内・途中で切らず完結）]',
+    `Estimated: ${perH3}`,
+  ].join('\n');
+
+  const response = await callAI(prompt, 1200);
+  console.debug('[outline h3 supplement debug] response (first 800 chars):', response.slice(0, 800));
+
+  const lines = String(response || '').split('\n').map((line) => line.trim()).filter(Boolean);
+  const byParent = new Map<string, SharedOutlineSection[]>();
+  const orphanItems: SharedOutlineSection[] = [];
+  let currentParent = '';
+  let pending: SharedOutlineSection | null = null;
+  const flush = () => {
+    if (!pending) return;
+    if (!currentParent) {
+      orphanItems.push(pending);
+      pending = null;
+      return;
+    }
+    const list = byParent.get(currentParent) || [];
+    list.push(pending);
+    byParent.set(currentParent, list);
+    pending = null;
+  };
+
+  for (const line of lines) {
+    const parentMatch = line.match(/^ParentH2\s*[:：]\s*(.+)$/i);
+    if (parentMatch?.[1]) {
+      flush();
+      currentParent = canonicalizeHeading(parentMatch[1]);
+      continue;
+    }
+    const h3Match = line.match(/^H3\s*[:：]\s*(.+)$/i);
+    if (h3Match?.[1]) {
+      flush();
+      pending = {
+        title: h3Match[1].trim(),
+        level: 3,
+        description: '',
+        isLead: false,
+        estimatedWordCount: perH3,
+      };
+      continue;
+    }
+    const descMatch = line.match(/^(?:Description|説明|概要)\s*[:：]\s*(.+)$/i);
+    if (descMatch?.[1] && pending) {
+      pending.description = descMatch[1].trim();
+      continue;
+    }
+    const estimatedMatch = line.match(/^(?:Estimated|推定|目安)\s*[:：]?\s*(\d+)/i);
+    if (estimatedMatch?.[1] && pending) {
+      const estimated = Number.parseInt(estimatedMatch[1], 10);
+      if (Number.isFinite(estimated) && estimated > 0) {
+        pending.estimatedWordCount = estimated;
+      }
+    }
+  }
+  flush();
+
+  const existing = new Set(normalized.map((section) => canonicalizeHeading(section.title)));
+  const rebuilt: SharedOutlineSection[] = [];
+  let added = 0;
+  const maxAdd = missing;
+  const usedParentKeys = new Set<string>();
+  const looseItemsForParent = (parentKey: string): SharedOutlineSection[] => {
+    const exact = byParent.get(parentKey);
+    if (exact && exact.length > 0) {
+      usedParentKeys.add(parentKey);
+      return exact;
+    }
+    for (const [candidateKey, items] of byParent.entries()) {
+      if (usedParentKeys.has(candidateKey)) continue;
+      if (parentKey.includes(candidateKey) || candidateKey.includes(parentKey)) {
+        usedParentKeys.add(candidateKey);
+        return items;
+      }
+    }
+    return [];
+  };
+
+  for (let i = 0; i < normalized.length; i += 1) {
+    const section = normalized[i];
+    rebuilt.push(section);
+    if (added >= maxAdd || section.isLead || section.level !== 2 || isSummaryLikeTitle(section.title)) {
+      continue;
+    }
+    const parentKey = canonicalizeHeading(section.title);
+    const items = looseItemsForParent(parentKey);
+    for (const item of items) {
+      if (added >= maxAdd) break;
+      const key = canonicalizeHeading(item.title);
+      if (!key || existing.has(key) || isSummaryLikeTitle(item.title) || isWeakH3Title(item.title)) continue;
+      existing.add(key);
+      rebuilt.push({
+        ...item,
+        description: item.description || '具体的な判断材料を整理する',
+      });
+      added += 1;
+    }
+  }
+
+  if (added < maxAdd) {
+    const leftovers = [
+      ...orphanItems,
+      ...Array.from(byParent.entries())
+        .filter(([key]) => !usedParentKeys.has(key))
+        .flatMap(([, items]) => items),
+    ];
+    const targetSet = new Set(targetH2Indexes);
+    const inserted: SharedOutlineSection[] = [];
+    for (let i = 0; i < rebuilt.length; i += 1) {
+      inserted.push(rebuilt[i]);
+      const originalIndex = normalized.findIndex((section) => (
+        section.title === rebuilt[i].title &&
+        section.level === rebuilt[i].level &&
+        section.isLead === rebuilt[i].isLead
+      ));
+      if (added >= maxAdd || !targetSet.has(originalIndex)) continue;
+      while (leftovers.length > 0 && added < maxAdd) {
+        const item = leftovers.shift();
+        if (!item) break;
+        const key = canonicalizeHeading(item.title);
+        if (!key || existing.has(key) || isSummaryLikeTitle(item.title) || isWeakH3Title(item.title)) continue;
+        existing.add(key);
+        inserted.push({
+          ...item,
+          description: item.description || '具体的な判断材料を整理する',
+        });
+        added += 1;
+        break;
+      }
+    }
+    rebuilt.splice(0, rebuilt.length, ...inserted);
+  }
+
+  console.debug('[outline h3 supplement debug]', {
+    targetH3Count,
+    currentH3Count,
+    added,
+    targetH2: targetPlans.map(({ section, needed }) => ({ title: section.title, needed })),
+  });
+
+  return {
+    sections: normalizeOutlineSections(rebuilt, targetWordCount),
+    added,
+  };
+}
+
 async function normalizeLengthWithQualityGate(
   content: string,
   title: string,
@@ -1571,9 +1956,10 @@ async function normalizeLengthWithQualityGate(
   callAI: SharedCallAI,
   maxTokens: number,
   retryCount: number,
-  customInstructions?: string
+  customInstructions?: string,
+  tolerance = DEFAULT_WORD_COUNT_TOLERANCE
 ): Promise<string> {
-  const { minAllowed, maxAllowed } = getWordCountBounds(targetWordCount, DEFAULT_WORD_COUNT_TOLERANCE);
+  const { minAllowed, maxAllowed } = getWordCountBounds(targetWordCount, tolerance);
   let normalized = content;
 
   for (let attempt = 0; attempt <= retryCount; attempt++) {
@@ -1731,6 +2117,8 @@ export async function generateOutlineWithSharedCore(
         ? 6
         : 7;
   const minimumNonLeadCount = Math.max(3, minimumSectionCount - 1);
+  const targetH3Count = getTargetH3Count(params.targetWordCount);
+  const hardMinimumH3Count = getHardMinimumH3Count(params.targetWordCount);
   let resolvedTitle = params.fixedTitle || `${params.keyword} について`;
   let bestSections: SharedOutlineSection[] = [];
   let bestScore = Number.NEGATIVE_INFINITY;
@@ -1743,6 +2131,9 @@ export async function generateOutlineWithSharedCore(
         '【再生成指示】',
         '- 出力形式を厳守し、Section(Lead/H2/H3) の形で返してください。',
         '- 導入とまとめ以外の見出しを最低3つ作成してください。',
+        targetH3Count > 0
+          ? `- 主要H2ごとにH3を3個置いてください。記事全体のH3目標は${targetH3Count}個です。H3は直前のH2の具体論にしてください。`
+          : '',
         '- 見出しはキーワード連呼を避け、自然な日本語で具体化してください。',
         '- 「夏の活用方法」「種類と特徴」「選び方と注意点」「よくある疑問」のような浅い見出しを避けてください。',
         '- 対策記事では、原因、優先順位、組み合わせ方、費用・施工・安全面の注意点を入れてください。',
@@ -1777,7 +2168,8 @@ export async function generateOutlineWithSharedCore(
     }));
     const normalized = normalizeOutlineSections(mapped, params.targetWordCount);
     const qualityScore = scoreOutlineSections(normalized, params.keyword, params.fixedTitle);
-    attemptDiagnostics.push(`attempt${attempt + 1}: parsed=${parsedSections.length}, normalized=${normalized.length}, score=${qualityScore}`);
+    const h3Count = countH3Sections(normalized);
+    attemptDiagnostics.push(`attempt${attempt + 1}: parsed=${parsedSections.length}, normalized=${normalized.length}, h3=${h3Count}, score=${qualityScore}`);
 
     if (
       qualityScore > bestScore ||
@@ -1788,7 +2180,12 @@ export async function generateOutlineWithSharedCore(
     }
     const nonLeadCount = normalized.filter((section) => !section.isLead).length;
     const minimumQualityScore = isCountermeasureTopic(params.keyword, params.fixedTitle) ? 70 : 45;
-    if (normalized.length >= minimumSectionCount && nonLeadCount >= minimumNonLeadCount && qualityScore >= minimumQualityScore) {
+    if (
+      normalized.length >= minimumSectionCount &&
+      nonLeadCount >= minimumNonLeadCount &&
+      h3Count >= targetH3Count &&
+      qualityScore >= minimumQualityScore
+    ) {
       bestSections = normalized;
       bestScore = qualityScore;
       break;
@@ -1809,6 +2206,9 @@ export async function generateOutlineWithSharedCore(
         'Section (H2): [見出し]',
         'Description: [説明]',
         'Estimated: [文字数]',
+        targetH3Count > 0
+          ? `Section (H3)も目標${targetH3Count}個入れること。主要H2ごとにH3を3個置き、H3は関連するH2の直後に置くこと。`
+          : '',
         '最後のH2は「まとめ」にすること。',
         `導入とまとめ以外に最低${Math.max(2, minimumSectionCount - 2)}つのH2を入れること。`,
         'キーワードを不自然に繰り返さないこと。',
@@ -1865,11 +2265,38 @@ export async function generateOutlineWithSharedCore(
     }
   }
 
+  if (countH3Sections(bestSections) < targetH3Count && bestSections.length >= minimumSectionCount) {
+    for (let h3Attempt = 0; h3Attempt < 4 && countH3Sections(bestSections) < targetH3Count; h3Attempt += 1) {
+      try {
+      const h3Supplement = await supplementH3SectionsWithAI(
+        bestSections,
+        params.keyword,
+        params.targetWordCount,
+        targetH3Count,
+        params.callAI
+      );
+      if (h3Supplement.sections.length > bestSections.length) {
+        bestSections = h3Supplement.sections;
+      }
+      attemptDiagnostics.push(`h3Supplement: added=${h3Supplement.added} h3=${countH3Sections(bestSections)} normalized=${bestSections.length}`);
+        if (h3Supplement.added === 0) break;
+      } catch (error) {
+        attemptDiagnostics.push(`h3Supplement:error=${error instanceof Error ? error.message : String(error)}`);
+        break;
+      }
+    }
+  }
+
   if (bestSections.length < minimumSectionCount) {
     throw new Error(`アウトラインの生成に失敗しました。AIの応答が正しく解析できませんでした（diagnostics: ${attemptDiagnostics.join(' | ')}）`);
   }
+  if (countH3Sections(bestSections) < hardMinimumH3Count) {
+    throw new Error(`アウトラインの生成に失敗しました。小見出し（H3）が不足しています（diagnostics: ${attemptDiagnostics.join(' | ')}）`);
+  }
 
-  const rebalancedSections = rebalanceEstimatedWordCounts(bestSections, params.targetWordCount);
+  const sectionsWithDescriptions = ensureOutlineDescriptions(bestSections);
+  const sectionsWithBalancedH3 = rebalanceParentAndChildH3WordCounts(sectionsWithDescriptions, params.targetWordCount);
+  const rebalancedSections = rebalanceEstimatedWordCounts(sectionsWithBalancedH3, params.targetWordCount);
   const normalizedLevels = flattenHeadingLevelsForMediumLength(rebalancedSections, params.targetWordCount);
   return { title: resolvedTitle, sections: normalizedLevels };
 }
@@ -1944,6 +2371,20 @@ export async function generateArticleFromOutlineWithSharedCore(
   fullContent = trimDanglingTailSafe(formatReadableParagraphs(fullContent));
   // まとめセクション保険は最後に一度だけ実行
   fullContent = ensureSummarySection(fullContent, params.outline);
+  if (params.targetWordCount && params.targetWordCount > 0) {
+    fullContent = await normalizeLengthWithQualityGate(
+      fullContent,
+      params.outline.title,
+      params.targetWordCount,
+      params.keywords,
+      params.callAI,
+      maxTokens,
+      1,
+      params.customInstructions,
+      FINAL_ARTICLE_WORD_COUNT_TOLERANCE
+    );
+    fullContent = trimDanglingTailSafe(formatReadableParagraphs(fullContent));
+  }
   if (!fullContent.endsWith('\n')) {
     fullContent = `${fullContent}\n`;
   }
