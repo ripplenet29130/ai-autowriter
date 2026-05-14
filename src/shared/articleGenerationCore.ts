@@ -425,7 +425,11 @@ function selectH3TitlesForH2(h2Title: string, count: number): string[] {
   return pool.slice(0, Math.max(1, Math.min(count, pool.length)));
 }
 
-function insertSubheadingsIntoLongSections(markdown: string): string {
+function insertSubheadingsIntoLongSections(markdown: string, targetWordCount?: number): string {
+  if (Number.isFinite(targetWordCount) && Number(targetWordCount) <= 1200) {
+    return String(markdown || '').trim();
+  }
+
   const text = String(markdown || '').trim();
   if (!text) return text;
 
@@ -2110,7 +2114,7 @@ export async function generateOutlineWithSharedCore(
 
   const maxAttempts = 4;
   const minimumSectionCount = params.targetWordCount <= 1200
-    ? 4
+    ? 5
     : params.targetWordCount <= 2500
       ? 5
       : params.targetWordCount <= 3500
@@ -2367,7 +2371,7 @@ export async function generateArticleFromOutlineWithSharedCore(
   }
 
   fullContent = removeDuplicateTitleAtStart(fullContent, params.outline.title);
-  fullContent = insertSubheadingsIntoLongSections(fullContent);
+  fullContent = insertSubheadingsIntoLongSections(fullContent, params.targetWordCount);
   fullContent = trimDanglingTailSafe(formatReadableParagraphs(fullContent));
   // まとめセクション保険は最後に一度だけ実行
   fullContent = ensureSummarySection(fullContent, params.outline);

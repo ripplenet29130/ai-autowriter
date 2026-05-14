@@ -7,6 +7,8 @@ export interface ArticleFilters {
   category?: string;
   dateFrom?: string;
   dateTo?: string;
+  publishedDateFrom?: string;
+  publishedDateTo?: string;
   searchTerm?: string;
 }
 
@@ -190,6 +192,14 @@ export const articlesService = {
         query = query.lte('created_at', filters.dateTo);
       }
 
+      if (filters?.publishedDateFrom) {
+        query = query.gte('published_at', filters.publishedDateFrom);
+      }
+
+      if (filters?.publishedDateTo) {
+        query = query.lte('published_at', filters.publishedDateTo);
+      }
+
       if (filters?.searchTerm) {
         query = query.or(`title.ilike.%${filters.searchTerm}%,content.ilike.%${filters.searchTerm}%`);
       }
@@ -243,6 +253,14 @@ export const articlesService = {
 
       if (filters?.dateTo) {
         query = query.lte('created_at', filters.dateTo);
+      }
+
+      if (filters?.publishedDateFrom) {
+        query = query.gte('published_at', filters.publishedDateFrom);
+      }
+
+      if (filters?.publishedDateTo) {
+        query = query.lte('published_at', filters.publishedDateTo);
       }
 
       if (filters?.searchTerm) {

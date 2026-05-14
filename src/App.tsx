@@ -21,7 +21,7 @@ import { supabase } from './services/supabaseClient';
 
 function App() {
   const { activeView, loadFromSupabase } = useAppStore();
-  const { isLoading, user, profile, account, isAdmin, isClient, loadAuth } = useAuthStore();
+  const { isLoading, user, profile, account, isAdmin, isClient, loadAuth, signOut } = useAuthStore();
   const featureFlags = account?.feature_flags ?? {};
   const [isPasswordRecovery, setIsPasswordRecovery] = useState(() =>
     new URLSearchParams(window.location.search).get('auth') === 'recovery' ||
@@ -34,6 +34,10 @@ function App() {
       <p className="text-gray-600">必要な場合は管理者にお問い合わせください。</p>
     </div>
   );
+
+  const handleBackToLogin = async () => {
+    await signOut();
+  };
 
   useEffect(() => {
     loadAuth().catch(error => {
@@ -153,6 +157,13 @@ function App() {
             <p className="text-gray-600">
               管理者に連絡して、このユーザーに権限を設定してください。
             </p>
+            <button
+              type="button"
+              onClick={handleBackToLogin}
+              className="mt-6 bg-gray-900 hover:bg-gray-800 text-white font-medium px-5 py-2.5 rounded-lg transition-all duration-200"
+            >
+              ログイン画面に戻る
+            </button>
           </div>
         </div>
       );
@@ -175,6 +186,13 @@ function App() {
             <p className="text-gray-600">
               clientアカウントの紐づけを確認してください。
             </p>
+            <button
+              type="button"
+              onClick={handleBackToLogin}
+              className="mt-6 bg-gray-900 hover:bg-gray-800 text-white font-medium px-5 py-2.5 rounded-lg transition-all duration-200"
+            >
+              ログイン画面に戻る
+            </button>
           </div>
         </div>
       );
@@ -188,6 +206,13 @@ function App() {
             <p className="text-gray-600">
               利用再開については管理者にお問い合わせください。
             </p>
+            <button
+              type="button"
+              onClick={handleBackToLogin}
+              className="mt-6 bg-gray-900 hover:bg-gray-800 text-white font-medium px-5 py-2.5 rounded-lg transition-all duration-200"
+            >
+              ログイン画面に戻る
+            </button>
           </div>
         </div>
       );

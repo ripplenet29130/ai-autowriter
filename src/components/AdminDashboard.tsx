@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { LogOut, Plus, RefreshCw, Save, Users } from 'lucide-react';
+import { LogOut, Plus, RefreshCw, Save, Trash2, Users } from 'lucide-react';
 import { supabase } from '../services/supabaseClient';
 import { Account, useAuthStore } from '../store/useAuthStore';
 
@@ -226,6 +226,35 @@ export const AdminDashboard: React.FC = () => {
     setIsSaving(false);
   };
 
+  const deleteAccount = async (account: AccountRow) => {
+    if (!supabase) return;
+
+    const confirmed = window.confirm(
+      `${account.name}を削除しますか？\nログインユーザーも削除され、この操作は元に戻せません。`
+    );
+    if (!confirmed) return;
+
+    setIsSaving(true);
+    setError(null);
+    setMessage(null);
+
+    const { error: deleteError } = await supabase.functions.invoke('admin-delete-client-account', {
+      body: {
+        account_id: account.id,
+      },
+    });
+
+    if (deleteError) {
+      setError(await getSupabaseErrorMessage(deleteError));
+      setIsSaving(false);
+      return;
+    }
+
+    setMessage('clientアカウントを削除しました。');
+    await loadAccounts();
+    setIsSaving(false);
+  };
+
   const formatDate = (value?: string) => {
     if (!value) return '-';
     return new Intl.DateTimeFormat('ja-JP', {
@@ -386,7 +415,179 @@ export const AdminDashboard: React.FC = () => {
             </div>
           )}
 
-          <div className="overflow-x-auto">
+          <div className="p-4 space-y-3">
+            {isLoading ? (
+              <div className="px-4 py-8 text-center text-gray-500">
+                読み込み中です
+              </div>
+            ) : accounts.length === 0 ? (
+              <div className="px-4 py-8 text-center text-gray-500">
+                アカウントがありません
+              </div>
+            ) : (
+              accounts.map((account) => (
+                <div
+                  key={account.id}
+                  className="grid grid-cols-1 xl:grid-cols-[minmax(260px,1.4fr)_minmax(220px,1fr)_minmax(280px,1.2fr)_auto] gap-4 border border-gray-200 rounded-lg p-4 bg-white"
+                >
+                  <div className="space-y-2 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className={`inline-flex h-2.5 w-2.5 rounded-full ${account.status === 'active' ? 'bg-green-500' : 'bg-gray-400'}`} />
+                      <span className="text-xs font-medium text-gray-500">client</span>
+                    </div>
+                    <div className="flex gap-2">
+                      <input
+                        value={account.name}
+                        onChange={(event) =>
+                          setAccounts((prev) =>
+                            prev.map((item) => item.id === account.id ? { ...item, name: event.target.value } : item)
+                          )
+                        }
+                        className="min-w-0 flex-1 border border-gray-300 rounded-lg px-3 py-2 text-base font-medium"
+                      />
+                      <select
+                        value={account.status}
+                        onChange={(event) =>
+                          updateAccount(account.id, { status: event.target.value as Account['status'] })
+                        }
+                        className="w-28 shrink-0 border border-gray-300 rounded-lg px-3 py-2"
+                      >
+                        <option value="active">利用中</option>
+                        <option value="suspended">停止中</option>
+                      </select>
+                    </div>
+                    <div className="text-xs text-gray-500 truncate">
+                      {account.login_email || 'ログインメール未登録'}
+                    </div>
+                    <div className="text-xs text-gray-400">
+                      更新 {formatDate(account.updated_at)} / 作成 {formatDate(account.created_at)}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-3">
+                    <label className="hidden">
+                      <span className="block text-xs font-medium text-gray-500">状態</span>
+                      <select
+                        value={account.status}
+                        onChange={(event) =>
+                          updateAccount(account.id, { status: event.target.value as Account['status'] })
+                        }
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                      >
+                        <option value="active">利用中</option>
+                        <option value="suspended">停止中</option>
+                      </select>
+                    </label>
+                    <div className="rounded-lg bg-gray-50 border border-gray-200 p-3">
+                      <div className="text-xs font-medium text-gray-500">利用状況</div>
+                      <div className="mt-1 text-sm text-gray-700">記事 {account.article_count ?? 0}</div>
+                      <div className="text-sm text-gray-700">予約 {account.schedule_count ?? 0}</div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <label className="space-y-1">
+                      <span className="block text-xs font-medium text-gray-500">WordPress上限</span>
+                      <input
+                        type="number"
+                        min={0}
+                        value={account.wordpress_site_limit}
+                        onChange={(event) =>
+                          setAccounts((prev) =>
+                            prev.map((item) => item.id === account.id
+                              ? { ...item, wordpress_site_limit: Number(event.target.value) }
+                              : item)
+                          )
+                        }
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                      />
+                      <div className="text-xs text-gray-500">登録済み {account.wordpress_count ?? 0}</div>
+                    </label>
+                    <label className="space-y-1">
+                      <span className="block text-xs font-medium text-gray-500">月間記事上限</span>
+                      <input
+                        type="number"
+                        min={0}
+                        value={account.monthly_article_limit ?? ''}
+                        onChange={(event) =>
+                          setAccounts((prev) =>
+                            prev.map((item) => item.id === account.id
+                              ? {
+                                  ...item,
+                                  monthly_article_limit: event.target.value ? Number(event.target.value) : null,
+                                }
+                              : item)
+                          )
+                        }
+                        placeholder="無制限"
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                      />
+                    </label>
+                    <div className="space-y-1">
+                      <span className="block text-xs font-medium text-gray-500">機能</span>
+                      <div className="grid grid-cols-2 gap-2">
+                        {featureOptions.map((feature) => (
+                          <label key={feature.key} className="inline-flex items-center gap-1.5 text-xs text-gray-600">
+                            <input
+                              type="checkbox"
+                              checked={Boolean((account.feature_flags ?? defaultFeatureFlags)[feature.key])}
+                              onChange={(event) =>
+                                setAccounts((prev) =>
+                                  prev.map((item) => item.id === account.id
+                                    ? {
+                                        ...item,
+                                        feature_flags: {
+                                          ...defaultFeatureFlags,
+                                          ...(item.feature_flags ?? {}),
+                                          [feature.key]: event.target.checked,
+                                        },
+                                      }
+                                    : item)
+                                )
+                              }
+                              className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                            />
+                            <span>{feature.label}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex xl:flex-col gap-2 xl:items-stretch justify-end">
+                    <button
+                      type="button"
+                      disabled={isSaving}
+                      onClick={() => updateAccount(account.id, {
+                        name: account.name,
+                        wordpress_site_limit: account.wordpress_site_limit,
+                        monthly_article_limit: account.monthly_article_limit,
+                        feature_flags: {
+                          ...defaultFeatureFlags,
+                          ...(account.feature_flags ?? {}),
+                        },
+                      })}
+                      className="inline-flex items-center justify-center gap-2 bg-gray-900 hover:bg-gray-800 disabled:bg-gray-400 text-white rounded-lg px-3 py-2 text-sm font-medium"
+                    >
+                      <Save className="w-4 h-4" />
+                      保存
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isSaving}
+                      onClick={() => deleteAccount(account)}
+                      className="inline-flex items-center justify-center gap-2 border border-red-200 bg-white hover:bg-red-50 disabled:bg-gray-100 text-red-700 rounded-lg px-3 py-2 text-sm font-medium"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                      削除
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+
+          <div className="hidden">
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
@@ -530,6 +731,15 @@ export const AdminDashboard: React.FC = () => {
                         <div className="text-xs">作成 {formatDate(account.created_at)}</div>
                       </td>
                       <td className="px-4 py-3">
+                        <button
+                          type="button"
+                          disabled={isSaving}
+                          onClick={() => deleteAccount(account)}
+                          className="inline-flex items-center gap-2 border border-red-200 bg-white hover:bg-red-50 disabled:bg-gray-100 text-red-700 rounded-lg px-3 py-2 text-sm font-medium mr-2"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                          削除
+                        </button>
                         <button
                           type="button"
                           disabled={isSaving}

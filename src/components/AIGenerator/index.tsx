@@ -73,6 +73,9 @@ export const AIGenerator: React.FC = () => {
 
     // Target Word Count State
     const [targetWordCount, setTargetWordCount] = useState<number>(2000);
+    const usesTitleSource = contentSourceMode === 'title' || contentSourceMode === 'both';
+    const activeSelectedTitle = usesTitleSource ? selectedTitle.trim() : '';
+    const activeSelectedTitleSetId = usesTitleSource ? selectedTitleSetId : '';
 
     const articleStructureOptions: Array<{ value: ArticleStructureType; label: string; description: string }> = [
         {
@@ -348,10 +351,10 @@ export const AIGenerator: React.FC = () => {
             }
         }
 
-        if ((contentSourceMode === 'title' || contentSourceMode === 'both') && selectedTitleSetId && selectedTitle) {
+        if (usesTitleSource && activeSelectedTitleSetId && activeSelectedTitle) {
             await applySelectedAIConfig();
             toast.loading('タイトルからキーワードと検索意図を解析中...', { id: 'title-inference' });
-            titleAnalysis = await titleKeywordInferenceService.inferFromTitle(selectedTitle);
+            titleAnalysis = await titleKeywordInferenceService.inferFromTitle(activeSelectedTitle);
             toast.success('タイトル解析が完了しました', { id: 'title-inference' });
 
             const titleKeywords = mergeKeywords(titleAnalysis.mainKeyword, titleAnalysis.subKeywords);
@@ -365,16 +368,10 @@ export const AIGenerator: React.FC = () => {
 
         // 自動モード実行 (最優先)
         if (generationMode === 'auto') {
-            if (contentSourceMode === 'title' || contentSourceMode === 'both') {
-                if (!selectedTitleSetId || !selectedTitle) {
+            if (usesTitleSource) {
+                if (!activeSelectedTitleSetId || !activeSelectedTitle) {
                     toast.error('タイトルセットと使用するタイトルを選択してください');
                     return;
-                }
-            } else if (contentSourceMode === 'keyword' && selectedTitleSetId && selectedTitle) {
-                // タイトルセット選択時はコンテキストとしてタイトルを使用
-                if (finalKeywords.length === 0) {
-                    const titleModeKeyword = selectedTitle.split(/[？?！!：:]/)[0].trim();
-                    finalKeywords = [titleModeKeyword];
                 }
             }
 
@@ -396,7 +393,7 @@ export const AIGenerator: React.FC = () => {
             const article = await executeAutoMode(finalKeywords, {
                 tone,
                 targetLength: length,
-                selectedTitle: selectedTitle || undefined,
+                selectedTitle: activeSelectedTitle || undefined,
                 targetWordCount,
                 articleStructureType,
                 customInstructions: [
@@ -647,8 +644,8 @@ export const AIGenerator: React.FC = () => {
                 articleGoal={articleGoal}
                 articleStructureType={articleStructureType}
                 customInstructions={buildEffectiveCustomInstructions(promptSets.find(ps => ps.id === selectedPromptSetId)?.customInstructions)}
-                selectedTitleSetId={selectedTitleSetId}
-                selectedTitle={selectedTitle}
+                selectedTitleSetId={activeSelectedTitleSetId}
+                selectedTitle={activeSelectedTitle}
                 targetWordCount={targetWordCount}
                 onComplete={handleMultiStepComplete}
                 onBack={() => setShowMultiStep(false)}

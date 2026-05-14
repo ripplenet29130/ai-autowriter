@@ -32,3 +32,6 @@ build/
 req.json
 supabase/.temp/
 *.tsbuildinfo
+
+.vercel
+.env*.local

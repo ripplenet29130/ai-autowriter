@@ -13,7 +13,7 @@ function safeWordCountTarget(total?: number, fallback = 300): number {
 }
 
 function resolveMinimumSectionCount(targetWordCount: number): number {
-  if (targetWordCount <= 1200) return 4;
+  if (targetWordCount <= 1200) return 5;
   if (targetWordCount <= 2500) return 5;
   if (targetWordCount <= 3500) return 6;
   return 7;

@@ -109,6 +109,50 @@ const getNextExecutionDate = (schedule: ScheduleSetting): Date | null => {
   return next;
 };
 
+const getScheduledExecutionForDate = (schedule: ScheduleSetting, targetDate: Date): Date | null => {
+  if (!schedule.status || !schedule.post_time) return null;
+
+  const [hourStr, minuteStr] = schedule.post_time.split(':');
+  const hour = Number(hourStr);
+  const minute = Number(minuteStr);
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null;
+
+  const dayStart = new Date(targetDate);
+  dayStart.setHours(0, 0, 0, 0);
+  const executionAt = new Date(dayStart);
+  executionAt.setHours(hour, minute, 0, 0);
+
+  const startAt = schedule.start_date
+    ? new Date(`${schedule.start_date}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00`)
+    : null;
+  const endAt = schedule.end_date ? new Date(`${schedule.end_date}T23:59:59`) : null;
+
+  if (startAt && executionAt < startAt) return null;
+  if (endAt && executionAt > endAt) return null;
+
+  const normalizedFrequency = schedule.frequency === '毎日' ? 'daily'
+    : schedule.frequency === '毎週' ? 'weekly'
+      : schedule.frequency === '隔週' ? 'biweekly'
+        : schedule.frequency === '毎月' ? 'monthly'
+          : schedule.frequency;
+
+  if (normalizedFrequency === 'daily') return executionAt;
+
+  if (normalizedFrequency === 'weekly' || normalizedFrequency === 'biweekly') {
+    if (!startAt) return executionAt;
+    const intervalDays = normalizedFrequency === 'weekly' ? 7 : 14;
+    const elapsedDays = Math.floor((dayStart.getTime() - new Date(startAt).setHours(0, 0, 0, 0)) / 86400000);
+    return elapsedDays >= 0 && elapsedDays % intervalDays === 0 ? executionAt : null;
+  }
+
+  if (normalizedFrequency === 'monthly') {
+    if (!startAt) return executionAt;
+    return targetDate.getDate() === startAt.getDate() ? executionAt : null;
+  }
+
+  return executionAt;
+};
+
 const toStatusLabel = (postStatus: ScheduleSetting['post_status']) => {
   return postStatus === 'publish' ? '公開投稿' : '下書き保存';
 };
@@ -144,8 +188,8 @@ export const Dashboard: React.FC = () => {
     try {
       setIsLoading(true);
 
-      const [allArticles, schedules] = await Promise.all([
-        articlesService.getAllArticles(undefined, { field: 'created_at', ascending: false }, 100),
+      const [totalArticles, schedules] = await Promise.all([
+        articlesService.getArticleCount(),
         scheduleService.getSchedules().catch(() => [] as ScheduleSetting[])
       ]);
       const executionHistory = await supabaseSchedulerService.getExecutionHistory(12).catch(() => [] as ExecutionCostHistoryItem[]);
@@ -155,9 +199,10 @@ export const Dashboard: React.FC = () => {
       const todayEnd = new Date(todayStart);
       todayEnd.setHours(23, 59, 59, 999);
 
-      const publishedToday = allArticles.filter((article) =>
-        article.publishedAt && new Date(article.publishedAt) >= todayStart
-      ).length;
+      const publishedToday = await articlesService.getArticleCount({
+        publishedDateFrom: todayStart.toISOString(),
+        publishedDateTo: todayEnd.toISOString()
+      });
 
       const enabledWithNext = await Promise.all(
         schedules
@@ -183,11 +228,11 @@ export const Dashboard: React.FC = () => {
       });
 
       const todayPlanned = enabledWithNext.filter((schedule) =>
-        schedule.nextExecution && schedule.nextExecution >= todayStart && schedule.nextExecution <= todayEnd
+        Boolean(getScheduledExecutionForDate(schedule, todayStart))
       ).length;
 
       setStats({
-        totalArticles: allArticles.length,
+        totalArticles,
         publishedToday
       });
       setActiveSchedules(enabledWithNext);
