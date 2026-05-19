@@ -290,6 +290,7 @@ export const useAppStore = create<AppState>()(
           });
         } catch (error) {
           console.error('Error setting AI config:', error);
+          throw error;
         }
       },
 
