@@ -107,7 +107,11 @@ export function useWordPressPublish() {
             const service = new WordPressService(config);
 
             // 記事内のBase64画像をWordPressにアップロードしてURLに置換
-            const processedArticle = await processImagesBeforePublish(article, service);
+            const articleForPublish = category
+                ? { ...article, category }
+                : article;
+
+            const processedArticle = await processImagesBeforePublish(articleForPublish, service);
 
             const result = await service.publishArticle(processedArticle, status, publishDate);
 

@@ -6,7 +6,8 @@ import {
     TrendAnalysisResult,
     SectionGenerationRequest,
     OutlineGenerationRequest,
-    ArticleStructureType
+    ArticleStructureType,
+    ArticleGoal
 } from '../types';
 import { realTrendAnalysisService } from './realTrendAnalysisService';
 import { trendAnalysisService } from './trendAnalysisService';
@@ -20,6 +21,171 @@ import { generateArticleFromOutlineWithSharedCore } from '../shared/articleGener
  * 繝医Ξ繝ｳ繝牙・譫・竊・繧｢繧ｦ繝医Λ繧､繝ｳ逕滓・ 竊・繧ｻ繧ｯ繧ｷ繝ｧ繝ｳ蛻･譛ｬ譁・函謌・竊・險倅ｺ狗ｵ・∩遶九※
  */
 export class MultiStepGenerationService {
+    private compactInstructions(parts: Array<string | undefined | null | false>): string | undefined {
+        const text = parts
+            .map((part) => String(part || '').trim())
+            .filter(Boolean)
+            .join('\n\n')
+            .trim();
+
+        return text || undefined;
+    }
+
+    private buildArticleGoalInstructions(goal?: ArticleGoal): string {
+        switch (goal) {
+            case 'beginner':
+                return [
+                    '【記事目的】初心者向け',
+                    '- 専門用語は初出で短く説明する',
+                    '- 読者が最初に迷う点から順に解消する',
+                    '- いきなり細部に入らず、判断の前提を整える',
+                ].join('\n');
+            case 'practical':
+                return [
+                    '【記事目的】実務・実践向け',
+                    '- 読者がそのまま行動できる手順、判断基準、注意点を入れる',
+                    '- 抽象論だけで終わらせず、現場で確認する項目を具体化する',
+                    '- 失敗しやすい点と回避策を必ず含める',
+                ].join('\n');
+            case 'seo':
+                return [
+                    '【記事目的】SEO網羅型',
+                    '- 検索意図を広く拾い、基礎・原因・対策・比較・注意点を整理する',
+                    '- 関連語を見出しに羅列せず、読者の疑問の流れに統合する',
+                    '- よくある疑問にも自然に答える',
+                ].join('\n');
+            case 'authority':
+                return [
+                    '【記事目的】専門性・信頼性重視',
+                    '- 断定しすぎず、条件・前提・例外を明確にする',
+                    '- 数値や制度など不確かな情報は一般化せず慎重に扱う',
+                    '- 判断根拠が読者に伝わる説明にする',
+                ].join('\n');
+            case 'comparison':
+                return [
+                    '【記事目的】比較・選定支援',
+                    '- 比較軸を先に示し、条件別に選び方が分かる構成にする',
+                    '- メリットだけでなく弱点、注意点、向いていないケースも入れる',
+                    '- 最後に読者が選択できる判断基準をまとめる',
+                ].join('\n');
+            case 'conversion':
+                return [
+                    '【記事目的】問い合わせ・導入検討向け',
+                    '- 課題、放置リスク、解決策、導入前の確認点を自然につなげる',
+                    '- 強い売り込みではなく、相談・検討に進む理由を整理する',
+                    '- 読者の不安を解消する具体的な判断材料を入れる',
+                ].join('\n');
+            default:
+                return [
+                    '【記事目的】標準解説',
+                    '- 読者がテーマを理解し、次の行動を判断できる構成にする',
+                    '- 一般論だけで終わらせず、具体的な確認点や注意点を入れる',
+                ].join('\n');
+        }
+    }
+
+    private buildAutoModeQualityInstructions(options: {
+        selectedTitle?: string;
+        targetWordCount: number;
+        articleGoal?: ArticleGoal;
+        articleStructureType?: ArticleStructureType;
+    }): string {
+        return [
+            '【自動モード品質基準】',
+            options.selectedTitle
+                ? `- 固定タイトル「${options.selectedTitle}」の検索意図を最優先し、タイトルから外れた章を作らない`
+                : '- 入力キーワードから読者の検索意図を推定し、記事全体を一つの明確な目的に揃える',
+            `- 目標文字数は${options.targetWordCount}字。導入・本文・まとめの配分を崩さず、本文を薄くしない`,
+            '- 対話モードで人が確認したアウトラインと同等になるよう、各H2の役割を分ける',
+            '- 「種類と特徴」「選び方と注意点」「活用方法」だけの汎用見出しに逃げず、テーマ固有の判断材料にする',
+            '- H3は直前のH2を具体化する小見出しとして使い、独立した大テーマにしない',
+            '- 本文では同じ説明を繰り返さず、原因・対策・比較・注意点・実行手順のどれを扱う章かを明確にする',
+            this.buildArticleGoalInstructions(options.articleGoal),
+            options.articleStructureType ? `- 記事構成タイプ: ${options.articleStructureType}` : '',
+        ].filter(Boolean).join('\n');
+    }
+
+    private normalizeComparableText(value: string): string {
+        return String(value || '')
+            .toLowerCase()
+            .replace(/[^\p{Letter}\p{Number}]+/gu, '')
+            .trim();
+    }
+
+    private evaluateAutoOutlineQuality(
+        outline: ArticleOutline,
+        options: { targetWordCount: number; selectedTitle?: string }
+    ): { passed: boolean; issues: string[] } {
+        const issues: string[] = [];
+        const sections = outline.sections || [];
+        const nonLeadSections = sections.filter((section) => !section.isLead);
+        const h2Sections = nonLeadSections.filter((section) => section.level === 2);
+        const h3Sections = nonLeadSections.filter((section) => section.level === 3);
+        const minSections = options.targetWordCount <= 1200 ? 5 : options.targetWordCount <= 3000 ? 6 : 7;
+
+        if (sections.length < minSections) {
+            issues.push(`section count is too low (${sections.length}/${minSections})`);
+        }
+
+        if (h2Sections.length < 3) {
+            issues.push(`H2 count is too low (${h2Sections.length}/3)`);
+        }
+
+        if (options.targetWordCount >= 1600 && h3Sections.length < 2) {
+            issues.push(`H3 count is too low (${h3Sections.length}/2)`);
+        }
+
+        if (!sections.some((section) => this.isSummaryTitle(section.title))) {
+            issues.push('summary section is missing');
+        }
+
+        const seenTitles = new Set<string>();
+        const genericHeadingPattern = /(活用方法|種類と特徴|選び方と注意点|ポイント|メリット|デメリット)$/;
+        let genericHeadingCount = 0;
+
+        for (const section of nonLeadSections) {
+            const title = String(section.title || '').trim();
+            const normalized = this.normalizeComparableText(title);
+            if (!normalized) {
+                issues.push('empty heading exists');
+                continue;
+            }
+
+            if (seenTitles.has(normalized)) {
+                issues.push(`duplicate heading: ${title}`);
+            }
+            seenTitles.add(normalized);
+
+            if (genericHeadingPattern.test(title)) {
+                genericHeadingCount += 1;
+            }
+        }
+
+        if (genericHeadingCount >= 2) {
+            issues.push(`too many generic headings (${genericHeadingCount})`);
+        }
+
+        if (options.selectedTitle) {
+            const outlineTitle = this.normalizeComparableText(outline.title);
+            const selectedTitle = this.normalizeComparableText(options.selectedTitle);
+            if (outlineTitle && selectedTitle && outlineTitle !== selectedTitle) {
+                issues.push('outline title differs from selected title');
+            }
+        }
+
+        return { passed: issues.length === 0, issues };
+    }
+
+    private buildAutoOutlineRetryInstructions(issues: string[]): string {
+        return [
+            '【自動モード再生成指示】',
+            '前回のアウトラインは自動生成品質基準を満たしていません。以下を必ず修正してください。',
+            ...issues.map((issue) => `- ${issue}`),
+            '- H2ごとの役割を明確に分け、汎用見出しをテーマ固有の具体的な見出しに置き換える',
+            '- 目標文字数に対して本文が薄くならない章数と配分にする',
+        ].join('\n');
+    }
+
     private resolveFinalTargetWordCount(
         outline: ArticleOutline,
         fallbackTargetWordCount?: number
@@ -400,6 +566,7 @@ export class MultiStepGenerationService {
             selectedTitle?: string;
             targetWordCount?: number;
             customInstructions?: string;
+            articleGoal?: ArticleGoal;
             articleStructureType?: ArticleStructureType;
             imagesPerArticle?: number; // 逕ｻ蜒乗椢謨ｰ繧定ｿｽ蜉
             onStepComplete?: (step: number, data: any) => void;
@@ -428,7 +595,17 @@ export class MultiStepGenerationService {
                     ? 3000
                     : 2000);
 
-        const outline = await this.generateOutline(
+        const effectiveCustomInstructions = this.compactInstructions([
+            options?.customInstructions,
+            this.buildAutoModeQualityInstructions({
+                selectedTitle,
+                targetWordCount,
+                articleGoal: options?.articleGoal,
+                articleStructureType: options?.articleStructureType,
+            }),
+        ]);
+
+        let outline = await this.generateOutline(
             keywords,
             trendData,
             {
@@ -436,17 +613,41 @@ export class MultiStepGenerationService {
                 tone: options?.tone,
                 selectedTitle,
                 targetWordCount,
-                customInstructions: options?.customInstructions,
+                customInstructions: effectiveCustomInstructions,
                 articleStructureType: options?.articleStructureType,
             }
         );
+
+        const outlineQuality = this.evaluateAutoOutlineQuality(outline, {
+            targetWordCount,
+            selectedTitle,
+        });
+
+        if (!outlineQuality.passed) {
+            console.warn('Auto outline quality gate failed. Regenerating outline:', outlineQuality.issues);
+            outline = await this.generateOutline(
+                keywords,
+                trendData,
+                {
+                    targetLength: options?.targetLength,
+                    tone: options?.tone,
+                    selectedTitle,
+                    targetWordCount,
+                    customInstructions: this.compactInstructions([
+                        effectiveCustomInstructions,
+                        this.buildAutoOutlineRetryInstructions(outlineQuality.issues),
+                    ]),
+                    articleStructureType: options?.articleStructureType,
+                }
+            );
+        }
         options?.onStepComplete?.(3, outline);
 
         // Step 4: 本文生成（対話モードと同じ経路）
         const article = await this.generateArticleFromPreparedOutline(outline, {
             tone: options?.tone || 'professional',
             targetWordCount,
-            customInstructions: options?.customInstructions,
+            customInstructions: effectiveCustomInstructions,
             onProgress: undefined,
         });
         options?.onStepComplete?.(4, article);
@@ -454,6 +655,8 @@ export class MultiStepGenerationService {
         article.tone = options?.tone || 'professional';
         article.length = options?.targetLength || 'medium';
         article.targetWordCount = targetWordCount;
+        article.articleGoal = options?.articleGoal || 'standard';
+        article.articleStructureType = options?.articleStructureType || 'standard';
 
         // 逕ｻ蜒冗函謌仙・逅・ｒ霑ｽ蜉
         if (options?.imagesPerArticle && options.imagesPerArticle > 0) {

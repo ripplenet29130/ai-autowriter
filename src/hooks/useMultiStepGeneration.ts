@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react';
 import {
     Article,
+    ArticleGoal,
     ArticleOutline,
     TrendAnalysisResult,
     GenerationStep,
@@ -308,6 +309,7 @@ export function useMultiStepGeneration() {
             selectedTitle?: string;
             targetWordCount?: number;
             customInstructions?: string;
+            articleGoal?: ArticleGoal;
             articleStructureType?: ArticleStructureType;
             imagesPerArticle?: number; // 追加
         }
@@ -334,7 +336,8 @@ export function useMultiStepGeneration() {
                             currentStep: (step + 1) as GenerationStep,
                             stepResults: [...prev.stepResults, stepResult],
                             ...(step === 1 && { trendData: data }),
-                            ...(step === 2 && { outline: data })
+                            ...(step === 2 && { titles: data }),
+                            ...(step === 3 && { outline: data })
                         }));
 
                         toast.success(`ステップ ${step}/3 完了`, { id: 'auto-generation' });

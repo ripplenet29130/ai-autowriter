@@ -11,7 +11,6 @@ import {
 import { useAppStore } from '../store/useAppStore';
 import { articlesService } from '../services/articlesService';
 import { scheduleService } from '../services/scheduleService';
-import { supabaseSchedulerService } from '../services/supabaseSchedulerService';
 import { ScheduleSetting } from '../types';
 import { format } from 'date-fns';
 import { ja } from 'date-fns/locale';
@@ -20,27 +19,6 @@ type ScheduleWithNext = ScheduleSetting & {
   nextExecution: Date | null;
   lastExecutionAt: string | null;
 };
-
-type ExecutionCostHistoryItem = {
-  id: string;
-  executed_at: string;
-  article_title: string | null;
-  status: string | null;
-  estimated_cost_usd?: number | string | null;
-  cost_breakdown?: any;
-  wordpress_configs?: { name?: string; url?: string } | null;
-};
-
-const USD_TO_JPY_RATE = 150;
-
-const toJpy = (usd: number) => usd * USD_TO_JPY_RATE;
-
-const formatJpy = (value: number) =>
-  new Intl.NumberFormat('ja-JP', {
-    style: 'currency',
-    currency: 'JPY',
-    maximumFractionDigits: 0
-  }).format(value);
 
 const getNextExecutionDate = (schedule: ScheduleSetting): Date | null => {
   if (!schedule.status || !schedule.post_time) return null;
@@ -175,8 +153,6 @@ export const Dashboard: React.FC = () => {
   });
   const [activeSchedules, setActiveSchedules] = useState<ScheduleWithNext[]>([]);
   const [todayScheduleCount, setTodayScheduleCount] = useState(0);
-  const [recentExecutionCosts, setRecentExecutionCosts] = useState<ExecutionCostHistoryItem[]>([]);
-  const [recentExecutionCostTotal, setRecentExecutionCostTotal] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [togglingScheduleId, setTogglingScheduleId] = useState<string | null>(null);
 
@@ -192,7 +168,6 @@ export const Dashboard: React.FC = () => {
         articlesService.getArticleCount(),
         scheduleService.getSchedules().catch(() => [] as ScheduleSetting[])
       ]);
-      const executionHistory = await supabaseSchedulerService.getExecutionHistory(12).catch(() => [] as ExecutionCostHistoryItem[]);
 
       const todayStart = new Date();
       todayStart.setHours(0, 0, 0, 0);
@@ -237,12 +212,6 @@ export const Dashboard: React.FC = () => {
       });
       setActiveSchedules(enabledWithNext);
       setTodayScheduleCount(todayPlanned);
-      setRecentExecutionCosts(executionHistory);
-      const total = executionHistory.reduce((sum, row) => {
-        const n = Number(row.estimated_cost_usd ?? 0);
-        return sum + (Number.isFinite(n) ? n : 0);
-      }, 0);
-      setRecentExecutionCostTotal(Number(total.toFixed(6)));
     } catch (error) {
       console.error('ダッシュボード取得エラー:', error);
     } finally {
@@ -445,48 +414,6 @@ export const Dashboard: React.FC = () => {
         )}
       </div>
 
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold text-gray-900">直近実行コスト（概算）</h3>
-          <span className="text-sm text-gray-500">直近 {recentExecutionCosts.length} 件合計: {formatJpy(toJpy(recentExecutionCostTotal))}</span>
-        </div>
-        <p className="text-xs text-gray-500 mb-3">換算レート: 1 USD = {USD_TO_JPY_RATE} JPY</p>
-
-        {recentExecutionCosts.length === 0 ? (
-          <div className="text-center py-6 text-sm text-gray-500">コスト履歴はまだありません</div>
-        ) : (
-          <div className="space-y-2">
-            {recentExecutionCosts.map((row) => {
-              const estimated = Number(row.estimated_cost_usd ?? 0);
-              const ai = row.cost_breakdown?.ai;
-              const research = row.cost_breakdown?.research;
-              const images = row.cost_breakdown?.images;
-              return (
-                <div key={row.id} className="border rounded-lg p-3 bg-gray-50">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="text-sm font-semibold text-gray-900 truncate">{row.article_title || '（タイトル未保存）'}</p>
-                      <p className="text-xs text-gray-500">
-                        {row.wordpress_configs?.name || 'Unknown Site'} | {format(new Date(row.executed_at), 'yyyy/MM/dd HH:mm', { locale: ja })}
-                      </p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-sm font-bold text-emerald-700">{formatJpy(toJpy(Number.isFinite(estimated) ? estimated : 0))}</p>
-                      <p className="text-[11px] text-gray-500">{row.status || 'unknown'}</p>
-                    </div>
-                  </div>
-                  <div className="mt-2 text-[11px] text-gray-600 flex flex-wrap gap-x-3 gap-y-1">
-                    <span>AI: {ai ? `${ai.provider}/${ai.model}` : 'n/a'}</span>
-                    <span>AI概算: {formatJpy(toJpy(ai?.estimated_usd != null ? Number(ai.estimated_usd) : 0))}</span>
-                    <span>Research概算: {formatJpy(toJpy(research?.estimated_usd != null ? Number(research.estimated_usd) : 0))}</span>
-                    <span>画像概算: {formatJpy(toJpy(images?.estimated_usd != null ? Number(images.estimated_usd) : 0))}</span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
     </div>
   );
 };

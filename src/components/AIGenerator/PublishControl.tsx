@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Send, Save, Globe } from 'lucide-react';
 import { Article, WordPressConfig } from '../../types';
+import toast from 'react-hot-toast';
 
 interface PublishControlProps {
     article: Article;
@@ -47,6 +48,10 @@ export const PublishControl: React.FC<PublishControlProps> = ({
     const handlePublish = () => {
         if (selectedConfig) {
             const date = publishStatus === 'future' ? new Date(scheduledDate) : undefined;
+            if (publishStatus === 'future' && (!scheduledDate || !date || Number.isNaN(date.getTime()))) {
+                toast.error('予約投稿日時を設定してください');
+                return;
+            }
             onPublish(selectedConfig, category || undefined, publishStatus, date);
         }
     };

@@ -395,6 +395,7 @@ export const AIGenerator: React.FC = () => {
                 targetLength: length,
                 selectedTitle: activeSelectedTitle || undefined,
                 targetWordCount,
+                articleGoal,
                 articleStructureType,
                 customInstructions: [
                     selectedPromptSet?.customInstructions?.trim(),

@@ -35,6 +35,7 @@ export function useArticleGeneration() {
         targetLength: options.length || 'medium',
         tone: options.tone || 'professional',
         targetWordCount: options.targetWordCount,
+        articleGoal: options.articleGoal,
         articleStructureType: options.articleStructureType,
         customInstructions: options.customInstructions,
         imagesPerArticle: options.imagesPerArticle,
