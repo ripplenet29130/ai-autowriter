@@ -709,6 +709,12 @@ Deno.serve(async (req: Request) => {
               stats.skipped += 1;
             } else {
               console.error(`Failed to execute schedule for ${wpConfig.name}:`, error);
+              await notifyScheduleExecutionFailure(
+                scheduleSetting,
+                wpConfig,
+                accountChatworkApiToken,
+                error
+              );
               stats.failed += 1;
             }
           }
@@ -3300,6 +3306,63 @@ function trimForLog(text: string, maxLength: number): string {
   const normalized = String(text || '').replace(/\s+/g, ' ').trim();
   if (normalized.length <= maxLength) return normalized;
   return `${normalized.slice(0, maxLength)}...`;
+}
+
+function formatScheduleFailureReason(error: unknown): string {
+  const raw = error instanceof Error ? error.message : String(error || '');
+  const message = trimForLog(raw, 700) || 'Unknown error';
+  const lower = message.toLowerCase();
+
+  if (
+    message.includes('H3') ||
+    message.includes('小見出し') ||
+    message.includes('アウトライン') ||
+    lower.includes('outline')
+  ) {
+    return `見出し構成の品質条件を満たせなかったため停止しました。詳細: ${message}`;
+  }
+
+  return message;
+}
+
+async function notifyScheduleExecutionFailure(
+  schedule: Schedule,
+  wpConfig: WordPressConfig,
+  chatworkApiToken: string | null,
+  error: unknown
+): Promise<void> {
+  const roomIds = String(schedule.fact_check_alert_chatwork_room_id || schedule.chatwork_room_id || '').trim();
+  if (!chatworkApiToken || !roomIds) return;
+
+  const reason = formatScheduleFailureReason(error);
+  const keyword = String(schedule.keyword || '').split(',').map((item) => item.trim()).filter(Boolean)[0] || '';
+  const template = `[info][title]自動投稿を停止しました[/title]
+スケジュールID: ${schedule.id}
+サイト: ${wpConfig.name}
+URL: ${wpConfig.url}
+キーワード: {keyword}
+状態: 投稿停止
+
+理由:
+${reason}
+
+記事品質を守るため、WordPressへの投稿は行っていません。
+AI設定、プロンプト、キーワード、見出し条件を確認してください。
+[/info]`;
+
+  try {
+    await sendChatworkNotifications(
+      chatworkApiToken,
+      roomIds,
+      template,
+      '自動投稿停止',
+      wpConfig.url,
+      keyword,
+      '投稿停止'
+    );
+  } catch (notifyError) {
+    console.error('Schedule failure notification failed:', notifyError);
+  }
 }
 
 function summarizeFactCheckContentChanges(
