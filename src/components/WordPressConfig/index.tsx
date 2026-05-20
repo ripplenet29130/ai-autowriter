@@ -21,27 +21,41 @@ export const WordPressConfigComponent: React.FC = () => {
 
   const [showForm, setShowForm] = useState(false);
   const [editingConfig, setEditingConfig] = useState<WordPressConfig | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const wordpressLimit = account?.wordpress_site_limit ?? 1;
   const isAtLimit = configs.length >= wordpressLimit;
+
+  const getErrorMessage = (error: unknown) => {
+    if (error instanceof Error && error.message) return error.message;
+    return 'WordPress設定の保存に失敗しました。';
+  };
 
   const sortedConfigs = [...configs].sort((a, b) => {
     if (a.isActive === b.isActive) return 0;
     return a.isActive ? -1 : 1;
   });
 
-  const handleSubmit = (configData: Omit<WordPressConfig, 'id'>) => {
-    if (editingConfig) {
-      updateConfig(editingConfig.id, configData);
-      toast.success('WordPress設定を更新しました');
-    } else {
-      if (isAtLimit) {
-        toast.error(`WordPress登録上限に達しています。現在の上限は${wordpressLimit}件です。`);
-        return;
+  const handleSubmit = async (configData: Omit<WordPressConfig, 'id'>) => {
+    setIsSubmitting(true);
+    try {
+      if (editingConfig) {
+        await updateConfig(editingConfig.id, configData);
+        toast.success('WordPress設定を更新しました');
+      } else {
+        if (isAtLimit) {
+          toast.error(`WordPress登録上限に達しています。現在の上限は${wordpressLimit}件です。`);
+          return;
+        }
+        await addConfig(configData);
       }
-      addConfig(configData);
+      setShowForm(false);
+      setEditingConfig(null);
+    } catch (error) {
+      console.error('Failed to save WordPress config:', error);
+      toast.error(getErrorMessage(error));
+    } finally {
+      setIsSubmitting(false);
     }
-    setShowForm(false);
-    setEditingConfig(null);
   };
 
   const handleEdit = (config: WordPressConfig) => {
@@ -80,8 +94,8 @@ export const WordPressConfigComponent: React.FC = () => {
         {!showForm && (
           <button
             onClick={handleAddClick}
-            disabled={isAtLimit}
-            className={`btn-primary flex items-center space-x-2 ${isAtLimit ? 'opacity-50 cursor-not-allowed' : ''}`}
+            disabled={isAtLimit || isSubmitting}
+            className={`btn-primary flex items-center space-x-2 ${isAtLimit || isSubmitting ? 'opacity-50 cursor-not-allowed' : ''}`}
           >
             <Plus className="w-5 h-5" />
             <span>新規設定</span>

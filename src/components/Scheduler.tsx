@@ -325,6 +325,8 @@ export const Scheduler: React.FC = () => {
       ...formData,
       ai_provider_override: useDefaultAiConfig ? '' : selectedAiProvider,
       ai_model_override: useDefaultAiConfig ? '' : selectedAiModel,
+      target_word_count: Math.min(Math.max(formData.target_word_count || 2000, 500), 3000),
+      article_goal: 'standard' as const,
       fact_check_note: '',
       fact_check_notify_on_anomaly: notifyMode === 'anomaly',
       fact_check_notify_on_every_run: notifyMode === 'every',
@@ -424,9 +426,9 @@ export const Scheduler: React.FC = () => {
       chatwork_room_id: schedule.chatwork_room_id || '',
       chatwork_message_template: schedule.chatwork_message_template || DEFAULT_CHATWORK_TEMPLATE,
       prompt_set_id: schedule.prompt_set_id || '',
-      target_word_count: schedule.target_word_count || 2000,
+      target_word_count: Math.min(schedule.target_word_count || 2000, 3000),
       writing_tone: schedule.writing_tone || 'professional',
-      article_goal: schedule.article_goal || 'standard',
+      article_goal: 'standard',
       status: schedule.status,
       enable_fact_check: schedule.enable_fact_check || false,
       fact_check_note: '',
@@ -666,23 +668,28 @@ export const Scheduler: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      {/* ヘッダー */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-        <div className="flex items-center space-x-3 mb-2">
-          <Calendar className="w-6 h-6 text-blue-600" />
+      {/* Header */}
+      <div className="flex items-center space-x-3">
+        <Calendar className="w-8 h-8 text-blue-600" />
+        <div>
           <h2 className="text-2xl font-bold text-gray-900">自動投稿スケジューラー</h2>
+          <p className="text-gray-600">
+            記事生成設定をもとに、指定した時刻で自動生成・投稿します
+          </p>
         </div>
-        <p className="text-gray-600">
-          キーワードまたはタイトルから記事を自動生成・投稿します
-        </p>
       </div>
 
       {/* スケジュール作成フォーム */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4">
-          {editingSchedule ? 'スケジュールを編集' : '新しいスケジュール'}
-        </h3>
-        <form onSubmit={handleSubmit} className="space-y-4">
+      <form onSubmit={handleSubmit} className="space-y-6">
+        <section className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 space-y-6">
+          <div>
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">
+              {editingSchedule ? '記事生成設定を編集' : '記事生成設定'}
+            </h3>
+            <p className="text-sm text-gray-600">
+              AI、生成元、投稿先、文字数、文体を設定します
+            </p>
+          </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="md:col-span-2">
               <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
@@ -709,7 +716,7 @@ export const Scheduler: React.FC = () => {
                   setSelectedAiModel(firstModel);
                 }}
                 disabled={loading || useDefaultAiConfig}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="input-field"
               >
                 {aiConfigs.length === 0 && <option value="">AI設定がありません</option>}
                 {aiProviderOptions.map((provider) => (
@@ -730,7 +737,7 @@ export const Scheduler: React.FC = () => {
                   setSelectedAiModel(e.target.value || '');
                 }}
                 disabled={loading || useDefaultAiConfig}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="input-field"
               >
                 {aiModelOptions.length === 0 && <option value="">モデルがありません</option>}
                 {aiModelOptions.map((item) => (
@@ -760,7 +767,7 @@ export const Scheduler: React.FC = () => {
             <select
               value={formData.wp_config_id}
               onChange={(e) => setFormData({ ...formData, wp_config_id: e.target.value })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              className="input-field"
               required
             >
               <option value="">選択してください</option>
@@ -795,7 +802,7 @@ export const Scheduler: React.FC = () => {
             <select
               value={formData.prompt_set_id}
               onChange={(e) => setFormData({ ...formData, prompt_set_id: e.target.value })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              className="input-field"
             >
               <option value="">指定なし（デフォルト設定を使用）</option>
               {promptSets.map((ps) => (
@@ -872,7 +879,7 @@ export const Scheduler: React.FC = () => {
                     setFormData({ ...formData, keyword_set_id: '', keyword: '' });
                   }
                 }}
-                className="w-full px-3 py-2 border border-blue-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="input-field"
                 required={formData.generation_mode === 'keyword' || formData.generation_mode === 'both'}
               >
                 <option value="">セットを選択してください...</option>
@@ -908,7 +915,7 @@ export const Scheduler: React.FC = () => {
                 onChange={(e) => {
                   setFormData({ ...formData, title_set_id: e.target.value });
                 }}
-                className="w-full px-3 py-2 border border-purple-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                className="input-field"
                 required={formData.generation_mode === 'title' || formData.generation_mode === 'both'}
               >
                 <option value="">セットを選択してください...</option>
@@ -940,7 +947,9 @@ export const Scheduler: React.FC = () => {
                 );
               })()}
             </div>
-          )}       <div className="grid grid-cols-1 gap-4">
+          )}
+
+          <div className="grid grid-cols-1 gap-4">
             {/* 目標文字数 */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -969,27 +978,30 @@ export const Scheduler: React.FC = () => {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setFormData({ ...formData, target_word_count: 4000 })}
-                  className={`px-3 py-2 text-sm rounded-md border transition-colors ${formData.target_word_count === 4000
+                  onClick={() => setFormData({ ...formData, target_word_count: 3000 })}
+                  className={`px-3 py-2 text-sm rounded-md border transition-colors ${formData.target_word_count === 3000
                     ? 'bg-purple-600 text-white border-purple-600'
                     : 'bg-white text-gray-700 border-gray-300 hover:border-purple-400'
                     }`}
                 >
-                  4,000字
+                  3,000字
                 </button>
               </div>
               <input
                 type="number"
                 value={formData.target_word_count}
-                onChange={(e) => setFormData({ ...formData, target_word_count: parseInt(e.target.value, 10) || 2000 })}
+                onChange={(e) => {
+                  const value = parseInt(e.target.value, 10) || 2000;
+                  setFormData({ ...formData, target_word_count: Math.min(value, 3000) });
+                }}
                 min="500"
-                max="10000"
+                max="3000"
                 step="100"
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="input-field"
                 placeholder="カスタム文字数を入力"
               />
               <p className="text-xs text-gray-500 mt-1">
-                プリセットを選択するか、カスタム文字数を入力してください
+                プリセットを選択するか、500〜3,000字の範囲で入力してください
               </p>
             </div>
 
@@ -1001,7 +1013,7 @@ export const Scheduler: React.FC = () => {
               <select
                 value={formData.writing_tone}
                 onChange={(e) => setFormData({ ...formData, writing_tone: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="input-field"
               >
                 <option value="professional">プロフェッショナル</option>
                 <option value="casual">カジュアル</option>
@@ -1010,111 +1022,119 @@ export const Scheduler: React.FC = () => {
               </select>
             </div>
 
+          </div>
+        </section>
+
+        <section className="bg-white rounded-xl shadow-sm border border-blue-200 p-6 space-y-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                記事の目的
-              </label>
-              <select
-                value={formData.article_goal}
-                onChange={(e) => setFormData({ ...formData, article_goal: e.target.value as any })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              >
-                <option value="standard">標準</option>
-                <option value="beginner">初心者向け</option>
-                <option value="practical">実務重視</option>
-                <option value="seo">SEO重視</option>
-                <option value="authority">専門性重視</option>
-                <option value="comparison">比較・選定向け</option>
-                <option value="conversion">問い合わせ導線向け</option>
-              </select>
-              <p className="text-xs text-gray-500 mt-1">
-                文体ではなく、記事で何を優先するかを指定します
+              <h3 className="text-lg font-semibold text-gray-900">投稿スケジュール設定</h3>
+              <p className="text-sm text-gray-600 mt-1">
+                記事をいつ、どの状態でWordPressへ投稿するかを指定します
               </p>
             </div>
-          </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {/* 投稿時刻 */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                投稿時刻 <span className="text-red-500">*</span>
-              </label>
-              <select
-                value={formData.post_time}
-                onChange={(e) => setFormData({ ...formData, post_time: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                required
-              >
-                {timeOptions.map((time) => (
-                  <option key={time} value={time}>
-                    {time}
-                  </option>
-                ))}
-              </select>
-              <p className="text-xs text-gray-500 mt-1">10分単位で選択できます（00, 10, 20, 30, 40, 50）</p>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {/* 投稿時刻 */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  投稿時刻 <span className="text-red-500">*</span>
+                </label>
+                <select
+                  value={formData.post_time}
+                  onChange={(e) => setFormData({ ...formData, post_time: e.target.value })}
+                  className="input-field"
+                  required
+                >
+                  {timeOptions.map((time) => (
+                    <option key={time} value={time}>
+                      {time}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-gray-500 mt-1">10分単位で選択できます</p>
+              </div>
+
+              {/* 頻度 */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  投稿頻度 <span className="text-red-500">*</span>
+                </label>
+                <select
+                  value={formData.frequency}
+                  onChange={(e) => setFormData({ ...formData, frequency: e.target.value })}
+                  className="input-field"
+                >
+                  <option value="毎日">毎日</option>
+                  <option value="毎週">毎週</option>
+                  <option value="隔週">隔週</option>
+                  <option value="毎月">毎月</option>
+                </select>
+              </div>
+
+              {/* 投稿状態 */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  投稿状態 <span className="text-red-500">*</span>
+                </label>
+                <select
+                  value={formData.post_status}
+                  onChange={(e) => setFormData({ ...formData, post_status: e.target.value as 'publish' | 'draft' })}
+                  className="input-field"
+                >
+                  <option value="publish">公開</option>
+                  <option value="draft">下書き</option>
+                </select>
+              </div>
             </div>
 
-            {/* 頻度 */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                投稿頻度 <span className="text-red-500">*</span>
-              </label>
-              <select
-                value={formData.frequency}
-                onChange={(e) => setFormData({ ...formData, frequency: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              >
-                <option value="毎日">毎日</option>
-                <option value="毎週">毎週</option>
-                <option value="隔週">隔週</option>
-                <option value="毎月">毎月</option>
-              </select>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* 開始日 */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  開始日（任意）
+                </label>
+                <input
+                  type="date"
+                  value={formData.start_date}
+                  onChange={(e) => setFormData({ ...formData, start_date: e.target.value })}
+                  className="input-field"
+                />
+              </div>
+
+              {/* 終了日 */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  終了日（任意）
+                </label>
+                <input
+                  type="date"
+                  value={formData.end_date}
+                  onChange={(e) => setFormData({ ...formData, end_date: e.target.value })}
+                  className="input-field"
+                />
+              </div>
             </div>
 
-            {/* 投稿状態 */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                投稿状態 <span className="text-red-500">*</span>
-              </label>
-              <select
-                value={formData.post_status}
-                onChange={(e) => setFormData({ ...formData, post_status: e.target.value as 'publish' | 'draft' })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              >
-                <option value="publish">公開</option>
-                <option value="draft">下書き</option>
-              </select>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* 開始日 */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                開始日（任意）
-              </label>
+            {/* スケジュール有効化 */}
+            <label className="flex items-center space-x-2 text-sm font-medium text-gray-700">
               <input
-                type="date"
-                value={formData.start_date}
-                onChange={(e) => setFormData({ ...formData, start_date: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                type="checkbox"
+                id="status"
+                checked={formData.status}
+                onChange={(e) => setFormData({ ...formData, status: e.target.checked })}
+                className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
               />
-            </div>
+              <span>このスケジュールを有効化</span>
+            </label>
+        </section>
 
-            {/* 終了日 */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                終了日（任意）
-              </label>
-              <input
-                type="date"
-                value={formData.end_date}
-                onChange={(e) => setFormData({ ...formData, end_date: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              />
-            </div>
+        <section className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 space-y-4">
+          <div>
+            <h3 className="text-lg font-semibold text-gray-900">通知・チェック設定</h3>
+            <p className="text-sm text-gray-600 mt-1">
+              ChatWork通知とファクトチェックの動作を設定します
+            </p>
           </div>
-
           {/* ChatWorkルームID */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -1125,7 +1145,7 @@ export const Scheduler: React.FC = () => {
               value={formData.chatwork_room_id}
               onChange={(e) => setFormData({ ...formData, chatwork_room_id: e.target.value })}
               placeholder="例: 123456789"
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              className="input-field"
             />
             <p className="text-xs text-gray-500 mt-1">
               ※ 空欄の場合はChatWorkに送信されません。複数送る場合はカンマ(,)で区切ってください
@@ -1142,7 +1162,7 @@ export const Scheduler: React.FC = () => {
               onChange={(e) => setFormData({ ...formData, chatwork_message_template: e.target.value })}
               placeholder="[info][title]記事投稿完了：{title}[/title]URL: {url}[/info]"
               rows={3}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent font-mono text-sm"
+              className="input-field font-mono text-sm"
             />
             <p className="text-xs text-gray-500 mt-1">
               使用可能な変数: {`{title}`} (記事タイトル), {`{url}`} (記事URL), {`{keyword}`} (キーワード), {`{status}`} (投稿状態)
@@ -1190,7 +1210,7 @@ export const Scheduler: React.FC = () => {
                   value={formData.fact_check_alert_chatwork_room_id || ''}
                   onChange={(e) => setFormData({ ...formData, fact_check_alert_chatwork_room_id: e.target.value })}
                   placeholder="例: 123456789"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="input-field"
                 />
                 <p className="text-xs text-gray-500 mt-1">
                   重大な不整合・ファクトチェック失敗時のみ通知します。複数指定はカンマ区切り。
@@ -1230,43 +1250,29 @@ export const Scheduler: React.FC = () => {
               </div>
             )}
           </div>
-
-          {/* スケジュール有効化 */}
-          <div className="flex items-center space-x-2">
-            <input
-              type="checkbox"
-              id="status"
-              checked={formData.status}
-              onChange={(e) => setFormData({ ...formData, status: e.target.checked })}
-              className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-            />
-            <label htmlFor="status" className="text-sm font-medium text-gray-700">
-              スケジュールを有効化
-            </label>
-          </div>
+        </section>
 
           {/* ボタン */}
-          <div className="flex space-x-3">
-            <button
-              type="submit"
-              disabled={loading}
-              className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {loading ? '保存中...' : editingSchedule ? 'スケジュールを更新' : 'スケジュールを作成'}
-            </button>
+          <div className="flex justify-end space-x-3 pt-4 border-t border-gray-200">
             <button
               type="button"
               onClick={resetForm}
-              className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors"
+              className="btn-secondary"
             >
               リセット
             </button>
+            <button
+              type="submit"
+              disabled={loading}
+              className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {loading ? '保存中...' : editingSchedule ? 'スケジュールを更新' : 'スケジュールを作成'}
+            </button>
           </div>
-        </form>
-      </div >
+      </form>
 
       {/* 登録済みスケジュール一覧 */}
-      < div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6" >
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-semibold text-gray-900">登録済みスケジュール</h3>
           <span className="text-sm text-gray-500">全 {schedules.length} 件</span>
@@ -1458,15 +1464,7 @@ export const Scheduler: React.FC = () => {
                                   schedule.writing_tone === 'professional' ? '専門的' : schedule.writing_tone || 'Default'}
                           </span>
                           <span className="font-mono text-xs bg-gray-50 text-gray-600 px-2 py-0.5 rounded border border-gray-200">
-                            {schedule.target_word_count || 3000}文字
-                          </span>
-                          <span className="font-mono text-xs bg-gray-50 text-gray-600 px-2 py-0.5 rounded border border-gray-200">
-                            {schedule.article_goal === 'beginner' ? '初心者向け' :
-                              schedule.article_goal === 'practical' ? '実務重視' :
-                                schedule.article_goal === 'seo' ? 'SEO重視' :
-                                  schedule.article_goal === 'authority' ? '専門性重視' :
-                                    schedule.article_goal === 'comparison' ? '比較向け' :
-                                      schedule.article_goal === 'conversion' ? '導線重視' : '標準'}
+                            {Math.min(schedule.target_word_count || 3000, 3000)}文字
                           </span>
                         </div>
 

@@ -3,6 +3,13 @@ import { WordPressConfig, AIConfig, ScheduleSettings } from '../types';
 import { getCurrentAccountId, getRequiredAccountId } from './accountScope';
 
 class SupabaseSchedulerService {
+  private isMissingStyleReferenceColumnError(error: any): boolean {
+    return Boolean(
+      error?.message?.includes("Could not find the 'style_reference_url' column") ||
+      (error?.message?.includes('style_reference_url') && error?.code === 'PGRST204')
+    );
+  }
+
   async saveWordPressConfig(config: WordPressConfig): Promise<string> {
     if (!supabase) {
       console.warn('Supabase not initialized');
@@ -46,53 +53,73 @@ class SupabaseSchedulerService {
       }
     }
 
-    const { data, error } = await supabase
+    const wordpressConfigData = {
+      id: configId,
+      account_id: accountId,
+      name: wpConfig.name,
+      url: wpConfig.url,
+      username: wpConfig.username,
+      password: wpConfig.applicationPassword,
+      category: normalizedCategory,
+      post_type: normalizedPostType,
+      style_reference_url: normalizedStyleReferenceUrl,
+      is_active: wpConfig.isActive,
+    };
+
+    let result = await supabase
       .from('wordpress_configs')
-      .upsert({
-        id: configId,
-        account_id: accountId,
-        name: wpConfig.name,
-        url: wpConfig.url,
-        username: wpConfig.username,
-        password: wpConfig.applicationPassword,
-        category: normalizedCategory,
-        post_type: normalizedPostType,
-        style_reference_url: normalizedStyleReferenceUrl,
-        is_active: wpConfig.isActive,
-      })
+      .upsert(wordpressConfigData)
       .select()
       .single();
 
-    if (error) {
-      console.error('Error saving WordPress config:', error);
-      throw new Error(`WordPress設定の保存に失敗しました: ${error.message}`);
+    if (this.isMissingStyleReferenceColumnError(result.error)) {
+      const { style_reference_url: _styleReferenceUrl, ...compatibleData } = wordpressConfigData;
+      result = await supabase
+        .from('wordpress_configs')
+        .upsert(compatibleData)
+        .select()
+        .single();
     }
 
-    const { error: legacySyncError } = await supabase
-      .from('wp_configs')
-      .upsert({
-        id: configId,
-        account_id: accountId,
-        name: wpConfig.name,
-        url: wpConfig.url,
-        username: wpConfig.username,
-        app_password: wpConfig.applicationPassword,
-        default_category: normalizedCategory,
-        post_type: normalizedPostType,
-        style_reference_url: normalizedStyleReferenceUrl,
-        is_active: wpConfig.isActive,
-      });
+    if (result.error) {
+      console.error('Error saving WordPress config:', result.error);
+      throw new Error(`WordPress設定の保存に失敗しました: ${result.error.message}`);
+    }
 
-    if (legacySyncError) {
-      console.error('Error syncing wp_configs:', legacySyncError);
-      throw new Error(`wp_configs との同期に失敗しました: ${legacySyncError.message}`);
+    const legacyConfigData = {
+      id: configId,
+      account_id: accountId,
+      name: wpConfig.name,
+      url: wpConfig.url,
+      username: wpConfig.username,
+      app_password: wpConfig.applicationPassword,
+      default_category: normalizedCategory,
+      post_type: normalizedPostType,
+      style_reference_url: normalizedStyleReferenceUrl,
+      is_active: wpConfig.isActive,
+    };
+
+    let legacySyncResult = await supabase
+      .from('wp_configs')
+      .upsert(legacyConfigData);
+
+    if (this.isMissingStyleReferenceColumnError(legacySyncResult.error)) {
+      const { style_reference_url: _styleReferenceUrl, ...compatibleLegacyData } = legacyConfigData;
+      legacySyncResult = await supabase
+        .from('wp_configs')
+        .upsert(compatibleLegacyData);
+    }
+
+    if (legacySyncResult.error) {
+      console.error('Error syncing wp_configs:', legacySyncResult.error);
+      throw new Error(`wp_configs との同期に失敗しました: ${legacySyncResult.error.message}`);
     }
 
     if (scheduleSettings) {
       await this.saveScheduleSettings(configId, scheduleSettings);
     }
 
-    return data.id;
+    return result.data.id;
   }
 
   async saveScheduleSettings(wpConfigId: string, settings: ScheduleSettings): Promise<void> {

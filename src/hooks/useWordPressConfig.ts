@@ -79,14 +79,14 @@ export function useWordPressConfig() {
     /**
      * 設定を追加
      */
-    const addConfig = useCallback((config: Omit<WordPressConfig, 'id'>) => {
+    const addConfig = useCallback(async (config: Omit<WordPressConfig, 'id'>) => {
         const newConfig: WordPressConfig = {
             ...config,
             id: uuidv4(),
             isActive: true, // 全ての設定をデフォルトでアクティブにする
         };
 
-        addWordPressConfig(newConfig);
+        await addWordPressConfig(newConfig);
         toast.success('WordPress設定を追加しました');
         wpLogger.info(`設定を追加: ${newConfig.name}`);
 

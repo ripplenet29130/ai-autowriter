@@ -24,8 +24,8 @@ interface AppState {
   addArticle: (article: Article) => void;
   updateArticle: (id: string, updates: Partial<Article>) => void;
   deleteArticle: (id: string) => void;
-  addWordPressConfig: (config: WordPressConfig) => void;
-  updateWordPressConfig: (id: string, updates: Partial<WordPressConfig>) => void;
+  addWordPressConfig: (config: WordPressConfig) => Promise<void>;
+  updateWordPressConfig: (id: string, updates: Partial<WordPressConfig>) => Promise<void>;
   deleteWordPressConfig: (id: string) => void;
   activateWordPressConfig: (id: string) => Promise<void>;
   // Prompt Set Actions
@@ -128,15 +128,19 @@ export const useAppStore = create<AppState>()(
       },
 
       addWordPressConfig: async (config) => {
+        const previousConfigs = get().wordPressConfigs;
         try {
           set((state) => ({ wordPressConfigs: [...state.wordPressConfigs, config] }));
           await supabaseSchedulerService.saveWordPressConfig(config);
         } catch (error) {
+          set({ wordPressConfigs: previousConfigs });
           console.error('Error adding WordPress config:', error);
+          throw error;
         }
       },
 
       updateWordPressConfig: async (id, updates) => {
+        const previousConfigs = get().wordPressConfigs;
         try {
           set((state) => ({
             wordPressConfigs: state.wordPressConfigs.map((config) =>
@@ -148,7 +152,9 @@ export const useAppStore = create<AppState>()(
             await supabaseSchedulerService.saveWordPressConfig(updatedConfig);
           }
         } catch (error) {
+          set({ wordPressConfigs: previousConfigs });
           console.error('Error updating WordPress config:', error);
+          throw error;
         }
       },
 
