@@ -8,7 +8,15 @@ import { parseOutlineSections, parseOutlineTitle } from './outlineParser.ts';
 import { buildHighQualitySectionPrompt } from './sectionGenerationPrompt.ts';
 import type { ArticleStructureType } from '../types';
 
-type Tone = 'professional' | 'casual' | 'technical' | 'friendly';
+type Tone = 'professional' | 'casual';
+
+export interface SearchConsolePromptQuery {
+  query: string;
+  clicks?: number;
+  impressions?: number;
+  ctr?: number;
+  position?: number;
+}
 
 const FINAL_ARTICLE_WORD_COUNT_TOLERANCE = 0.18;
 
@@ -48,6 +56,7 @@ export interface GenerateOutlineWithSharedCoreParams {
   competitorHeadings?: string[];
   competitorArticles?: { title: string; headings: string[]; excerpt?: string }[];
   relatedKeywords?: string[];
+  searchConsoleQueries?: SearchConsolePromptQuery[];
   tone?: string;
   articleStructureType?: ArticleStructureType;
 }
@@ -62,6 +71,12 @@ export interface GenerateArticleWithSharedCoreParams {
   defaultMaxTokens?: number;
   qualityRetryCount?: number;
   finalPolish?: boolean;
+  sectionTimeoutMs?: number;
+  onSectionStart?: (payload: {
+    index: number;
+    total: number;
+    section: SharedOutlineSection;
+  }) => void | Promise<void>;
   onSectionComplete?: (payload: {
     index: number;
     total: number;
@@ -70,10 +85,15 @@ export interface GenerateArticleWithSharedCoreParams {
 }
 
 function normalizeTone(tone?: string): Tone {
-  if (tone === 'casual' || tone === 'technical' || tone === 'friendly' || tone === 'professional') {
+  if (tone === 'casual' || tone === 'friendly' || tone === 'desu_masu') {
+    return 'casual';
+  }
+  if (tone === 'professional' || tone === 'technical' || tone === 'da_dearu') {
+    return 'professional';
+  }
+  if (tone === 'casual') {
     return tone;
   }
-  if (tone === 'desu_masu') return 'friendly';
   return 'professional';
 }
 
@@ -425,7 +445,7 @@ function selectH3TitlesForH2(h2Title: string, count: number): string[] {
   return pool.slice(0, Math.max(1, Math.min(count, pool.length)));
 }
 
-function insertSubheadingsIntoLongSections(markdown: string, targetWordCount?: number): string {
+export function insertSubheadingsIntoLongSections(markdown: string, targetWordCount?: number): string {
   if (Number.isFinite(targetWordCount) && Number(targetWordCount) <= 1200) {
     return String(markdown || '').trim();
   }
@@ -565,6 +585,23 @@ async function polishArticleFormatting(
   } catch {
     return originalContent;
   }
+}
+
+function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  message: string
+): Promise<T> {
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return promise;
+
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  const timeoutPromise = new Promise<T>((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(message)), timeoutMs);
+  });
+
+  return Promise.race([promise, timeoutPromise]).finally(() => {
+    if (timeoutId) clearTimeout(timeoutId);
+  });
 }
 
 function shouldRunFinalStyleUnification(content: string, outline: SharedArticleOutline): boolean {
@@ -1287,7 +1324,7 @@ function getTargetH3Count(targetWordCount: number): number {
 function getHardMinimumH3Count(targetWordCount: number): number {
   const targetH3Count = getTargetH3Count(targetWordCount);
   if (targetH3Count <= 0) return 0;
-  return Math.min(targetH3Count, 2);
+  return Math.min(targetH3Count, 1);
 }
 
 function countH3Sections(sections: SharedOutlineSection[]): number {
@@ -2109,6 +2146,7 @@ export async function generateOutlineWithSharedCore(
     competitorHeadings: params.competitorHeadings || [],
     competitorArticles: params.competitorArticles,
     relatedKeywords: params.relatedKeywords || [],
+    searchConsoleQueries: params.searchConsoleQueries || [],
     articleStructureType: params.articleStructureType
   });
 
@@ -2150,7 +2188,19 @@ export async function generateOutlineWithSharedCore(
       ].filter(Boolean).join('\n');
 
     const prompt = retryInstruction ? `${basePrompt}\n\n${retryInstruction}` : basePrompt;
-    const text = await params.callAI(prompt, 2400);
+    let text: string;
+    try {
+      text = await params.callAI(prompt, 4000);
+    } catch (callError: any) {
+      // If the AI truncated its output, try to use the partial text for parsing.
+      if (callError?.partialText && typeof callError.partialText === 'string' && callError.partialText.length > 100) {
+        console.warn(`[outline] callAI truncated on attempt ${attempt + 1}, trying partial text (${callError.partialText.length} chars)`);
+        text = callError.partialText;
+      } else {
+        attemptDiagnostics.push(`attempt${attempt + 1}: callAI error - ${String(callError?.message || callError)}`);
+        continue;
+      }
+    }
     console.debug(`[outline debug] attempt${attempt + 1} response (first 800 chars):`, text.slice(0, 800));
     let parsedSections = parseOutlineSections(text, 400, false);
     const parsedFromJson = parsedSections.length <= 1 ? parseOutlineSectionsFromJson(text, 400) : { sections: [] as ParsedOutlineLikeSection[] };
@@ -2295,7 +2345,12 @@ export async function generateOutlineWithSharedCore(
     throw new Error(`アウトラインの生成に失敗しました。AIの応答が正しく解析できませんでした（diagnostics: ${attemptDiagnostics.join(' | ')}）`);
   }
   if (countH3Sections(bestSections) < hardMinimumH3Count) {
-    throw new Error(`アウトラインの生成に失敗しました。小見出し（H3）が不足しています（diagnostics: ${attemptDiagnostics.join(' | ')}）`);
+    const h3Count = countH3Sections(bestSections);
+    attemptDiagnostics.push(`h3SoftFallback: h3=${h3Count} hardMinimum=${hardMinimumH3Count}`);
+    console.warn(
+      `Outline H3 count is below preferred minimum, but generation will continue. ` +
+      `h3=${h3Count}, hardMinimum=${hardMinimumH3Count}, diagnostics=${attemptDiagnostics.join(' | ')}`
+    );
   }
 
   const sectionsWithDescriptions = ensureOutlineDescriptions(bestSections);
@@ -2314,8 +2369,16 @@ export async function generateArticleFromOutlineWithSharedCore(
   const sectionsWithContent: SharedSectionWithContent[] = [];
 
   let accumulatedContent = '';
-  for (const section of params.outline.sections) {
-    const content = await generateSectionWithQualityGate(section, params.outline, accumulatedContent, {
+  for (const [index, section] of params.outline.sections.entries()) {
+    if (params.onSectionStart) {
+      await params.onSectionStart({
+        index,
+        total: params.outline.sections.length,
+        section,
+      });
+    }
+
+    const contentPromise = generateSectionWithQualityGate(section, params.outline, accumulatedContent, {
       keywords: params.keywords,
       tone,
       customInstructions: params.customInstructions,
@@ -2323,6 +2386,11 @@ export async function generateArticleFromOutlineWithSharedCore(
       maxTokens,
       qualityRetryCount
     });
+    const content = await withTimeout(
+      contentPromise,
+      params.sectionTimeoutMs || 0,
+      `Section generation timed out: ${section.title}`
+    );
 
     const completedSection: SharedSectionWithContent = { ...section, content };
     sectionsWithContent.push(completedSection);

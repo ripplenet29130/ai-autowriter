@@ -1,12 +1,13 @@
 import React, { useEffect, useMemo } from 'react';
 import {
-  LayoutDashboard,
   Bot,
-  FileText,
-  Calendar,
-  LogOut,
   BookOpen,
+  Calendar,
+  FileText,
+  LayoutDashboard,
+  LogOut,
   Plug,
+  Search,
   UserCircle,
 } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
@@ -22,19 +23,19 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
       id: 'dashboard',
       label: 'ホーム',
       icon: LayoutDashboard,
-      description: '運用状況と次の操作'
+      description: '運用状況と次の操作',
     },
     {
       id: 'generator',
       label: '記事作成',
       icon: Bot,
-      description: '確認しながら作成・おまかせ作成'
+      description: '確認しながら作成・おまかせ作成',
     },
     {
       id: 'articles',
       label: '記事管理',
       icon: FileText,
-      description: '生成済み記事の管理'
+      description: '生成済み記事の管理',
     },
     {
       id: 'scheduler',
@@ -47,7 +48,14 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
       id: 'templates',
       label: 'テンプレート',
       icon: BookOpen,
-      description: 'キーワード・タイトル管理'
+      description: 'キーワード・タイトル管理',
+    },
+    {
+      id: 'seo-report',
+      label: 'SEOレポート',
+      icon: Search,
+      description: 'Search Console分析',
+      enabled: featureFlags.wordpress_publish !== false,
     },
     {
       id: 'connections',
@@ -60,8 +68,8 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
       id: 'account',
       label: 'アカウント',
       icon: UserCircle,
-      description: '利用状況とログアウト'
-    }
+      description: '利用状況とログアウト',
+    },
   ], [featureFlags.scheduler, featureFlags.wordpress_publish]);
 
   const visibleNavigationItems = navigationItems.filter((item) => item.enabled !== false);
@@ -73,12 +81,11 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
   }, [activeView, setActiveView, visibleNavigationItems]);
 
   return (
-    <div className="min-h-screen bg-gray-50 flex">
-      {/* Sidebar Navigation */}
-      <div className="w-64 bg-white shadow-lg border-r border-gray-200">
-        <div className="p-6 border-b border-gray-200">
+    <div className="flex min-h-screen bg-gray-50">
+      <aside className="w-64 border-r border-gray-200 bg-white shadow-lg">
+        <div className="border-b border-gray-200 p-6">
           <h1 className="text-xl font-bold text-gray-900">AI Auto Writer ver.3.0</h1>
-          <p className="text-sm text-gray-600 mt-1">自動記事生成・投稿ツール</p>
+          <p className="mt-1 text-sm text-gray-600">自動記事生成・投稿ツール</p>
         </div>
 
         <nav className="p-4">
@@ -90,16 +97,18 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
               return (
                 <li key={item.id}>
                   <button
+                    type="button"
                     onClick={() => setActiveView(item.id)}
-                    className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg text-left transition-all duration-200 ${isActive
-                      ? 'bg-blue-100 text-blue-700 border border-blue-200'
-                      : 'text-gray-700 hover:bg-gray-100 hover:text-gray-900'
-                      }`}
+                    className={`flex w-full items-center space-x-3 rounded-lg px-4 py-3 text-left transition-all duration-200 ${
+                      isActive
+                        ? 'border border-blue-200 bg-blue-100 text-blue-700'
+                        : 'text-gray-700 hover:bg-gray-100 hover:text-gray-900'
+                    }`}
                   >
-                    <Icon className={`w-5 h-5 ${isActive ? 'text-blue-600' : 'text-gray-500'}`} />
-                    <div className="flex-1">
+                    <Icon className={`h-5 w-5 ${isActive ? 'text-blue-600' : 'text-gray-500'}`} />
+                    <div className="min-w-0 flex-1">
                       <div className="font-medium">{item.label}</div>
-                      <div className="text-xs text-gray-500 mt-0.5">{item.description}</div>
+                      <div className="mt-0.5 text-xs text-gray-500">{item.description}</div>
                     </div>
                   </button>
                 </li>
@@ -107,11 +116,10 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
             })}
           </ul>
         </nav>
-      </div>
+      </aside>
 
-      {/* Main Content */}
       <div className="flex-1 overflow-auto">
-        <header className="bg-white border-b border-gray-200 px-8 py-4">
+        <header className="border-b border-gray-200 bg-white px-8 py-4">
           <div className="flex items-center justify-between">
             <div>
               <div className="text-xl font-bold text-gray-900">{account?.name ?? '未設定'}</div>
@@ -121,17 +129,17 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
               <button
                 type="button"
                 onClick={() => signOut()}
-                className="inline-flex items-center gap-2 border border-gray-300 hover:bg-gray-50 text-gray-700 rounded-lg px-3 py-2 text-sm font-medium"
+                className="inline-flex items-center gap-2 rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
               >
-                <LogOut className="w-4 h-4" />
+                <LogOut className="h-4 w-4" />
                 ログアウト
               </button>
             </div>
           </div>
         </header>
-        <div className="p-8">
+        <main className="p-8">
           {children}
-        </div>
+        </main>
       </div>
     </div>
   );

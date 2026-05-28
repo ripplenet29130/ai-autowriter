@@ -4,7 +4,7 @@ export interface SectionGenerationRequest {
     section: OutlineSection;
     outline: ArticleOutline;
     previousSections?: OutlineSection[];
-    tone: 'professional' | 'casual' | 'technical' | 'friendly';
+    tone: 'professional' | 'casual';
     customInstructions?: string;
 }
 
@@ -64,3 +64,4 @@ export interface ArticleWithFactList {
     article_body: string;
     fact_check_list: FactCheckItem[];
 }
+

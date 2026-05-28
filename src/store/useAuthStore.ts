@@ -10,7 +10,6 @@ export interface Account {
   status: 'active' | 'suspended';
   wordpress_site_limit: number;
   feature_flags: Record<string, boolean>;
-  monthly_article_limit: number | null;
 }
 
 export interface Profile {
@@ -33,6 +32,7 @@ interface AuthState {
   loadAuth: () => Promise<void>;
   signInWithPassword: (email: string, password: string) => Promise<void>;
   requestPasswordReset: (email: string) => Promise<void>;
+  updateEmail: (email: string) => Promise<void>;
   updatePassword: (password: string) => Promise<void>;
   signOut: () => Promise<void>;
 }
@@ -62,7 +62,7 @@ const loadProfile = async (userId: string): Promise<{ profile: Profile | null; a
 
   const { data: account, error: accountError } = await supabase
     .from('accounts')
-    .select('id,name,status,wordpress_site_limit,feature_flags,monthly_article_limit')
+    .select('id,name,status,wordpress_site_limit,feature_flags')
     .eq('id', profile.account_id)
     .maybeSingle();
 
@@ -174,6 +174,22 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       set({ error: error.message });
       throw error;
     }
+  },
+
+  updateEmail: async (email) => {
+    if (!supabase) {
+      throw new Error('Supabase configuration is missing.');
+    }
+
+    set({ isLoading: true, error: null });
+
+    const { error } = await supabase.auth.updateUser({ email });
+    if (error) {
+      set({ isLoading: false, error: error.message });
+      throw error;
+    }
+
+    await get().loadAuth();
   },
 
   updatePassword: async (password) => {

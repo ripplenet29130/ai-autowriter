@@ -1,5 +1,5 @@
 ﻿import React, { useState, useEffect, useMemo } from 'react';
-import { Calendar, Globe, Clock, Tag, Trash2, Edit2, Power, MessageSquare, Zap, ShieldCheck } from 'lucide-react';
+import { AlertCircle, Calendar, Globe, Clock, Tag, Trash2, Edit2, Power, MessageSquare, Zap, ShieldCheck } from 'lucide-react';
 import { scheduleService } from '../services/scheduleService';
 import { supabaseSchedulerService } from '../services/supabaseSchedulerService';
 import { supabase } from '../services/supabaseClient';
@@ -7,10 +7,27 @@ import { ScheduleSetting } from '../types';
 import { useAppStore } from '../store/useAppStore';
 import { PromptSetManager } from './AIGenerator/PromptSetManager';
 import { getCurrentAccountId } from '../services/accountScope';
+import { formatSharedTone, getSharedToneDescription, normalizeSharedTone, sharedToneOptions } from '../shared/toneOptions';
 import toast from 'react-hot-toast';
 import { Play } from 'lucide-react';
 
 const SCHEDULE_LIMIT = 5;
+
+type ExecutionHistoryRow = {
+  id: string;
+  schedule_id?: string | null;
+  executed_at: string;
+  keyword_used?: string | null;
+  article_title?: string | null;
+  wordpress_post_id?: string | null;
+  status?: string | null;
+  error_message?: string | null;
+  cost_breakdown?: any;
+  wordpress_configs?: {
+    name?: string | null;
+    url?: string | null;
+  } | null;
+};
 
 const DEFAULT_CHATWORK_TEMPLATE = `いつもお世話になっております。
 記事の投稿が完了しましたので、ご報告いたします。
@@ -50,6 +67,9 @@ export const Scheduler: React.FC = () => {
   const [usedKeywordsMap, setUsedKeywordsMap] = useState<Record<string, string[]>>({});
   const [usedTitlesMap, setUsedTitlesMap] = useState<Record<string, string[]>>({});
   const [lastExecutionMap, setLastExecutionMap] = useState<Record<string, string | null>>({});
+  const [executionHistory, setExecutionHistory] = useState<ExecutionHistoryRow[]>([]);
+  const [selectedFailedHistoryIds, setSelectedFailedHistoryIds] = useState<string[]>([]);
+  const [isDeletingFailedHistory, setIsDeletingFailedHistory] = useState(false);
   const [defaultFactCheckAutoFixEnabled, setDefaultFactCheckAutoFixEnabled] = useState(false);
 
   const [loading, setLoading] = useState(false);
@@ -79,7 +99,6 @@ export const Scheduler: React.FC = () => {
     prompt_set_id: '',
     target_word_count: 2000,
     writing_tone: 'professional',
-    article_goal: 'standard' as 'standard' | 'beginner' | 'practical' | 'seo' | 'authority' | 'comparison' | 'conversion',
     status: true,
     enable_fact_check: false,
     fact_check_note: '',
@@ -156,7 +175,19 @@ export const Scheduler: React.FC = () => {
     loadTitleSets();
     loadPromptSets();
     loadFactCheckSettings();
+    loadExecutionHistory();
   }, []);
+
+  useEffect(() => {
+    const hasRunningExecution = executionHistory.some((history) => history.status === 'running');
+    if (!hasRunningExecution) return;
+
+    const intervalId = window.setInterval(() => {
+      void Promise.all([loadSchedules(), loadExecutionHistory()]);
+    }, 10000);
+
+    return () => window.clearInterval(intervalId);
+  }, [executionHistory]);
 
   useEffect(() => {
     if (aiConfigs.length === 0) return;
@@ -282,6 +313,23 @@ export const Scheduler: React.FC = () => {
     }
   };
 
+  const loadExecutionHistory = async () => {
+    try {
+      const rows = await supabaseSchedulerService.getExecutionHistory(8);
+      setExecutionHistory(rows as ExecutionHistoryRow[]);
+      setSelectedFailedHistoryIds((prev) => {
+        const validIds = new Set((rows as ExecutionHistoryRow[])
+          .filter((row) => row.status === 'failed')
+          .map((row) => row.id));
+        return prev.filter((id) => validIds.has(id));
+      });
+    } catch (error) {
+      console.error('Failed to load execution history:', error);
+      setExecutionHistory([]);
+      setSelectedFailedHistoryIds([]);
+    }
+  };
+
 
   const loadSchedules = async () => {
     try {
@@ -326,7 +374,6 @@ export const Scheduler: React.FC = () => {
       ai_provider_override: useDefaultAiConfig ? '' : selectedAiProvider,
       ai_model_override: useDefaultAiConfig ? '' : selectedAiModel,
       target_word_count: Math.min(Math.max(formData.target_word_count || 2000, 500), 3000),
-      article_goal: 'standard' as const,
       fact_check_note: '',
       fact_check_notify_on_anomaly: notifyMode === 'anomaly',
       fact_check_notify_on_every_run: notifyMode === 'every',
@@ -377,7 +424,7 @@ export const Scheduler: React.FC = () => {
         toast.success('スケジュールを作成しました');
       }
 
-      await Promise.all([loadSchedules(), loadFactCheckSettings()]);
+      await Promise.all([loadSchedules(), loadFactCheckSettings(), loadExecutionHistory()]);
       resetForm();
     } catch (error) {
       console.error('Failed to save schedule:', error);
@@ -427,8 +474,7 @@ export const Scheduler: React.FC = () => {
       chatwork_message_template: schedule.chatwork_message_template || DEFAULT_CHATWORK_TEMPLATE,
       prompt_set_id: schedule.prompt_set_id || '',
       target_word_count: Math.min(schedule.target_word_count || 2000, 3000),
-      writing_tone: schedule.writing_tone || 'professional',
-      article_goal: 'standard',
+      writing_tone: normalizeSharedTone(schedule.writing_tone),
       status: schedule.status,
       enable_fact_check: schedule.enable_fact_check || false,
       fact_check_note: '',
@@ -492,10 +538,12 @@ export const Scheduler: React.FC = () => {
     try {
       const result = await supabaseSchedulerService.triggerScheduler(true, scheduleId);
       console.log('Manual trigger result:', result);
-      toast.success('実行リクエストを受け付けました。結果は実行履歴に反映されます。', { id: loadingToast });
-      setTimeout(() => {
-        void loadSchedules();
-      }, 3000);
+      toast.success('実行を開始しました。生成には数分かかることがあります。結果は実行履歴に反映されます。', { id: loadingToast });
+      [5000, 30000, 90000].forEach((delayMs) => {
+        setTimeout(() => {
+          void Promise.all([loadSchedules(), loadExecutionHistory()]);
+        }, delayMs);
+      });
     } catch (error: any) {
       console.error('Failed to trigger scheduler:', error);
       toast.error(`実行に失敗しました: ${error.message}`, { id: loadingToast });
@@ -525,7 +573,6 @@ export const Scheduler: React.FC = () => {
       prompt_set_id: '',
       target_word_count: 2000,
       writing_tone: 'professional',
-      article_goal: 'standard',
       status: true,
       enable_fact_check: false,
       fact_check_note: '',
@@ -589,6 +636,59 @@ export const Scheduler: React.FC = () => {
     } catch (error: any) {
       console.error('Failed to reset used keywords:', error);
       toast.error(`キーワード消化の解除に失敗しました: ${error.message || 'Unknown error'}`);
+    }
+  };
+
+  const handleClearExecutionState = async (scheduleId: string) => {
+    if (!confirm('このスケジュールの実行ロックを解除しますか？進行中扱いの実行は失敗扱いになります。')) return;
+
+    const loadingToast = toast.loading('実行ロックを解除しています...');
+    try {
+      await supabaseSchedulerService.clearScheduleExecutionState(scheduleId);
+      toast.success('実行ロックを解除しました', { id: loadingToast });
+      await Promise.all([loadSchedules(), loadExecutionHistory()]);
+    } catch (error: any) {
+      console.error('Failed to clear execution state:', error);
+      toast.error(`実行ロックの解除に失敗しました: ${error.message || 'Unknown error'}`, { id: loadingToast });
+    }
+  };
+
+  const handleRestoreTitle = async (scheduleId: string, title: string) => {
+    if (!confirm(`「${title}」を未使用に戻しますか？`)) return;
+    try {
+      await scheduleService.restoreTitle(scheduleId, title);
+      const refreshed = await scheduleService.getUsedTitles(scheduleId);
+      setUsedTitlesMap((prev) => ({ ...prev, [scheduleId]: refreshed }));
+      toast.success(`タイトルを復活しました: ${title}`);
+    } catch (error: any) {
+      console.error('Failed to restore title:', error);
+      toast.error(`タイトルの復活に失敗しました: ${error.message || 'Unknown error'}`);
+    }
+  };
+
+  const handleMarkTitleUsed = async (scheduleId: string, title: string) => {
+    if (!confirm(`「${title}」を使用済みにしますか？`)) return;
+    try {
+      await scheduleService.markTitleUsed(scheduleId, title);
+      const refreshed = await scheduleService.getUsedTitles(scheduleId);
+      setUsedTitlesMap((prev) => ({ ...prev, [scheduleId]: refreshed }));
+      toast.success(`タイトルを使用済みにしました: ${title}`);
+    } catch (error: any) {
+      console.error('Failed to mark title used:', error);
+      toast.error(`タイトルを使用済みにできませんでした: ${error.message || 'Unknown error'}`);
+    }
+  };
+
+  const handleResetUsedTitles = async (scheduleId: string, titles: string[]) => {
+    if (!confirm('このスケジュールのタイトル消化状態をすべて解除しますか？')) return;
+    try {
+      await scheduleService.resetUsedTitles(scheduleId, titles);
+      const refreshed = await scheduleService.getUsedTitles(scheduleId);
+      setUsedTitlesMap((prev) => ({ ...prev, [scheduleId]: refreshed }));
+      toast.success('タイトル消化を解除しました');
+    } catch (error: any) {
+      console.error('Failed to reset used titles:', error);
+      toast.error(`タイトル消化の解除に失敗しました: ${error.message || 'Unknown error'}`);
     }
   };
 
@@ -659,11 +759,62 @@ export const Scheduler: React.FC = () => {
     return next;
   };
 
+  const summarizeExecutionError = (message?: string | null): string => {
+    const text = String(message || '').trim();
+    if (!text) return '';
+    if (text.includes('rest_cannot_create') || text.includes('投稿を編集する権限')) {
+      return 'WordPressユーザーに投稿作成/編集権限がありません。ユーザー権限またはアプリケーションパスワードを確認してください。';
+    }
+    if (text.includes('401')) {
+      return 'WordPress認証に失敗しています。ユーザー名、アプリケーションパスワード、権限を確認してください。';
+    }
+    if (text.includes('H3') || text.includes('小見出し') || text.includes('アウトライン')) {
+      return '見出し構成の品質条件を満たせず、投稿を停止しました。';
+    }
+    return text.length > 180 ? `${text.slice(0, 180)}...` : text;
+  };
+
+  const getGenerationDebug = (history: ExecutionHistoryRow) => (
+    history.cost_breakdown?.generation_debug || null
+  );
+
+  const toggleFailedHistorySelection = (id: string) => {
+    setSelectedFailedHistoryIds((prev) =>
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
+    );
+  };
+
+  const handleDeleteSelectedFailedHistory = async () => {
+    if (selectedFailedHistoryIds.length === 0) return;
+    if (!confirm(`選択した失敗履歴 ${selectedFailedHistoryIds.length}件を削除しますか？`)) return;
+
+    setIsDeletingFailedHistory(true);
+    try {
+      await supabaseSchedulerService.deleteFailedExecutionHistory(selectedFailedHistoryIds);
+      toast.success('選択した失敗履歴を削除しました');
+      setSelectedFailedHistoryIds([]);
+      await loadExecutionHistory();
+    } catch (error) {
+      console.error('Failed to delete failed execution history:', error);
+      toast.error(error instanceof Error ? error.message : '失敗履歴の削除に失敗しました');
+    } finally {
+      setIsDeletingFailedHistory(false);
+    }
+  };
+
   // フィルタリングされたWordPress設定（アクティブのみ）
   const activeWordPressConfigs = wordPressConfigs.filter(config => config.isActive);
   const sortedSchedules = useMemo(
     () => [...schedules].sort((a, b) => Number(b.status) - Number(a.status)),
     [schedules]
+  );
+  const failedExecutionHistory = useMemo(
+    () => executionHistory.filter((history) => history.status === 'failed'),
+    [executionHistory]
+  );
+  const visibleExecutionHistory = useMemo(
+    () => executionHistory.filter((history) => ['failed', 'running'].includes(String(history.status || ''))),
+    [executionHistory]
   );
 
   return (
@@ -1015,11 +1166,13 @@ export const Scheduler: React.FC = () => {
                 onChange={(e) => setFormData({ ...formData, writing_tone: e.target.value })}
                 className="input-field"
               >
-                <option value="professional">プロフェッショナル</option>
-                <option value="casual">カジュアル</option>
-                <option value="technical">テクニカル</option>
-                <option value="friendly">フレンドリー</option>
+                {sharedToneOptions.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
               </select>
+              <p className="mt-2 text-xs leading-relaxed text-gray-500">
+                {getSharedToneDescription(formData.writing_tone)}
+              </p>
             </div>
 
           </div>
@@ -1271,6 +1424,171 @@ export const Scheduler: React.FC = () => {
           </div>
       </form>
 
+      <section className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h3 className="text-lg font-semibold text-gray-900">実行状況・履歴</h3>
+            <p className="text-sm text-gray-600 mt-1">
+              今すぐ実行の途中経過と、失敗した時の原因を表示します
+            </p>
+          </div>
+          {failedExecutionHistory.length > 0 && (
+            <button
+              type="button"
+              onClick={handleDeleteSelectedFailedHistory}
+              disabled={selectedFailedHistoryIds.length === 0 || isDeletingFailedHistory}
+              className="inline-flex items-center justify-center gap-2 rounded-lg border border-red-200 bg-white px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:border-gray-200 disabled:text-gray-400 disabled:hover:bg-white"
+            >
+              <Trash2 className="w-4 h-4" />
+              {isDeletingFailedHistory
+                ? '削除中'
+                : selectedFailedHistoryIds.length > 0
+                  ? `選択した${selectedFailedHistoryIds.length}件を削除`
+                  : '選択して削除'}
+            </button>
+          )}
+        </div>
+
+        {visibleExecutionHistory.length === 0 ? (
+          <div className="text-sm text-gray-500 py-4">進行中の実行や直近の失敗履歴はありません</div>
+        ) : (
+          <div className="space-y-3">
+            {visibleExecutionHistory.map((history) => {
+              const debug = getGenerationDebug(history);
+              const headings = Array.isArray(debug?.headings) ? debug.headings : [];
+              const isSelected = selectedFailedHistoryIds.includes(history.id);
+              const isRunning = history.status === 'running';
+              const isExecutionLockFailure = debug?.failure_stage === 'execution_lock' || debug?.current_stage === 'execution_lock';
+              const runningMinutes = history.executed_at
+                ? (Date.now() - new Date(history.executed_at).getTime()) / 60000
+                : 0;
+              const isStaleRunning = isRunning && runningMinutes >= 12;
+              return (
+                <div
+                  key={history.id}
+                  className={`rounded-lg border p-4 ${
+                    isStaleRunning
+                      ? 'border-amber-300 bg-amber-50/60'
+                      : isRunning
+                      ? 'border-blue-200 bg-blue-50/40'
+                      : isSelected ? 'border-red-400 bg-red-50' : 'border-red-200 bg-red-50/40'
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex min-w-0 items-start gap-3">
+                      {isRunning ? (
+                        <div className="mt-1 h-4 w-4 rounded-full border-2 border-blue-500 border-t-transparent animate-spin" />
+                      ) : (
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => toggleFailedHistorySelection(history.id)}
+                          className="mt-1 h-4 w-4 rounded border-red-300 text-red-600 focus:ring-red-500"
+                          aria-label="削除する失敗履歴を選択"
+                        />
+                      )}
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <AlertCircle className={`w-4 h-4 flex-shrink-0 ${isStaleRunning ? 'text-amber-600' : isRunning ? 'text-blue-600' : 'text-red-600'}`} />
+                          <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+                            isStaleRunning
+                              ? 'bg-amber-100 text-amber-700'
+                              : isRunning
+                              ? 'bg-blue-100 text-blue-700'
+                              : 'bg-red-100 text-red-700'
+                          }`}>
+                            {isStaleRunning ? '停止の可能性' : isRunning ? '実行中' : '失敗'}
+                          </span>
+                          <span className="text-xs text-gray-500">
+                            {history.executed_at ? new Date(history.executed_at).toLocaleString('ja-JP') : ''}
+                          </span>
+                        </div>
+                        <div className="mt-2 font-semibold text-gray-900 break-words">
+                          {history.article_title || history.keyword_used || 'タイトル未記録'}
+                        </div>
+                        <div className="mt-1 text-sm text-gray-600">
+                          {history.wordpress_configs?.name || 'WordPress未設定'} / {history.keyword_used || 'キーワード未記録'}
+                        </div>
+                      </div>
+                    </div>
+                    {history.wordpress_post_id && (
+                      <span className="text-xs font-mono text-gray-500 bg-white border border-gray-200 rounded px-2 py-1">
+                        WP ID: {history.wordpress_post_id}
+                      </span>
+                    )}
+                  </div>
+
+                  <div className={`mt-3 rounded-md border bg-white px-3 py-2 text-sm ${
+                    isStaleRunning
+                      ? 'border-amber-200 text-amber-800'
+                      : isRunning
+                      ? 'border-blue-200 text-blue-800'
+                      : 'border-red-200 text-red-800'
+                  }`}>
+                    {isStaleRunning
+                      ? '12分以上進捗が更新されていません。AI応答待ち、Edge Functionのタイムアウト、または外部API停止の可能性があります。もう一度「今すぐ実行」を押すと古い実行は失敗扱いに更新されます。'
+                      : isRunning
+                      ? (debug?.progress_message || '処理中です')
+                      : summarizeExecutionError(history.error_message)}
+                  </div>
+
+                  {isExecutionLockFailure && history.schedule_id && (
+                    <div className="mt-3 flex justify-end">
+                      <button
+                        type="button"
+                        onClick={() => void handleClearExecutionState(history.schedule_id!)}
+                        className="inline-flex items-center justify-center rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800 hover:bg-amber-100"
+                      >
+                        ロックを解除
+                      </button>
+                    </div>
+                  )}
+
+                  {isRunning && (
+                    <div className="mt-3">
+                      <div className="h-2 rounded-full bg-blue-100 overflow-hidden">
+                        <div
+                          className="h-full rounded-full bg-blue-600 transition-all"
+                          style={{ width: `${Math.max(5, Math.min(100, Number(debug?.progress_percent || 5)))}%` }}
+                        />
+                      </div>
+                      <div className="mt-1 text-xs text-blue-700">
+                        {debug?.current_stage || 'running'} / {debug?.progress_percent || 0}%
+                      </div>
+                    </div>
+                  )}
+
+                  {debug && (
+                    <div className="mt-3 grid grid-cols-1 md:grid-cols-4 gap-2 text-xs">
+                      <div className="rounded-md bg-white border border-gray-200 px-3 py-2">
+                        <div className="text-gray-500">目標/実文字数</div>
+                        <div className="font-semibold text-gray-900">
+                          {debug.target_word_count || '-'} / {debug.generated_chars || '-'}
+                        </div>
+                      </div>
+                      <div className="rounded-md bg-white border border-gray-200 px-3 py-2">
+                        <div className="text-gray-500">H2 / H3</div>
+                        <div className="font-semibold text-gray-900">
+                          {debug.h2_count ?? '-'} / {debug.h3_count ?? '-'}
+                        </div>
+                      </div>
+                      <div className="rounded-md bg-white border border-gray-200 px-3 py-2 md:col-span-2">
+                        <div className="text-gray-500">見出しサンプル</div>
+                        <div className="font-medium text-gray-900 truncate">
+                          {headings.length > 0
+                            ? headings.slice(0, 4).map((item: any) => item.title).join(' / ')
+                            : debug.failure_stage || '診断情報なし'}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
+
       {/* 登録済みスケジュール一覧 */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
         <div className="flex items-center justify-between mb-4">
@@ -1458,10 +1776,7 @@ export const Scheduler: React.FC = () => {
                         <div className="flex items-center space-x-2 text-sm">
                           <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Tone:</span>
                           <span className="font-mono text-xs bg-gray-50 text-gray-600 px-2 py-0.5 rounded border border-gray-200">
-                            {schedule.writing_tone === 'desu_masu' ? 'です・ます' :
-                              schedule.writing_tone === 'da_dearu' ? 'だ・である' :
-                                schedule.writing_tone === 'friendly' ? '親しみ' :
-                                  schedule.writing_tone === 'professional' ? '専門的' : schedule.writing_tone || 'Default'}
+                            {formatSharedTone(schedule.writing_tone)}
                           </span>
                           <span className="font-mono text-xs bg-gray-50 text-gray-600 px-2 py-0.5 rounded border border-gray-200">
                             {Math.min(schedule.target_word_count || 3000, 3000)}文字
@@ -1564,26 +1879,48 @@ export const Scheduler: React.FC = () => {
                               <MessageSquare className="w-4 h-4 mr-2 text-purple-500" />
                               ターゲットタイトル ({titleSet.titles.length})
                             </h4>
-                            <span className="text-xs text-gray-500">
-                              {usedTitles.length} / {titleSet.titles.length} 消化済み
-                            </span>
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs text-gray-500">
+                                {usedTitles.length} / {titleSet.titles.length} 消化済み
+                              </span>
+                              {schedule.id && usedTitles.length > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() => void handleResetUsedTitles(schedule.id!, titleSet.titles)}
+                                  className="text-xs px-2 py-1 rounded border border-amber-200 text-amber-700 bg-amber-50 hover:bg-amber-100 transition-colors"
+                                  title="タイトル消化を一括解除"
+                                >
+                                  解除
+                                </button>
+                              )}
+                            </div>
                           </div>
                           <div className="flex flex-col gap-1">
                             {titleSet.titles.map((title, i) => {
                               const isUsed = usedTitles.includes(title);
                               return (
-                                <div
+                                <button
+                                  type="button"
                                   key={i}
+                                  onClick={() => {
+                                    if (!schedule.id) return;
+                                    if (isUsed) {
+                                      void handleRestoreTitle(schedule.id, title);
+                                    } else {
+                                      void handleMarkTitleUsed(schedule.id, title);
+                                    }
+                                  }}
                                   className={`
-                                    text-xs px-2 py-1 rounded border transition-colors
+                                    text-left text-xs px-2 py-1 rounded border transition-colors select-none
                                     ${isUsed
-                                      ? 'bg-gray-50 text-gray-400 border-gray-100 line-through decoration-gray-400'
+                                      ? 'bg-gray-50 text-gray-400 border-gray-100 line-through decoration-gray-400 cursor-pointer hover:bg-amber-50 hover:text-amber-700 hover:border-amber-200'
                                       : 'bg-purple-50 text-purple-800 border-purple-100 hover:bg-purple-100'
                                     }
                                   `}
+                                  title={isUsed ? 'クリックで未使用に戻す' : 'クリックで使用済みにする'}
                                 >
                                   {title}
-                                </div>
+                                </button>
                               );
                             })}
                           </div>

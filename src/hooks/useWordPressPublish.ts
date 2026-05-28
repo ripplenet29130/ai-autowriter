@@ -142,7 +142,8 @@ export function useWordPressPublish() {
             }
         } catch (error) {
             handleError(error, 'WordPressPublish');
-            toast.error('投稿中にエラーが発生しました');
+            const message = error instanceof Error ? error.message : '投稿中にエラーが発生しました';
+            toast.error(message);
 
             const sanitizedContent = stripBase64ImagesFromContent(article.content);
             updateArticle(article.id, { status: 'failed', content: sanitizedContent });

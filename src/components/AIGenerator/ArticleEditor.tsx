@@ -4,6 +4,7 @@ import { Article } from '../../types';
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { RegenerateModal, RegenerateOptions } from './RegenerateModal';
+import { getSharedToneDescription, normalizeSharedTone, sharedToneOptions, type SharedTone } from '../../shared/toneOptions';
 
 interface ArticleEditorProps {
     article: Article;
@@ -176,16 +177,18 @@ export const ArticleEditor: React.FC<ArticleEditorProps> = ({
                         トーン
                     </label>
                     <select
-                        value={article.tone || 'professional'}
-                        onChange={(e) => onUpdate({ tone: e.target.value as any })}
+                        value={normalizeSharedTone(article.tone)}
+                        onChange={(e) => onUpdate({ tone: e.target.value as SharedTone })}
                         disabled={readOnly}
                         className="input-field"
                     >
-                        <option value="professional">プロフェッショナル</option>
-                        <option value="casual">カジュアル</option>
-                        <option value="technical">テクニカル</option>
-                        <option value="friendly">フレンドリー</option>
+                        {sharedToneOptions.map((option) => (
+                            <option key={option.value} value={option.value}>{option.label}</option>
+                        ))}
                     </select>
+                    <p className="mt-2 text-xs leading-relaxed text-gray-500">
+                        {getSharedToneDescription(article.tone)}
+                    </p>
                 </div>
 
                 <div>

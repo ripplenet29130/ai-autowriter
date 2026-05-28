@@ -1,7 +1,6 @@
 import { useState, useCallback } from 'react';
 import {
     Article,
-    ArticleGoal,
     ArticleOutline,
     TrendAnalysisResult,
     GenerationStep,
@@ -158,7 +157,7 @@ export function useMultiStepGeneration() {
         trendData: TrendAnalysisResult,
         options?: {
             targetLength?: 'short' | 'medium' | 'long';
-            tone?: 'professional' | 'casual' | 'technical' | 'friendly';
+            tone?: 'professional' | 'casual';
             focusTopics?: string[];
             selectedTitle?: string;
             keywordPreferences?: Record<string, KeywordPreference>;
@@ -221,7 +220,7 @@ export function useMultiStepGeneration() {
     const executeStep4 = useCallback(async (
         outline: ArticleOutline,
         options?: {
-            tone?: 'professional' | 'casual' | 'technical' | 'friendly';
+            tone?: 'professional' | 'casual';
             onProgress?: (section: OutlineSection, progress: number) => void;
             customInstructions?: string;
             targetWordCount?: number;
@@ -305,11 +304,10 @@ export function useMultiStepGeneration() {
         keywords: string[],
         options?: {
             targetLength?: 'short' | 'medium' | 'long';
-            tone?: 'professional' | 'casual' | 'technical' | 'friendly';
+            tone?: 'professional' | 'casual';
             selectedTitle?: string;
             targetWordCount?: number;
             customInstructions?: string;
-            articleGoal?: ArticleGoal;
             articleStructureType?: ArticleStructureType;
             imagesPerArticle?: number; // 追加
         }
@@ -497,3 +495,4 @@ export function useMultiStepGeneration() {
         addKeywordPreference
     };
 }
+

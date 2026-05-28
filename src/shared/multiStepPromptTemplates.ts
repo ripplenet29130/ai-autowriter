@@ -1,4 +1,5 @@
 import type { ArticleStructureType } from '../types';
+import type { SearchConsolePromptQuery } from './articleGenerationCore';
 
 export interface OutlinePromptInput {
   keyword: string;
@@ -8,6 +9,7 @@ export interface OutlinePromptInput {
   competitorHeadings?: string[];
   competitorArticles?: { title: string; headings: string[]; excerpt?: string }[];
   relatedKeywords?: string[];
+  searchConsoleQueries?: SearchConsolePromptQuery[];
   articleStructureType?: ArticleStructureType;
 }
 
@@ -143,6 +145,54 @@ export function buildArticleStructureTemplate(type: ArticleStructureType = 'stan
   }
 }
 
+export function buildAioStructureGuidelines(): string {
+  return [
+    'AIO・AI検索向け構造化ルール:',
+    '- 導入では読者の質問に対する結論を先に示し、記事全体で何が分かるかを明確にする',
+    '- 各H2/H3は「定義」「原因」「手順」「比較」「判断基準」「注意点」「FAQ」のどの役割か分かる見出しにする',
+    '- AIが要約しやすいように、1つの見出しで複数テーマを混ぜず、答えを短く抽出できる構成にする',
+    '- 手順や選び方を扱う場合は、順番・条件・判断基準が分かる流れにする',
+    '- 比較を扱う場合は、比較軸を先に示し、違い・向いているケース・注意点を分ける',
+    '- よくある疑問が想定されるテーマでは、終盤にFAQへ転用しやすい疑問解消の見出しを入れる',
+    '- まとめでは単なる再掲ではなく、読者が次に取る行動や確認点を簡潔に整理する',
+  ].join('\n');
+}
+
+function buildSearchConsoleQueryGuidance(queries?: SearchConsolePromptQuery[]): string {
+  const rows = (queries || [])
+    .map((row) => ({
+      query: String(row.query || '').trim(),
+      clicks: row.clicks ?? 0,
+      impressions: row.impressions ?? 0,
+      ctr: row.ctr,
+      position: row.position,
+    }))
+    .filter((row) => row.query)
+    .slice(0, 10);
+
+  if (rows.length === 0) return '';
+
+  const formatPercent = (value?: number) =>
+    typeof value === 'number' && Number.isFinite(value) ? `${(value * 100).toFixed(1)}%` : '-';
+  const formatPosition = (value?: number) =>
+    typeof value === 'number' && Number.isFinite(value) ? value.toFixed(1) : '-';
+
+  const queryLines = rows
+    .map((row) => `- ${row.query}（クリック:${row.clicks} / 表示:${row.impressions} / CTR:${formatPercent(row.ctr)} / 平均順位:${formatPosition(row.position)}）`)
+    .join('\n');
+
+  return `
+【Search Console検索クエリ（検索意図の補助材料）】
+${queryLines}
+
+使い方:
+- クリック数があるクエリは、既に読者反応がある表現としてタイトル・導入・主要見出しの参考にする
+- 表示回数が多くCTRが低いクエリは、読者の疑問に対する結論や見出しの具体性を補う材料にする
+- 平均順位が低いクエリは、本文で補足すべき関連疑問として扱う
+- クエリをそのまま羅列したり、全てを見出し化したりしない
+`.trim();
+}
+
 export function buildSchedulerOutlinePrompt(input: OutlinePromptInput): string {
   const competitorInsights = (() => {
     if (input.competitorArticles && input.competitorArticles.length > 0) {
@@ -165,9 +215,11 @@ export function buildSchedulerOutlinePrompt(input: OutlinePromptInput): string {
     input.relatedKeywords && input.relatedKeywords.length > 0
       ? `\n【読者の関心キーワード（各キーワードを単独で見出し化せず、最も適切なセクションに統合すること）】\n${input.relatedKeywords.join('、')}\n`
       : '';
+  const searchConsoleQuerySection = buildSearchConsoleQueryGuidance(input.searchConsoleQueries);
 
   const structureRules = buildSchedulerStructureRules(input.targetWordCount);
   const structureTemplate = buildArticleStructureTemplate(input.articleStructureType);
+  const aioStructureGuidelines = buildAioStructureGuidelines();
   const countermeasurePattern = input.articleStructureType === 'problem_solution' || !input.articleStructureType
     ? buildCountermeasureOutlinePattern()
     : '';
@@ -185,9 +237,12 @@ ${input.fixedTitle ? `【固定タイトル】\n${input.fixedTitle}\n` : ''}
 ${input.customInstructions ? `【追加指示】\n${input.customInstructions}\n` : ''}
 ${competitorInsights}
 ${relatedKeywordsSection}
+${searchConsoleQuerySection}
 ${structureRules}
 
 ${structureTemplate}
+
+${aioStructureGuidelines}
 
 ${countermeasurePattern}
 
@@ -237,14 +292,8 @@ Estimated: [推定文字数]
 }
 
 export function resolveToneInstruction(writingTone: string): string {
-  if (writingTone === 'casual') {
+  if (writingTone === 'casual' || writingTone === 'friendly' || writingTone === 'desu_masu') {
     return '親しみやすい文体。くだけすぎない。';
-  }
-  if (writingTone === 'technical') {
-    return '専門用語を正確に使い、論理的に説明する。';
-  }
-  if (writingTone === 'friendly') {
-    return '読者に寄り添い、わかりやすく解説する。';
   }
   return '専門的で丁寧な文体。根拠に基づいて説明する。';
 }

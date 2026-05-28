@@ -1,5 +1,5 @@
 ﻿import { BrowserRouter as Router } from 'react-router-dom';
-import { Toaster } from 'react-hot-toast';
+import toast, { Toaster } from 'react-hot-toast';
 import { useEffect, useState } from 'react';
 import { Layout } from './components/Layout';
 import { Dashboard } from './components/Dashboard';
@@ -9,6 +9,7 @@ import { WordPressConfigComponent } from './components/WordPressConfig/index';
 import { AIConfigComponent } from './components/AIConfig';
 import { SettingsComponent } from './components/Settings';
 import { ArticlesList } from './components/ArticlesList';
+import { SEOReport } from './components/SEOReport';
 import { KeywordSettings } from './components/KeywordSettings';
 import { TitleSettings } from './components/TitleSettings';
 import { ClientTemplates } from './components/ClientTemplates';
@@ -18,6 +19,7 @@ import { useAuthStore } from './store/useAuthStore';
 import { Login } from './components/Login';
 import { AdminDashboard } from './components/AdminDashboard';
 import { supabase } from './services/supabaseClient';
+import { searchConsoleService } from './services/searchConsoleService';
 
 function App() {
   const { activeView, loadFromSupabase } = useAppStore();
@@ -67,6 +69,21 @@ function App() {
     }
   }, [isClient, account?.id, account?.status]);
 
+  useEffect(() => {
+    if (!user || !searchConsoleService.isOAuthRedirect()) return;
+
+    const result = searchConsoleService.getOAuthRedirectResult();
+    if (result?.success) {
+      toast.success(result.hasRefreshToken
+        ? 'Google Search Consoleと連携しました'
+        : 'Google Search Consoleと連携しました。必要に応じて再連携してください');
+    } else if (result?.error) {
+      toast.error(`Google Search Console連携に失敗しました: ${result.error}`);
+    }
+
+    searchConsoleService.clearOAuthRedirectFlag();
+  }, [user]);
+
   const renderContent = () => {
     try {
       switch (activeView) {
@@ -82,6 +99,9 @@ function App() {
           return <Scheduler />;
         case 'templates':
           return <ClientTemplates />;
+        case 'seo-report':
+          if (featureFlags.wordpress_publish === false) return unavailableFeature;
+          return <SEOReport />;
         case 'connections':
           if (featureFlags.wordpress_publish === false) return unavailableFeature;
           return <SettingsComponent />;

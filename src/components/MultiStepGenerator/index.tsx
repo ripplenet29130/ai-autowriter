@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { ArrowLeft, Sparkles } from 'lucide-react';
 import { useMultiStepGeneration } from '../../hooks/useMultiStepGeneration';
 import { useAppStore } from '../../store/useAppStore';
@@ -7,13 +7,12 @@ import { TrendAnalysisStep } from './TrendAnalysisStep';
 import { TitleSelectionStep } from './TitleSelectionStep';
 import { OutlineEditorStep } from './OutlineEditorStep';
 import { ContentGenerationStep } from './ContentGenerationStep';
-import { Article, ArticleGoal, ArticleStructureType, GenerationStep } from '../../types';
+import { Article, ArticleStructureType, GenerationStep } from '../../types';
 
 interface MultiStepGeneratorProps {
   keywords: string[];
-  tone: 'professional' | 'casual' | 'technical' | 'friendly';
+  tone: 'professional' | 'casual';
   length: 'short' | 'medium' | 'long';
-  articleGoal?: ArticleGoal;
   articleStructureType?: ArticleStructureType;
   customInstructions?: string;
   selectedTitleSetId?: string;
@@ -27,7 +26,6 @@ export const MultiStepGenerator: React.FC<MultiStepGeneratorProps> = ({
   keywords,
   tone,
   length,
-  articleGoal,
   articleStructureType,
   customInstructions,
   selectedTitleSetId,
@@ -134,7 +132,6 @@ export const MultiStepGenerator: React.FC<MultiStepGeneratorProps> = ({
       });
 
     if (result) {
-      result.articleGoal = articleGoal || 'standard';
       result.articleStructureType = articleStructureType || 'standard';
       addArticle(result);
       onComplete(result);
@@ -271,3 +268,4 @@ export const MultiStepGenerator: React.FC<MultiStepGeneratorProps> = ({
     </div>
   );
 };
+

@@ -1,4 +1,4 @@
-﻿import { FactCheckResult } from './factCheck';
+import { FactCheckResult } from './factCheck';
 export type { FactCheckResult };
 
 export interface Article {
@@ -9,7 +9,7 @@ export interface Article {
   keywords: string[];
   category: string;
   status: 'draft' | 'scheduled' | 'published' | 'failed';
-  tone?: 'professional' | 'casual' | 'technical' | 'friendly';
+  tone?: 'professional' | 'casual';
   length?: 'short' | 'medium' | 'long';
   aiProvider?: string;
   aiModel?: string;
@@ -74,7 +74,7 @@ export interface GenerationPrompt {
   topicId?: string;
   topic: string;
   keywords: string[];
-  tone: 'professional' | 'casual' | 'technical' | 'friendly';
+  tone: 'professional' | 'casual';
   length: 'short' | 'medium' | 'long';
   includeIntroduction: boolean;
   includeConclusion: boolean;
@@ -338,7 +338,7 @@ export interface OutlineGenerationRequest {
   keywords: string[];
   trendData: TrendAnalysisResult;
   targetLength: 'short' | 'medium' | 'long';
-  tone: 'professional' | 'casual' | 'technical' | 'friendly';
+  tone: 'professional' | 'casual';
   focusTopics?: string[];
   keywordPreferences?: Record<string, KeywordPreference>;
   selectedTitle?: string; // 縺薙％縺ｫ霑ｽ蜉
@@ -354,6 +354,7 @@ export interface SectionGenerationRequest {
   section: OutlineSection;
   outline: ArticleOutline;
   previousSections?: OutlineSection[];
-  tone: 'professional' | 'casual' | 'technical' | 'friendly';
+  tone: 'professional' | 'casual';
   customInstructions?: string;
 }
+

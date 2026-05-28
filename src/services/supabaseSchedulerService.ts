@@ -494,6 +494,34 @@ class SupabaseSchedulerService {
     const { data, error } = await query;
 
     if (error) {
+      const errorMessage = String(error.message || error.details || '').toLowerCase();
+      let fallbackQuery = supabase
+        .from('execution_history')
+        .select('*')
+        .order('executed_at', { ascending: false })
+        .limit(limit);
+
+      if (accountId && !errorMessage.includes('account_id')) {
+        fallbackQuery = fallbackQuery.eq('account_id', accountId);
+      }
+
+      const fallback = await fallbackQuery;
+      if (!fallback.error) {
+        return fallback.data || [];
+      }
+
+      if (accountId && errorMessage.includes('account_id')) {
+        const unscopedFallback = await supabase
+          .from('execution_history')
+          .select('*')
+          .order('executed_at', { ascending: false })
+          .limit(limit);
+
+        if (!unscopedFallback.error) {
+          return unscopedFallback.data || [];
+        }
+      }
+
       console.error('Error loading execution history:', error);
       return [];
     }
@@ -501,7 +529,48 @@ class SupabaseSchedulerService {
     return data || [];
   }
 
+  async deleteFailedExecutionHistory(ids: string[]): Promise<void> {
+    if (!supabase || ids.length === 0) return;
+
+    const accountId = getCurrentAccountId();
+    let query = supabase
+      .from('execution_history')
+      .delete()
+      .in('id', ids)
+      .eq('status', 'failed');
+
+    if (accountId) {
+      query = query.eq('account_id', accountId);
+    }
+
+    const { error } = await query;
+
+    if (error) {
+      const errorMessage = String(error.message || error.details || '').toLowerCase();
+      if (accountId && errorMessage.includes('account_id')) {
+        const fallback = await supabase
+          .from('execution_history')
+          .delete()
+          .in('id', ids)
+          .eq('status', 'failed');
+
+        if (!fallback.error) return;
+      }
+
+      console.error('Error deleting failed execution history:', error);
+      throw new Error(`失敗履歴の削除に失敗しました: ${error.message}`);
+    }
+  }
+
   async triggerScheduler(forceExecute = true, scheduleId?: string): Promise<any> {
+    return this.callSchedulerFunction({ forceExecute, scheduleId });
+  }
+
+  async clearScheduleExecutionState(scheduleId: string): Promise<any> {
+    return this.callSchedulerFunction({ action: 'clear_execution_state', scheduleId });
+  }
+
+  private async callSchedulerFunction(payload: Record<string, any>): Promise<any> {
     if (!supabase) {
       throw new Error('Supabase is not initialized');
     }
@@ -514,7 +583,7 @@ class SupabaseSchedulerService {
     }
 
     const functionUrl = `${supabaseUrl}/functions/v1/scheduler-executor`;
-    console.log('Triggering scheduler:', { forceExecute, scheduleId, functionUrl });
+    console.log('Calling scheduler function:', { ...payload, functionUrl });
 
     const response = await fetch(functionUrl, {
       method: 'POST',
@@ -523,7 +592,7 @@ class SupabaseSchedulerService {
         'Authorization': `Bearer ${supabaseKey}`,
         'apikey': supabaseKey,
       },
-      body: JSON.stringify({ forceExecute, scheduleId }),
+      body: JSON.stringify(payload),
     });
 
     if (!response.ok) {

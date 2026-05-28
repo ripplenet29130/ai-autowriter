@@ -37,6 +37,7 @@ function extractJsonArray(text: string): string | null {
 function normalizeTitleText(value: string): string {
   return String(value || '')
     .replace(/^タイトル[:：]\s*/i, '')
+    .replace(/^\*\*|\*\*$/g, '')
     .replace(/^["']|["']$/g, '')
     .replace(/[「」『』【】]/g, '')
     .replace(/\s+/g, ' ')
@@ -87,113 +88,81 @@ function buildReasonFromTitle(title: string): string {
   return '検索意図に沿う切り口を明確にし、クリック後の期待値とのギャップを抑えるため。';
 }
 
-function pickTopicTerm(keyword: string, relatedKeywords: string[], hotTopics: string[]): string {
-  const normalizedKeyword = normalizeComparable(keyword);
-  const candidates = [...relatedKeywords, ...hotTopics]
-    .map((v) => String(v || '').trim())
-    .filter(Boolean);
-
-  for (const candidate of candidates) {
-    const n = normalizeComparable(candidate);
-    if (!n || n === normalizedKeyword) continue;
-    if (normalizedKeyword && n.includes(normalizedKeyword)) continue;
-    if (candidate.length >= 2 && candidate.length <= 18) return candidate;
-  }
-
-  return '比較';
-}
-
-function fallbackTitleSuggestions(
-  keyword: string,
-  count: number,
-  relatedKeywords: string[] = [],
-  hotTopics: string[] = []
-): SharedTitleSuggestion[] {
-  const base = String(keyword || '').trim() || '記事テーマ';
-  const topic = pickTopicTerm(base, relatedKeywords, hotTopics);
-
-  // フォールバックも多様なパターンで生成（定型語尾の連発を避ける）
-  const patterns: [string, string][] = [
-    [
-      `${base}とは何か：仕組みと基本的な考え方`,
-      'テーマの本質を問う形式で、基礎から理解したい読者に対応するため。',
-    ],
-    [
-      `${base}を正しく理解するための重要ポイント`,
-      '「正しく」という言葉で、情報の信頼性を求める読者の関心を引くため。',
-    ],
-    [
-      `${base}における${topic}の役割と実践的な活用法`,
-      '関連トピックとの関係を切り口に、実用性を重視する読者に訴求するため。',
-    ],
-    [
-      `現場で役立つ${base}の知識と対処法`,
-      '「現場」という具体性が実務者の共感を呼び、クリック動機を高めるため。',
-    ],
-    [
-      `${base}の効果を最大化するための管理・運用のコツ`,
-      '導入後の運用フェーズを意識した読者層に合致する切り口のため。',
-    ],
-    [
-      `${base}に関してよく見落とされる注意点と対策`,
-      '「見落とし」という表現が検索意図と合致し、情報収集層を引き込むため。',
-    ],
-    [
-      `${base}の種類と特徴を整理：目的に応じた使い分け方`,
-      '分類・整理の需要に応え、選定で迷う読者の意思決定を助けるため。',
-    ],
-    [
-      `${base}の導入・設定で押さえるべき手順と判断軸`,
-      '手順ベースの情報ニーズに応え、初めて取り組む読者にとって有益なため。',
-    ],
-  ];
-
-  const seen = new Set<string>();
-  const suggestions: SharedTitleSuggestion[] = [];
-  for (const [rawTitle, reason] of patterns) {
-    const title = normalizeTitleText(rawTitle);
-    const comparable = normalizeComparable(title);
-    if (!title || !comparable || seen.has(comparable)) continue;
-    seen.add(comparable);
-    suggestions.push({ title, reason });
-    if (suggestions.length >= Math.max(1, count)) break;
-  }
-  return suggestions;
-}
-
 function parseJsonLikeTitles(raw: string): SharedTitleSuggestion[] {
-  const titleMatches = [...String(raw || '').matchAll(/"title"\s*:\s*"([^"]+)"/g)];
+  const titleMatches = [...String(raw || '').matchAll(/["“”](?:title|タイトル)["“”]\s*[:：]\s*["“”]([^"“”]+)["“”]/gi)];
   if (titleMatches.length === 0) return [];
 
-  const reasonMatches = [...String(raw || '').matchAll(/"reason"\s*:\s*"([^"]+)"/g)];
+  const reasonMatches = [...String(raw || '').matchAll(/["“”](?:reason|理由|狙い)["“”]\s*[:：]\s*["“”]([^"“”]+)["“”]/gi)];
   return titleMatches.map((match, index) => ({
     title: normalizeTitleText(String(match[1] || '')),
     reason: normalizeTitleText(String(reasonMatches[index]?.[1] || '')),
   }));
 }
 
-function parseLineBasedTitles(raw: string, keyword: string): SharedTitleSuggestion[] {
+function parseMarkdownTableTitles(raw: string): SharedTitleSuggestion[] {
+  const lines = String(raw || '')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith('|') && line.endsWith('|'));
+
+  const results: SharedTitleSuggestion[] = [];
+  for (const line of lines) {
+    if (/^\|\s*-+/.test(line)) continue;
+    if (/タイトル|title/i.test(line) && /理由|reason|狙い/i.test(line)) continue;
+
+    const cells = line
+      .split('|')
+      .map((cell) => cell.trim())
+      .filter(Boolean);
+    if (cells.length < 1) continue;
+
+    const title = normalizeTitleText(cells[0] || '');
+    if (!title || title.length < 6 || title.length > 120) continue;
+    results.push({
+      title,
+      reason: normalizeTitleText(cells[1] || ''),
+    });
+  }
+
+  return results;
+}
+
+function parseLineBasedTitles(raw: string): SharedTitleSuggestion[] {
   const lines = String(raw || '')
     .split('\n')
     .map((line) => line.trim())
     .filter(Boolean);
 
   const results: SharedTitleSuggestion[] = [];
-  for (const line of lines) {
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    const looksLikeTitleLine =
+      /^[-*]\s+/.test(line) ||
+      /^\d+[.)、]\s+/.test(line) ||
+      /^(?:タイトル案?|案|title)\s*\d*\s*[:：]/i.test(line) ||
+      /^#{1,4}\s+/.test(line);
+
+    if (!looksLikeTitleLine) continue;
+
     const cleaned = line
+      .replace(/^#{1,4}\s+/, '')
       .replace(/^[-*]\s+/, '')
-      .replace(/^\d+[.)]\s+/, '')
-      .replace(/^(タイトル案?|title)\s*\d*\s*[:：]\s*/i, '')
+      .replace(/^\d+[.)、]\s+/, '')
+      .replace(/^(?:タイトル案?|案|title)\s*\d*\s*[:：]\s*/i, '')
+      .replace(/\*\*/g, '')
+      .split(/\s+(?:-|--|ー|:|：)\s*(?:理由|狙い|reason)\s*[:：]?/i)[0]
+      .split(/\s+\|\s+/)[0]
       .trim();
 
-    if (!cleaned || cleaned.length < 12 || cleaned.length > 80) continue;
+    if (!cleaned || cleaned.length < 6 || cleaned.length > 120) continue;
     if (/^(理由|狙い|reason)[:：]/i.test(cleaned)) continue;
-    if (/です。$|ます。$/.test(cleaned) && cleaned.length < 25) continue;
-    if (!cleaned.includes(keyword) && !/(比較|選び方|費用|注意|始め方|評判)/.test(cleaned)) continue;
+
+    const nextLine = String(lines[index + 1] || '').trim();
+    const reasonMatch = nextLine.match(/^(?:理由|狙い|reason)[:：]\s*(.+)$/i);
 
     results.push({
       title: normalizeTitleText(cleaned),
-      reason: '',
+      reason: reasonMatch ? normalizeTitleText(reasonMatch[1]) : '',
     });
   }
   return results;
@@ -237,25 +206,44 @@ function ensureReasonDiversity(suggestions: SharedTitleSuggestion[]): SharedTitl
   }));
 }
 
-function fillSuggestionsToCount(
-  primary: SharedTitleSuggestion[],
-  keyword: string,
-  count: number,
-  relatedKeywords: string[],
-  hotTopics: string[]
-): SharedTitleSuggestion[] {
-  const normalizedPrimary = normalizeAndFilterSuggestions(primary, keyword, count);
-  if (normalizedPrimary.length >= count) {
-    return ensureReasonDiversity(normalizedPrimary.slice(0, count));
+function parseSuggestionsFromJsonValue(value: unknown): SharedTitleSuggestion[] {
+  if (Array.isArray(value)) return value as SharedTitleSuggestion[];
+  if (!value || typeof value !== 'object') return [];
+
+  const record = value as Record<string, unknown>;
+  const candidateKeys = ['titles', 'suggestions', 'titleSuggestions', 'candidates', 'items', 'タイトル候補'];
+  for (const key of candidateKeys) {
+    if (Array.isArray(record[key])) return record[key] as SharedTitleSuggestion[];
   }
 
-  const fallback = fallbackTitleSuggestions(keyword, count, relatedKeywords, hotTopics);
-  const merged = normalizeAndFilterSuggestions(
-    [...normalizedPrimary, ...fallback],
-    keyword,
-    count
-  );
-  return ensureReasonDiversity(merged.slice(0, count));
+  return [];
+}
+
+function parseAiTitleSuggestions(raw: string, keyword: string, count: number): SharedTitleSuggestion[] {
+  const parsers = [
+    () => parseJsonLikeTitles(raw),
+    () => parseMarkdownTableTitles(raw),
+    () => parseLineBasedTitles(raw),
+  ];
+
+  for (const parse of parsers) {
+    const suggestions = normalizeAndFilterSuggestions(parse(), keyword, count);
+    if (suggestions.length >= count) return ensureReasonDiversity(suggestions);
+  }
+
+  const jsonText = extractJsonArray(raw);
+  if (jsonText) {
+    try {
+      const parsed = JSON.parse(jsonText);
+      const parsedSuggestions = parseSuggestionsFromJsonValue(parsed);
+      const suggestions = normalizeAndFilterSuggestions(parsedSuggestions, keyword, count);
+      if (suggestions.length >= count) return ensureReasonDiversity(suggestions);
+    } catch {
+      return [];
+    }
+  }
+
+  return [];
 }
 
 export async function generateTitleSuggestionsWithSharedCore(
@@ -263,7 +251,9 @@ export async function generateTitleSuggestionsWithSharedCore(
 ): Promise<SharedTitleSuggestion[]> {
   const count = Math.max(1, Math.min(8, Number(params.count) || 5));
   const keyword = String(params.keyword || '').trim();
-  if (!keyword) return fallbackTitleSuggestions('記事テーマ', count, [], []);
+  if (!keyword) {
+    throw new Error('タイトル生成に必要なキーワードがありません。');
+  }
 
   const ngKeywords = (params.ngKeywords || []).map((k) => String(k || '').trim()).filter(Boolean);
   const essentialKeywords = (params.essentialKeywords || []).map((k) => String(k || '').trim()).filter(Boolean);
@@ -282,6 +272,9 @@ export async function generateTitleSuggestionsWithSharedCore(
       return `- タイトル: ${title}${headings ? `\n  (主な見出し: ${headings})` : ''}`;
     }).join('\n')
     : '（データなし）';
+  const outputExample = Array.from({ length: count }, (_, index) =>
+    `  { "title": "タイトル${index + 1}", "reason": "この切り口にした理由" }`
+  ).join(',\n');
 
   const prompt = `
 あなたは日本語SEOライターです。以下のキーワードで、オリジナルのブログ記事タイトルを${count}件作成してください。
@@ -309,42 +302,40 @@ ${competitorText}
 
 【出力形式（JSON配列のみ、前置き不要）】
 [
-  { "title": "タイトル1", "reason": "この切り口にした理由" },
-  { "title": "タイトル2", "reason": "この切り口にした理由" }
+${outputExample}
 ]
 `.trim();
 
   try {
     const raw = await params.callAI(prompt, 1800);
-    const jsonLikeParsed = parseJsonLikeTitles(raw);
-    if (jsonLikeParsed.length > 0) {
-      return fillSuggestionsToCount(jsonLikeParsed, keyword, count, filteredRelated, filteredHotTopics);
-    }
+    const suggestions = parseAiTitleSuggestions(raw, keyword, count);
+    if (suggestions.length >= count) return suggestions;
 
-    const jsonText = extractJsonArray(raw);
-    if (!jsonText) {
-      const lineParsed = parseLineBasedTitles(raw, keyword);
-      if (lineParsed.length > 0) {
-        return fillSuggestionsToCount(lineParsed, keyword, count, filteredRelated, filteredHotTopics);
-      }
-      return fallbackTitleSuggestions(keyword, count, filteredRelated, filteredHotTopics);
-    }
+    const retryPrompt = `
+次のキーワードから、ブログ記事タイトル案を必ず${count}件作成してください。
 
-    const parsed = JSON.parse(jsonText);
-    if (!Array.isArray(parsed)) {
-      const lineParsed = parseLineBasedTitles(raw, keyword);
-      if (lineParsed.length > 0) {
-        return fillSuggestionsToCount(lineParsed, keyword, count, filteredRelated, filteredHotTopics);
-      }
-      return fallbackTitleSuggestions(keyword, count, filteredRelated, filteredHotTopics);
-    }
+キーワード: ${keyword}
+関連キーワード: ${relatedLine}
 
-    const suggestions = normalizeAndFilterSuggestions(parsed as SharedTitleSuggestion[], keyword, count);
-    if (suggestions.length > 0) {
-      return fillSuggestionsToCount(suggestions, keyword, count, filteredRelated, filteredHotTopics);
-    }
-    return fallbackTitleSuggestions(keyword, count, filteredRelated, filteredHotTopics);
-  } catch {
-    return fallbackTitleSuggestions(keyword, count, filteredRelated, filteredHotTopics);
+条件:
+- 返答はJSON配列のみ
+- 配列の要素数は必ず${count}件
+- 各要素は title と reason を持つ
+- titleは記事タイトルとしてそのまま使える日本語にする
+- reasonは1文で書く
+
+出力例:
+[
+${outputExample}
+]
+`.trim();
+    const retryRaw = await params.callAI(retryPrompt, 1200);
+    const retrySuggestions = parseAiTitleSuggestions(retryRaw, keyword, count);
+    if (retrySuggestions.length >= count) return retrySuggestions;
+
+    throw new Error(`AIのタイトル候補が${count}件に満たない、または品質条件を満たしませんでした。`);
+  } catch (error) {
+    if (error instanceof Error) throw error;
+    throw new Error('AIタイトル生成に失敗しました。');
   }
 }

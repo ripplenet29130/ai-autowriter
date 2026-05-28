@@ -7,7 +7,6 @@ type CreateClientUserRequest = {
   email: string;
   password: string;
   wordpress_site_limit?: number;
-  monthly_article_limit?: number | null;
 };
 
 const defaultFeatureFlags = {
@@ -61,9 +60,6 @@ serve(async (req) => {
   const email = String(body.email ?? "").trim().toLowerCase();
   const password = String(body.password ?? "");
   const wordpressSiteLimit = Math.max(0, Number(body.wordpress_site_limit ?? 1));
-  const monthlyArticleLimit = body.monthly_article_limit === null || body.monthly_article_limit === undefined
-    ? null
-    : Math.max(0, Number(body.monthly_article_limit));
 
   if (!name) {
     return json({ error: "client name is required." }, 400);
@@ -88,10 +84,9 @@ serve(async (req) => {
         name,
         status: "active",
         wordpress_site_limit: wordpressSiteLimit,
-        monthly_article_limit: monthlyArticleLimit,
         feature_flags: defaultFeatureFlags,
       })
-      .select("id,name,status,wordpress_site_limit,monthly_article_limit,feature_flags")
+      .select("id,name,status,wordpress_site_limit,feature_flags")
       .single();
 
     if (accountError) throw accountError;

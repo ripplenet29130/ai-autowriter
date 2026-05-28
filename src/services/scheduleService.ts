@@ -14,7 +14,6 @@ class ScheduleService {
         'keyword_set_id',
         'title_set_id',
         'generation_mode',
-        'article_goal',
         'enable_fact_check',
         'fact_check_note',
         'fact_check_alert_chatwork_room_id',
@@ -228,7 +227,6 @@ class ScheduleService {
             prompt_set_id: schedule.prompt_set_id || null,
             target_word_count: schedule.target_word_count,
             writing_tone: schedule.writing_tone,
-            article_goal: schedule.article_goal || 'standard',
             keyword_set_id: schedule.keyword_set_id || null,
             title_set_id: schedule.title_set_id || null,
             generation_mode: schedule.generation_mode || 'keyword',
@@ -568,25 +566,131 @@ class ScheduleService {
         return (data || []).map((item: any) => item.article_title);
     }
 
-    async getLastExecution(scheduleId: string): Promise<string | null> {
+    async restoreTitle(scheduleId: string, title: string): Promise<void> {
         if (!supabase) {
             throw new Error('Supabase is not initialized');
         }
 
+        const normalized = String(title || '').trim();
+        if (!normalized) return;
+
+        const { error } = await supabase
+            .from('execution_history')
+            .delete()
+            .eq('schedule_id', scheduleId)
+            .eq('account_id', getRequiredAccountId())
+            .eq('article_title', normalized);
+
+        if (error) {
+            console.error('Error restoring title:', error);
+            throw new Error(`タイトルの復活に失敗しました: ${error.message}`);
+        }
+    }
+
+    async markTitleUsed(scheduleId: string, title: string): Promise<void> {
+        if (!supabase) {
+            throw new Error('Supabase is not initialized');
+        }
+
+        const normalized = String(title || '').trim();
+        if (!normalized) return;
+
+        const accountId = getRequiredAccountId();
+        const { data: existing, error: existingError } = await supabase
+            .from('execution_history')
+            .select('id')
+            .eq('schedule_id', scheduleId)
+            .eq('account_id', accountId)
+            .eq('article_title', normalized)
+            .limit(1);
+
+        if (existingError) {
+            console.error('Error checking used title:', existingError);
+            throw new Error(`タイトル消化状態の確認に失敗しました: ${existingError.message}`);
+        }
+
+        if (existing && existing.length > 0) return;
+
+        const { error } = await supabase
+            .from('execution_history')
+            .insert({
+                schedule_id: scheduleId,
+                account_id: accountId,
+                article_title: normalized,
+                keyword_used: '',
+                wordpress_post_id: '',
+                status: 'manual_used',
+                error_message: null,
+            });
+
+        if (error) {
+            console.error('Error marking title used:', error);
+            throw new Error(`タイトルを使用済みにできませんでした: ${error.message}`);
+        }
+    }
+
+    async resetUsedTitles(scheduleId: string, titles: string[]): Promise<void> {
+        if (!supabase) {
+            throw new Error('Supabase is not initialized');
+        }
+
+        const targets = (titles || [])
+            .map((title) => String(title || '').trim())
+            .filter((title) => title.length > 0);
+
+        if (targets.length === 0) return;
+
+        const { error } = await supabase
+            .from('execution_history')
+            .delete()
+            .eq('schedule_id', scheduleId)
+            .eq('account_id', getRequiredAccountId())
+            .in('article_title', targets);
+
+        if (error) {
+            console.error('Error resetting used titles:', error);
+            throw new Error(`タイトル消化の解除に失敗しました: ${error.message}`);
+        }
+    }
+
+    async getLastExecution(scheduleId: string): Promise<string | null> {
+        if (!supabase) {
+            throw new Error('Supabase is not initialized');
+        }
+        const accountId = getRequiredAccountId();
         const { data, error } = await supabase
             .from('execution_history')
             .select('executed_at')
             .eq('schedule_id', scheduleId)
-            .eq('account_id', getRequiredAccountId())
+            .eq('account_id', accountId)
             .order('executed_at', { ascending: false })
             .limit(1)
             .maybeSingle();
 
-        if (error || !data) {
+        if (!error && data) {
+            return data.executed_at;
+        }
+
+        const errorMessage = String(error?.message || error?.details || '').toLowerCase();
+        if (errorMessage.includes('account_id')) {
+            const fallback = await supabase
+                .from('execution_history')
+                .select('executed_at')
+                .eq('schedule_id', scheduleId)
+                .order('executed_at', { ascending: false })
+                .limit(1)
+                .maybeSingle();
+            if (!fallback.error && fallback.data) {
+                return fallback.data.executed_at;
+            }
+        }
+
+        if (error) {
+            console.error('Error fetching last execution:', error);
             return null;
         }
 
-        return data.executed_at;
+        return null;
     }
 }
 

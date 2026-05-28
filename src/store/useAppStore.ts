@@ -16,11 +16,13 @@ interface AppState {
   keywordSets: KeywordSet[];
   titleSets: TitleSet[];
   activeView: string;
+  selectedSeoReportConfigId: string | null;
   isGenerating: boolean;
   isLoading: boolean;
 
   // Actions
   setActiveView: (view: string) => void;
+  setSelectedSeoReportConfigId: (configId: string | null) => void;
   addArticle: (article: Article) => void;
   updateArticle: (id: string, updates: Partial<Article>) => void;
   deleteArticle: (id: string) => void;
@@ -64,6 +66,7 @@ export const useAppStore = create<AppState>()(
       keywordSets: [],
       titleSets: [],
       activeView: 'dashboard',
+      selectedSeoReportConfigId: null,
       isGenerating: false,
       isLoading: false,
 
@@ -73,6 +76,10 @@ export const useAppStore = create<AppState>()(
         } catch (error) {
           console.error('Error setting active view:', error);
         }
+      },
+
+      setSelectedSeoReportConfigId: (configId) => {
+        set({ selectedSeoReportConfigId: configId });
       },
 
       addArticle: async (article) => {
@@ -428,7 +435,8 @@ export const useAppStore = create<AppState>()(
         wordPressConfigs: state.wordPressConfigs,
         aiConfigs: state.aiConfigs,
         aiConfig: state.aiConfig,
-        promptSets: state.promptSets
+        promptSets: state.promptSets,
+        selectedSeoReportConfigId: state.selectedSeoReportConfigId
       }),
     }
   )

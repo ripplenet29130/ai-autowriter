@@ -22,6 +22,15 @@ export class WordPressService {
     return url.replace(/\/+$/, '');
   }
 
+  private formatWordPressLocalDate(date: Date): string {
+    const pad = (value: number) => String(value).padStart(2, '0');
+    return [
+      date.getFullYear(),
+      pad(date.getMonth() + 1),
+      pad(date.getDate())
+    ].join('-') + `T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+  }
+
   constructor(config?: WordPressConfig) {
     if (config) {
       this.config = {
@@ -159,19 +168,19 @@ export class WordPressService {
       console.log('元のコンテンツ:', article.content.substring(0, 200));
       console.log('変換後のコンテンツ:', processedContent.substring(0, 500));
 
-      // Get category IDs - only use existing categories, don't create new ones
-      const categoryIds = await this.getExistingCategoryIds(article.category);
-
       // Get or create tags
       const tagIds = await this.getOrCreateTags(article.keywords);
+      const postType = this.config.postType || 'posts';
+      console.log(`WordPress投稿タイプ: ${postType}`);
+      const taxonomyAssignments = await this.getExistingTaxonomyAssignments(article.category, postType);
 
       const postData: any = {
         title: article.title,
         content: processedContent,
         excerpt: article.excerpt,
         status: publishStatus,
-        categories: categoryIds,
         tags: tagIds,
+        ...taxonomyAssignments,
         meta: {
           _yoast_wpseo_focuskw: article.keywords.join(', '),
           _yoast_wpseo_metadesc: article.excerpt,
@@ -180,11 +189,8 @@ export class WordPressService {
       };
 
       if (publishDate) {
-        postData.date = publishDate.toISOString();
+        postData.date = this.formatWordPressLocalDate(publishDate);
       }
-
-      const postType = this.config.postType || 'posts';
-      console.log(`WordPress投稿タイプ: ${postType}`);
 
       const response = await axios.post(
         `${this.config.url}/wp-json/wp/v2/${postType}`,
@@ -193,6 +199,19 @@ export class WordPressService {
       );
 
       if (response.status === 201) {
+        const fallbackResult = await this.assignCategoryViaXmlRpcIfNeeded(
+          response.data.id,
+          postType,
+          article.category,
+          taxonomyAssignments
+        );
+        if (!fallbackResult.success) {
+          return {
+            success: false,
+            error: fallbackResult.error || 'WordPress投稿後のカテゴリー設定に失敗しました'
+          };
+        }
+
         return {
           success: true,
           wordPressId: response.data.id,
@@ -224,20 +243,20 @@ export class WordPressService {
       // Convert to Gutenberg blocks format
       const processedContent = convertToGutenbergBlocks(article.content);
 
-      // Get category IDs - only use existing categories, don't create new ones
-      const categoryIds = await this.getExistingCategoryIds(article.category);
-
       // Get or create tags
       const tagIds = await this.getOrCreateTags(article.keywords);
+      const postType = this.config.postType || 'posts';
+      console.log(`WordPress予約投稿タイプ: ${postType}`);
+      const taxonomyAssignments = await this.getExistingTaxonomyAssignments(article.category, postType);
 
       const postData = {
         title: article.title,
         content: processedContent,
         excerpt: article.excerpt,
         status: 'future',
-        date: publishDate.toISOString(),
-        categories: categoryIds,
+        date: this.formatWordPressLocalDate(publishDate),
         tags: tagIds,
+        ...taxonomyAssignments,
         meta: {
           _yoast_wpseo_focuskw: article.keywords.join(', '),
           _yoast_wpseo_metadesc: article.excerpt,
@@ -245,8 +264,6 @@ export class WordPressService {
         }
       };
 
-      const postType = this.config.postType || 'posts';
-      console.log(`WordPress予約投稿タイプ: ${postType}`);
       const response = await axios.post(
         `${this.config.url}/wp-json/wp/v2/${postType}`,
         postData,
@@ -254,6 +271,19 @@ export class WordPressService {
       );
 
       if (response.status === 201) {
+        const fallbackResult = await this.assignCategoryViaXmlRpcIfNeeded(
+          response.data.id,
+          postType,
+          article.category,
+          taxonomyAssignments
+        );
+        if (!fallbackResult.success) {
+          return {
+            success: false,
+            error: fallbackResult.error || 'WordPress予約投稿後のカテゴリー設定に失敗しました'
+          };
+        }
+
         return {
           success: true,
           wordPressId: response.data.id
@@ -444,6 +474,280 @@ export class WordPressService {
       console.error('既存カテゴリID取得エラー:', error);
       return [];
     }
+  }
+
+  private async getTaxonomyCandidatesForPostType(postType: string): Promise<Array<{ field: string; restBase: string }>> {
+    if (!this.config) return [];
+
+    const candidates: Array<{ field: string; restBase: string }> = [];
+    const addCandidate = (field: string, restBase: string) => {
+      if (!field || !restBase) return;
+      if (candidates.some((item) => item.field === field || item.restBase === restBase)) return;
+      candidates.push({ field, restBase });
+    };
+
+    if (postType === 'posts') {
+      addCandidate('categories', 'categories');
+      return candidates;
+    }
+
+    const normalizedPostType = String(postType || '').trim();
+
+    try {
+      const optionsResponse = await axios.options(`${this.config.url}/wp-json/wp/v2/${postType}`, {
+        headers: this.getAuthHeaders(),
+      });
+      const properties = optionsResponse.data?.schema?.properties
+        || optionsResponse.data?.endpoints?.[0]?.schema?.properties
+        || {};
+      const ignoredFields = new Set([
+        'id', 'date', 'date_gmt', 'guid', 'modified', 'modified_gmt', 'slug', 'status',
+        'type', 'link', 'title', 'content', 'excerpt', 'author', 'featured_media',
+        'comment_status', 'ping_status', 'template', 'meta', 'permalink_template',
+        'generated_slug', 'tags',
+      ]);
+
+      Object.entries(properties).forEach(([fieldName, definition]: [string, any]) => {
+        if (ignoredFields.has(fieldName)) return;
+        const itemType = definition?.items?.type || definition?.items?.[0]?.type;
+        if (definition?.type === 'array' && (itemType === 'integer' || itemType === 'number')) {
+          addCandidate(fieldName, fieldName);
+        }
+      });
+    } catch (error) {
+      console.warn(`投稿タイプ「${postType}」のRESTスキーマ取得に失敗しました`, error);
+    }
+
+    try {
+      const response = await axios.get(`${this.config.url}/wp-json/wp/v2/taxonomies`, {
+        headers: this.getAuthHeaders(),
+        params: { type: postType },
+      });
+
+      Object.entries(response.data || {}).forEach(([taxonomyName, taxonomy]: [string, any]) => {
+        if (taxonomy?.visibility?.show_in_rest === false) return;
+        if (taxonomy?.hierarchical === false) return;
+        const restBase = String(taxonomy?.rest_base || taxonomyName || '').trim();
+        addCandidate(restBase, restBase);
+        addCandidate(taxonomyName, restBase);
+      });
+    } catch (error) {
+      console.warn(`投稿タイプ「${postType}」のtaxonomy取得に失敗しました`, error);
+    }
+
+    try {
+      const response = await axios.get(`${this.config.url}/wp-json/wp/v2/taxonomies`, {
+        headers: this.getAuthHeaders(),
+      });
+
+      Object.entries(response.data || {}).forEach(([taxonomyName, taxonomy]: [string, any]) => {
+        if (taxonomy?.visibility?.show_in_rest === false) return;
+        if (taxonomy?.hierarchical === false) return;
+        const types = Array.isArray(taxonomy?.types) ? taxonomy.types.map(String) : [];
+        if (!types.includes(postType)) return;
+        const restBase = String(taxonomy?.rest_base || taxonomyName || '').trim();
+        addCandidate(restBase, restBase);
+        addCandidate(taxonomyName, restBase);
+      });
+    } catch (error) {
+      console.warn(`投稿タイプ「${postType}」の全taxonomy照合に失敗しました`, error);
+    }
+
+    [
+      `${normalizedPostType}_category`,
+      `${normalizedPostType}_cat`,
+      `${normalizedPostType}-category`,
+      `${normalizedPostType}-cat`,
+      `${normalizedPostType}_categories`,
+      `${normalizedPostType}-categories`,
+    ].forEach((candidate) => addCandidate(candidate, candidate));
+
+    if (candidates.length === 0) {
+      addCandidate('categories', 'categories');
+    }
+    console.log(`投稿タイプ「${postType}」のtaxonomy候補:`, candidates);
+    return candidates;
+  }
+
+  private async findExistingTermBySlugOrName(restBase: string, termIdentifier: string): Promise<number | null> {
+    if (!this.config) return null;
+    try {
+      let searchResponse = await axios.get(`${this.config.url}/wp-json/wp/v2/${restBase}`, {
+        headers: this.getAuthHeaders(),
+        params: { slug: termIdentifier }
+      });
+
+      if (searchResponse.data.length > 0) {
+        return searchResponse.data[0].id;
+      }
+
+      searchResponse = await axios.get(`${this.config.url}/wp-json/wp/v2/${restBase}`, {
+        headers: this.getAuthHeaders(),
+        params: { search: termIdentifier }
+      });
+
+      if (searchResponse.data.length > 0) {
+        const exactMatch = searchResponse.data.find((term: any) =>
+          term.name.toLowerCase() === termIdentifier.toLowerCase()
+        );
+        return exactMatch ? exactMatch.id : searchResponse.data[0].id;
+      }
+
+      return null;
+    } catch (error) {
+      console.error(`ターム検索エラー (${restBase}: ${termIdentifier}):`, error);
+      return null;
+    }
+  }
+
+  private escapeXml(value: string | number): string {
+    return String(value)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&apos;');
+  }
+
+  private resolveXmlRpcTaxonomyAndTerm(articleCategory: string, postType: string): { taxonomy: string; term: string } | null {
+    if (!this.config) return null;
+    const category = String(articleCategory || this.config.defaultCategory || '').trim();
+    if (!category || postType === 'posts') return null;
+
+    const explicitMatch = category.match(/^([A-Za-z0-9_-]+)\s*[:：]\s*(.+)$/);
+    if (explicitMatch) {
+      return {
+        taxonomy: explicitMatch[1].trim(),
+        term: explicitMatch[2].trim(),
+      };
+    }
+
+    return {
+      taxonomy: `${postType}_category`,
+      term: category,
+    };
+  }
+
+  private async assignCategoryViaXmlRpcIfNeeded(
+    postId: number | string,
+    postType: string,
+    articleCategory: string,
+    restAssignments: Record<string, number[]>
+  ): Promise<{ success: boolean; error?: string }> {
+    if (!this.config?.defaultCategory && !articleCategory) return { success: true };
+    if (Object.keys(restAssignments).length > 0) return { success: true };
+
+    const target = this.resolveXmlRpcTaxonomyAndTerm(articleCategory, postType);
+    if (!target) return { success: true };
+    const config = this.config;
+    if (!config) return { success: true };
+
+    try {
+      console.log(`Edge Function経由でカテゴリー設定: post=${postId}, taxonomy=${target.taxonomy}, term=${target.term}`);
+      if (!supabase) {
+        return {
+          success: false,
+          error: 'Supabaseが初期化されていないためカテゴリー設定を実行できませんでした',
+        };
+      }
+
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+      const response = await fetch(`${supabaseUrl}/functions/v1/wp-taxonomy-assign`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${supabaseAnonKey}`,
+        },
+        body: JSON.stringify({
+          url: config.url,
+          username: config.username,
+          password: config.applicationPassword,
+          postId,
+          postType,
+          taxonomy: target.taxonomy,
+          term: target.term,
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok || data?.error) {
+        console.error('カテゴリー設定Edge Functionレスポンス:', data);
+        return {
+          success: false,
+          error: data?.error || `WordPressカテゴリー設定に失敗しました (${response.status})`,
+        };
+      }
+
+      return { success: true };
+    } catch (error: any) {
+      console.error('カテゴリー設定Edge Functionエラー:', error);
+      return {
+        success: false,
+        error: 'WordPressカテゴリー設定に失敗しました',
+      };
+    }
+  }
+
+  private async getExistingTaxonomyAssignments(articleCategory: string, postType: string): Promise<Record<string, number[]>> {
+    if (!this.config) return {};
+
+    const assignments: Record<string, number[]> = {};
+    const candidates = await this.getTaxonomyCandidatesForPostType(postType);
+    console.log('WordPress taxonomy assignment input:', {
+      postType,
+      defaultCategory: this.config.defaultCategory || '',
+      articleCategory,
+      candidates,
+    });
+    const addCategory = async (categoryIdentifier: string) => {
+      const trimmed = String(categoryIdentifier || '').trim();
+      if (!trimmed) return;
+
+      const explicitMatch = trimmed.match(/^([A-Za-z0-9_-]+)\s*[:：]\s*(.+)$/);
+      if (explicitMatch) {
+        const explicitField = explicitMatch[1].trim();
+        const explicitTerm = explicitMatch[2].trim();
+        const explicitId = await this.findExistingTermBySlugOrName(explicitField, explicitTerm);
+        if (explicitId) {
+          assignments[explicitField] = Array.from(new Set([...(assignments[explicitField] || []), explicitId]));
+          console.log(`カテゴリ「${explicitTerm}」を明示taxonomy ${explicitField} に設定: ID ${explicitId}`);
+          return;
+        }
+        console.warn(`明示taxonomy「${explicitField}」でカテゴリ「${explicitTerm}」が見つかりません`);
+      }
+
+      const parsed = parseInt(trimmed, 10);
+      if (!Number.isNaN(parsed)) {
+        const field = candidates[0]?.field || 'categories';
+        assignments[field] = Array.from(new Set([...(assignments[field] || []), parsed]));
+        return;
+      }
+
+      for (const candidate of candidates) {
+        const termId = await this.findExistingTermBySlugOrName(candidate.restBase, trimmed);
+        if (termId) {
+          assignments[candidate.field] = Array.from(new Set([...(assignments[candidate.field] || []), termId]));
+          console.log(`カテゴリ「${trimmed}」を ${candidate.field} に設定: ID ${termId}`);
+          return;
+        }
+      }
+
+      console.warn(`カテゴリ「${trimmed}」が見つかりません`);
+    };
+
+    await addCategory(this.config.defaultCategory || '');
+    if (articleCategory && articleCategory !== this.config.defaultCategory) {
+      await addCategory(articleCategory);
+    }
+
+    if (Object.keys(assignments).length === 0 && postType === 'posts') {
+      const uncategorizedId = await this.findExistingTermBySlugOrName('categories', 'uncategorized');
+      if (uncategorizedId) assignments.categories = [uncategorizedId];
+    }
+
+    console.log('WordPress taxonomy assignments:', assignments);
+    return assignments;
   }
 
   private async findExistingCategoryBySlugOrName(categoryIdentifier: string): Promise<number | null> {

@@ -60,7 +60,6 @@ export const AdminDashboard: React.FC = () => {
     email: '',
     password: '',
     wordpress_site_limit: 1,
-    monthly_article_limit: '',
   });
 
   const activeCount = useMemo(
@@ -78,7 +77,7 @@ export const AdminDashboard: React.FC = () => {
 
     const { data, error: loadError } = await supabase
       .from('accounts')
-      .select('id,name,status,wordpress_site_limit,feature_flags,monthly_article_limit,created_at,updated_at')
+      .select('id,name,status,wordpress_site_limit,feature_flags,created_at,updated_at')
       .order('created_at', { ascending: false });
 
     if (loadError) {
@@ -156,11 +155,9 @@ export const AdminDashboard: React.FC = () => {
 
     const email = newAccount.email.trim();
     const password = newAccount.password;
-    const monthlyLimit = String(newAccount.monthly_article_limit).trim();
     const payload = {
         name,
         wordpress_site_limit: Number(newAccount.wordpress_site_limit) || 1,
-        monthly_article_limit: monthlyLimit ? Number(monthlyLimit) : null,
     };
 
     if ((email || password) && (!email || password.length < 8)) {
@@ -191,7 +188,7 @@ export const AdminDashboard: React.FC = () => {
       return;
     }
 
-    setNewAccount({ name: '', email: '', password: '', wordpress_site_limit: 1, monthly_article_limit: '' });
+    setNewAccount({ name: '', email: '', password: '', wordpress_site_limit: 1 });
     setMessage(email
       ? 'clientアカウントとログインユーザーを作成しました。初期パスワードは安全な方法で共有してください。'
       : 'clientアカウントを作成しました。ログインユーザーの紐づけはprofilesで設定してください。'
@@ -202,7 +199,7 @@ export const AdminDashboard: React.FC = () => {
 
   const updateAccount = async (
     id: string,
-    updates: Partial<Pick<AccountRow, 'name' | 'status' | 'wordpress_site_limit' | 'monthly_article_limit' | 'feature_flags'>>
+    updates: Partial<Pick<AccountRow, 'name' | 'status' | 'wordpress_site_limit' | 'feature_flags'>>
   ) => {
     if (!supabase) return;
 
@@ -356,17 +353,6 @@ export const AdminDashboard: React.FC = () => {
                   className="w-full border border-gray-300 rounded-lg px-3 py-2"
                 />
               </label>
-              <label className="space-y-1">
-                <span className="block text-sm font-medium text-gray-700">月間記事上限</span>
-                <input
-                  type="number"
-                  min={0}
-                  value={newAccount.monthly_article_limit}
-                  onChange={(event) => setNewAccount((prev) => ({ ...prev, monthly_article_limit: event.target.value }))}
-                  placeholder="無制限"
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2"
-                />
-              </label>
             </div>
           </div>
 
@@ -485,7 +471,7 @@ export const AdminDashboard: React.FC = () => {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <label className="space-y-1">
                       <span className="block text-xs font-medium text-gray-500">WordPress上限</span>
                       <input
@@ -502,26 +488,6 @@ export const AdminDashboard: React.FC = () => {
                         className="w-full border border-gray-300 rounded-lg px-3 py-2"
                       />
                       <div className="text-xs text-gray-500">登録済み {account.wordpress_count ?? 0}</div>
-                    </label>
-                    <label className="space-y-1">
-                      <span className="block text-xs font-medium text-gray-500">月間記事上限</span>
-                      <input
-                        type="number"
-                        min={0}
-                        value={account.monthly_article_limit ?? ''}
-                        onChange={(event) =>
-                          setAccounts((prev) =>
-                            prev.map((item) => item.id === account.id
-                              ? {
-                                  ...item,
-                                  monthly_article_limit: event.target.value ? Number(event.target.value) : null,
-                                }
-                              : item)
-                          )
-                        }
-                        placeholder="無制限"
-                        className="w-full border border-gray-300 rounded-lg px-3 py-2"
-                      />
                     </label>
                     <div className="space-y-1">
                       <span className="block text-xs font-medium text-gray-500">機能</span>
@@ -561,7 +527,6 @@ export const AdminDashboard: React.FC = () => {
                       onClick={() => updateAccount(account.id, {
                         name: account.name,
                         wordpress_site_limit: account.wordpress_site_limit,
-                        monthly_article_limit: account.monthly_article_limit,
                         feature_flags: {
                           ...defaultFeatureFlags,
                           ...(account.feature_flags ?? {}),
@@ -595,7 +560,6 @@ export const AdminDashboard: React.FC = () => {
                   <th className="text-left px-4 py-3 font-medium text-gray-600">状態</th>
                   <th className="text-left px-4 py-3 font-medium text-gray-600">WordPress</th>
                   <th className="text-left px-4 py-3 font-medium text-gray-600">利用状況</th>
-                  <th className="text-left px-4 py-3 font-medium text-gray-600">月間記事上限</th>
                   <th className="text-left px-4 py-3 font-medium text-gray-600">機能</th>
                   <th className="text-left px-4 py-3 font-medium text-gray-600">更新日</th>
                   <th className="text-left px-4 py-3 font-medium text-gray-600">操作</th>
@@ -604,13 +568,13 @@ export const AdminDashboard: React.FC = () => {
               <tbody>
                 {isLoading ? (
                   <tr>
-                    <td colSpan={8} className="px-4 py-8 text-center text-gray-500">
+                    <td colSpan={7} className="px-4 py-8 text-center text-gray-500">
                       読み込み中です
                     </td>
                   </tr>
                 ) : accounts.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="px-4 py-8 text-center text-gray-500">
+                    <td colSpan={7} className="px-4 py-8 text-center text-gray-500">
                       アカウントがありません
                     </td>
                   </tr>
@@ -677,28 +641,6 @@ export const AdminDashboard: React.FC = () => {
                         <div>予約 {account.schedule_count ?? 0}</div>
                       </td>
                       <td className="px-4 py-3">
-                        <label className="space-y-1">
-                          <span className="block text-xs font-medium text-gray-500">月間記事上限</span>
-                          <input
-                            type="number"
-                            min={0}
-                            value={account.monthly_article_limit ?? ''}
-                            onChange={(event) =>
-                              setAccounts((prev) =>
-                                prev.map((item) => item.id === account.id
-                                  ? {
-                                      ...item,
-                                      monthly_article_limit: event.target.value ? Number(event.target.value) : null,
-                                    }
-                                  : item)
-                              )
-                            }
-                            placeholder="無制限"
-                            className="border border-gray-300 rounded-lg px-3 py-2 w-28"
-                          />
-                        </label>
-                      </td>
-                      <td className="px-4 py-3">
                         <div className="grid grid-cols-2 gap-2 min-w-48">
                           {featureOptions.map((feature) => (
                             <label key={feature.key} className="inline-flex items-center gap-1.5 text-xs text-gray-600">
@@ -746,7 +688,6 @@ export const AdminDashboard: React.FC = () => {
                           onClick={() => updateAccount(account.id, {
                             name: account.name,
                             wordpress_site_limit: account.wordpress_site_limit,
-                            monthly_article_limit: account.monthly_article_limit,
                             feature_flags: {
                               ...defaultFeatureFlags,
                               ...(account.feature_flags ?? {}),

@@ -1,4 +1,4 @@
-type Tone = 'professional' | 'casual' | 'technical' | 'friendly';
+type Tone = 'professional' | 'casual';
 type KeywordPreference = 'default' | 'ng' | 'essential';
 
 interface SectionPromptInput {
@@ -22,10 +22,6 @@ function toneInstruction(tone: Tone): string {
       return '丁寧で信頼感のある実務的な文体で書くこと。';
     case 'casual':
       return '読みやすく親しみやすい文体で書くこと。';
-    case 'technical':
-      return '専門性を保ちつつ、根拠が伝わる明確な文体で書くこと。';
-    case 'friendly':
-      return '柔らかく案内的な文体で書くこと。';
     default:
       return '自然で読みやすい日本語で書くこと。';
   }
@@ -59,6 +55,17 @@ function keywordPreferenceText(keywordPreferences?: Record<string, KeywordPrefer
   if (essential.length > 0) lines.push(`- 必ず自然に含めるキーワード: ${essential.join('、')}`);
   if (ng.length > 0) lines.push(`- 使用禁止キーワード: ${ng.join('、')}`);
   return lines.join('\n');
+}
+
+function aioWritingInstructions(): string {
+  return [
+    '- セクション冒頭で、この見出しに対する答え・要点を1〜2文で先に示すこと',
+    '- 定義、原因、手順、比較、判断基準、注意点のどれを説明しているかが読者に分かる流れにすること',
+    '- 手順や条件を説明する場合は、順番・前提・判断基準を明確にすること',
+    '- 比較を説明する場合は、比較軸、違い、向いているケース、注意点を分けて説明すること',
+    '- FAQに転用できるよう、読者の疑問に対する直接的な回答文を自然に含めること',
+    '- AI要約で抜き出されても意味が通るよう、代名詞だけに頼らず主語と対象を明確にすること',
+  ].join('\n');
 }
 
 export function buildHighQualitySectionPrompt(input: SectionPromptInput): string {
@@ -116,6 +123,8 @@ ${prefText || ''}
 - 他セクションの内容を重複させないこと
 - 情報が不確かな場合は断定しすぎないこと
 - 自然な日本語で、具体性のある本文にすること
+- AIO・AI検索向けに、以下を守ること
+${aioWritingInstructions()}
 ${sectionRoleInstruction}
 
 ${context ? `直前までの本文:\n${context}\n` : ''}

@@ -6,8 +6,7 @@ import {
     TrendAnalysisResult,
     SectionGenerationRequest,
     OutlineGenerationRequest,
-    ArticleStructureType,
-    ArticleGoal
+    ArticleStructureType
 } from '../types';
 import { realTrendAnalysisService } from './realTrendAnalysisService';
 import { trendAnalysisService } from './trendAnalysisService';
@@ -15,6 +14,12 @@ import { outlineGenerationService } from './outlineGenerationService';
 import { titleGenerationService } from './titleGenerationService';
 import { aiService } from './aiService';
 import { generateArticleFromOutlineWithSharedCore } from '../shared/articleGenerationCore';
+import {
+    buildAutoModeQualityInstructions as buildSharedAutoModeQualityInstructions,
+    buildAutoOutlineRetryInstructions as buildSharedAutoOutlineRetryInstructions,
+    compactAutoModeInstructions,
+    evaluateAutoOutlineQuality as evaluateSharedAutoOutlineQuality,
+} from '../shared/autoModeQuality';
 
 /**
  * 繝槭Ν繝√せ繝・ャ繝苓ｨ倅ｺ狗函謌舌し繝ｼ繝薙せ
@@ -31,63 +36,9 @@ export class MultiStepGenerationService {
         return text || undefined;
     }
 
-    private buildArticleGoalInstructions(goal?: ArticleGoal): string {
-        switch (goal) {
-            case 'beginner':
-                return [
-                    '【記事目的】初心者向け',
-                    '- 専門用語は初出で短く説明する',
-                    '- 読者が最初に迷う点から順に解消する',
-                    '- いきなり細部に入らず、判断の前提を整える',
-                ].join('\n');
-            case 'practical':
-                return [
-                    '【記事目的】実務・実践向け',
-                    '- 読者がそのまま行動できる手順、判断基準、注意点を入れる',
-                    '- 抽象論だけで終わらせず、現場で確認する項目を具体化する',
-                    '- 失敗しやすい点と回避策を必ず含める',
-                ].join('\n');
-            case 'seo':
-                return [
-                    '【記事目的】SEO網羅型',
-                    '- 検索意図を広く拾い、基礎・原因・対策・比較・注意点を整理する',
-                    '- 関連語を見出しに羅列せず、読者の疑問の流れに統合する',
-                    '- よくある疑問にも自然に答える',
-                ].join('\n');
-            case 'authority':
-                return [
-                    '【記事目的】専門性・信頼性重視',
-                    '- 断定しすぎず、条件・前提・例外を明確にする',
-                    '- 数値や制度など不確かな情報は一般化せず慎重に扱う',
-                    '- 判断根拠が読者に伝わる説明にする',
-                ].join('\n');
-            case 'comparison':
-                return [
-                    '【記事目的】比較・選定支援',
-                    '- 比較軸を先に示し、条件別に選び方が分かる構成にする',
-                    '- メリットだけでなく弱点、注意点、向いていないケースも入れる',
-                    '- 最後に読者が選択できる判断基準をまとめる',
-                ].join('\n');
-            case 'conversion':
-                return [
-                    '【記事目的】問い合わせ・導入検討向け',
-                    '- 課題、放置リスク、解決策、導入前の確認点を自然につなげる',
-                    '- 強い売り込みではなく、相談・検討に進む理由を整理する',
-                    '- 読者の不安を解消する具体的な判断材料を入れる',
-                ].join('\n');
-            default:
-                return [
-                    '【記事目的】標準解説',
-                    '- 読者がテーマを理解し、次の行動を判断できる構成にする',
-                    '- 一般論だけで終わらせず、具体的な確認点や注意点を入れる',
-                ].join('\n');
-        }
-    }
-
     private buildAutoModeQualityInstructions(options: {
         selectedTitle?: string;
         targetWordCount: number;
-        articleGoal?: ArticleGoal;
         articleStructureType?: ArticleStructureType;
     }): string {
         return [
@@ -100,7 +51,8 @@ export class MultiStepGenerationService {
             '- 「種類と特徴」「選び方と注意点」「活用方法」だけの汎用見出しに逃げず、テーマ固有の判断材料にする',
             '- H3は直前のH2を具体化する小見出しとして使い、独立した大テーマにしない',
             '- 本文では同じ説明を繰り返さず、原因・対策・比較・注意点・実行手順のどれを扱う章かを明確にする',
-            this.buildArticleGoalInstructions(options.articleGoal),
+            '- AIO・AI検索で要約されやすいよう、導入で結論を先に示し、定義・手順・比較・判断基準・FAQに転用しやすい見出しを必要に応じて入れる',
+            '- 各見出しは1つの質問に対する答えが抜き出せる粒度にし、複数テーマを混ぜない',
             options.articleStructureType ? `- 記事構成タイプ: ${options.articleStructureType}` : '',
         ].filter(Boolean).join('\n');
     }
@@ -328,7 +280,7 @@ export class MultiStepGenerationService {
     ): Promise<import('../types').TitleSuggestion[]> {
         try {
             console.log('Step 2: タイトル生成開始');
-            return await titleGenerationService.generateTitleSuggestions(trendData, 5, keywordPreferences);
+            return await titleGenerationService.generateTitleSuggestions(trendData, 3, keywordPreferences);
         } catch (error) {
             console.error('Title generation failed:', error);
             throw new Error('タイトル生成に失敗しました');
@@ -343,7 +295,7 @@ export class MultiStepGenerationService {
         trendData: TrendAnalysisResult,
         options?: {
             targetLength?: 'short' | 'medium' | 'long';
-            tone?: 'professional' | 'casual' | 'technical' | 'friendly';
+            tone?: 'professional' | 'casual';
             focusTopics?: string[];
             selectedTitle?: string;
             keywordPreferences?: Record<string, import('../types').KeywordPreference>;
@@ -392,7 +344,7 @@ export class MultiStepGenerationService {
     async generateSections(
         outline: ArticleOutline,
         options?: {
-            tone?: 'professional' | 'casual' | 'technical' | 'friendly';
+            tone?: 'professional' | 'casual';
             customInstructions?: string;
             onProgress?: (section: OutlineSection, progress: number) => void;
         }
@@ -562,11 +514,10 @@ export class MultiStepGenerationService {
         keywords: string[],
         options?: {
             targetLength?: 'short' | 'medium' | 'long';
-            tone?: 'professional' | 'casual' | 'technical' | 'friendly';
+            tone?: 'professional' | 'casual';
             selectedTitle?: string;
             targetWordCount?: number;
             customInstructions?: string;
-            articleGoal?: ArticleGoal;
             articleStructureType?: ArticleStructureType;
             imagesPerArticle?: number; // 逕ｻ蜒乗椢謨ｰ繧定ｿｽ蜉
             onStepComplete?: (step: number, data: any) => void;
@@ -595,12 +546,11 @@ export class MultiStepGenerationService {
                     ? 3000
                     : 2000);
 
-        const effectiveCustomInstructions = this.compactInstructions([
+        const effectiveCustomInstructions = compactAutoModeInstructions([
             options?.customInstructions,
-            this.buildAutoModeQualityInstructions({
+            buildSharedAutoModeQualityInstructions({
                 selectedTitle,
                 targetWordCount,
-                articleGoal: options?.articleGoal,
                 articleStructureType: options?.articleStructureType,
             }),
         ]);
@@ -618,7 +568,7 @@ export class MultiStepGenerationService {
             }
         );
 
-        const outlineQuality = this.evaluateAutoOutlineQuality(outline, {
+        const outlineQuality = evaluateSharedAutoOutlineQuality(outline, {
             targetWordCount,
             selectedTitle,
         });
@@ -633,9 +583,9 @@ export class MultiStepGenerationService {
                     tone: options?.tone,
                     selectedTitle,
                     targetWordCount,
-                    customInstructions: this.compactInstructions([
+                    customInstructions: compactAutoModeInstructions([
                         effectiveCustomInstructions,
-                        this.buildAutoOutlineRetryInstructions(outlineQuality.issues),
+                        buildSharedAutoOutlineRetryInstructions(outlineQuality.issues),
                     ]),
                     articleStructureType: options?.articleStructureType,
                 }
@@ -655,7 +605,6 @@ export class MultiStepGenerationService {
         article.tone = options?.tone || 'professional';
         article.length = options?.targetLength || 'medium';
         article.targetWordCount = targetWordCount;
-        article.articleGoal = options?.articleGoal || 'standard';
         article.articleStructureType = options?.articleStructureType || 'standard';
 
         // 逕ｻ蜒冗函謌仙・逅・ｒ霑ｽ蜉
@@ -690,7 +639,7 @@ export class MultiStepGenerationService {
     async generateArticleFromPreparedOutline(
         outline: ArticleOutline,
         options?: {
-            tone?: 'professional' | 'casual' | 'technical' | 'friendly';
+            tone?: 'professional' | 'casual';
             targetWordCount?: number;
             customInstructions?: string;
             onProgress?: (section: OutlineSection, progress: number) => void;
@@ -780,5 +729,6 @@ export class MultiStepGenerationService {
 }
 
 export const multiStepGenerationService = new MultiStepGenerationService();
+
 
 

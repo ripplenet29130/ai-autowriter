@@ -13,10 +13,11 @@ import { useMultiStepGeneration } from '../../hooks/useMultiStepGeneration';
 import { FactCheckResultsDisplay } from '../FactCheckResultsDisplay';
 import { factCheckService } from '../../services/factCheckService';
 import { titleKeywordInferenceService } from '../../services/titleKeywordInferenceService';
+import { getSharedToneDescription, sharedToneOptions, type SharedTone } from '../../shared/toneOptions';
 import type { TitleKeywordInference } from '../../services/titleKeywordInferenceService';
 import type { FactCheckResult } from '../../types';
 import type { FactCheckItem } from '../../types/factCheck';
-import type { Article, ArticleGoal, ArticleStructureType } from '../../types';
+import type { Article, ArticleStructureType } from '../../types';
 import toast from 'react-hot-toast';
 
 /**
@@ -30,10 +31,9 @@ export const AIGenerator: React.FC = () => {
 
     const [inputValue, setInputValue] = useState('');
     const [keywords, setKeywords] = useState<string[]>([]);
-    const [tone, setTone] = useState<'professional' | 'casual' | 'technical' | 'friendly'>('professional');
+    const [tone, setTone] = useState<SharedTone>('professional');
     const [length, setLength] = useState<'short' | 'medium' | 'long'>('medium');
-    const articleGoal: ArticleGoal = 'standard';
-    const [articleStructureType, setArticleStructureType] = useState<ArticleStructureType>('standard');
+    const articleStructureType: ArticleStructureType = 'standard';
     const [generationMode, setGenerationMode] = useState<'auto' | 'interactive'>('interactive');
     const [showMultiStep, setShowMultiStep] = useState(false);
     const [useDefaultAIConfig, setUseDefaultAIConfig] = useState(true);
@@ -76,40 +76,6 @@ export const AIGenerator: React.FC = () => {
     const usesTitleSource = contentSourceMode === 'title' || contentSourceMode === 'both';
     const activeSelectedTitle = usesTitleSource ? selectedTitle.trim() : '';
     const activeSelectedTitleSetId = usesTitleSource ? selectedTitleSetId : '';
-
-    const articleStructureOptions: Array<{ value: ArticleStructureType; label: string; description: string }> = [
-        {
-            value: 'standard',
-            label: '標準解説型',
-            description: '基礎知識 → 原因 → 具体策 → 選び方 → 注意点 → まとめ',
-        },
-        {
-            value: 'problem_solution',
-            label: '課題解決型',
-            description: '悩み → 原因 → 解決策 → 選び方 → 導入手順 → 注意点 → まとめ',
-        },
-        {
-            value: 'comparison',
-            label: '比較・選定型',
-            description: '選ぶ前の前提 → 比較軸 → 向き不向き → 選び方 → 注意点 → まとめ',
-        },
-        {
-            value: 'practical',
-            label: '実務ノウハウ型',
-            description: '現場の課題 → 実践手順 → 失敗例 → 改善策 → 運用ポイント → まとめ',
-        },
-        {
-            value: 'seo_comprehensive',
-            label: 'SEO網羅型',
-            description: '基礎知識 → 原因 → 具体策 → 比較 → 選び方 → よくある疑問 → まとめ',
-        },
-        {
-            value: 'conversion',
-            label: '問い合わせ導線型',
-            description: '課題提起 → 放置リスク → 解決策 → 導入メリット → 相談前の確認点 → まとめ',
-        },
-    ];
-    const selectedStructureDescription = articleStructureOptions.find(option => option.value === articleStructureType)?.description || '';
 
     React.useEffect(() => {
         const loadFactCheckSettings = async () => {
@@ -179,36 +145,6 @@ export const AIGenerator: React.FC = () => {
             return 'バランス';
         }
         return '低価格・高速';
-    };
-
-    const getEstimatedCostPer1000Chars = (model: string): string | null => {
-        // Assumption: per 1000 Japanese chars ~= input 300 tokens + output 700 tokens.
-        const tokenIn = 300;
-        const tokenOut = 700;
-        const usdJpyRate = 150; // fixed display rate for rough estimation
-        const rateMap: Record<string, { input: number; output: number }> = {
-            // OpenAI pricing (per 1M tokens)
-            'gpt-5.2': { input: 1.75, output: 14.0 },
-            'gpt-5': { input: 1.25, output: 10.0 },
-            'gpt-5-mini': { input: 0.25, output: 2.0 },
-            'gpt-4.1': { input: 2.0, output: 8.0 },
-            'gpt-4.1-mini': { input: 0.40, output: 1.60 },
-            'gpt-4.1-nano': { input: 0.10, output: 0.40 },
-            'gpt-4o': { input: 2.50, output: 10.0 },
-            'gpt-4o-mini': { input: 0.15, output: 0.60 },
-
-            // Gemini pricing (per 1M tokens)
-            'gemini-2.5-pro': { input: 1.25, output: 10.0 },
-            'gemini-2.5-flash': { input: 0.30, output: 2.50 },
-            'gemini-2.0-flash': { input: 0.10, output: 0.40 },
-        };
-
-        const rate = rateMap[model];
-        if (!rate) return null;
-
-        const usd = (tokenIn / 1_000_000) * rate.input + (tokenOut / 1_000_000) * rate.output;
-        const jpy = usd * usdJpyRate;
-        return `1000文字あたり概算: 約${jpy.toFixed(2)}円（$1=150円換算 / 入力300tok + 出力700tok想定）`;
     };
 
     const providerModelOptions = getProviderModelOptions(selectedAIProvider);
@@ -326,7 +262,6 @@ export const AIGenerator: React.FC = () => {
             keywords: finalKeywords,
             tone,
             length,
-            articleGoal,
             articleStructureType,
             customInstructions: buildEffectiveCustomInstructions(selectedPromptSet?.customInstructions),
             targetWordCount,
@@ -395,7 +330,6 @@ export const AIGenerator: React.FC = () => {
                 targetLength: length,
                 selectedTitle: activeSelectedTitle || undefined,
                 targetWordCount,
-                articleGoal,
                 articleStructureType,
                 customInstructions: [
                     selectedPromptSet?.customInstructions?.trim(),
@@ -405,9 +339,9 @@ export const AIGenerator: React.FC = () => {
             });
 
             if (article) {
-                const articleWithGoal = { ...article, articleGoal, articleStructureType };
-                setGeneratedArticle(articleWithGoal);
-                addArticle(articleWithGoal);
+                const articleWithStructure = { ...article, articleStructureType };
+                setGeneratedArticle(articleWithStructure);
+                addArticle(articleWithStructure);
             }
             return;
         }
@@ -618,7 +552,6 @@ export const AIGenerator: React.FC = () => {
                 keywords: generatedArticle.keywords || [],
                 tone: generatedArticle.tone,
                 length: generatedArticle.length,
-                articleGoal: generatedArticle.articleGoal || articleGoal,
                 customInstructions: buildEffectiveCustomInstructions(customInstructions)
             });
 
@@ -632,7 +565,7 @@ export const AIGenerator: React.FC = () => {
     };
 
     const handleMultiStepComplete = (article: Article) => {
-        setGeneratedArticle({ ...article, articleGoal, articleStructureType } as any);
+        setGeneratedArticle({ ...article, articleStructureType } as any);
         setShowMultiStep(false);
     };
 
@@ -642,7 +575,6 @@ export const AIGenerator: React.FC = () => {
                 keywords={keywords}
                 tone={tone}
                 length={length}
-                articleGoal={articleGoal}
                 articleStructureType={articleStructureType}
                 customInstructions={buildEffectiveCustomInstructions(promptSets.find(ps => ps.id === selectedPromptSetId)?.customInstructions)}
                 selectedTitleSetId={activeSelectedTitleSetId}
@@ -760,11 +692,6 @@ export const AIGenerator: React.FC = () => {
                                     </option>
                                 ))}
                             </select>
-                            {getEstimatedCostPer1000Chars(selectedAIModel) && (
-                                <p className="text-xs text-gray-500 mt-1">
-                                    {getEstimatedCostPer1000Chars(selectedAIModel)}
-                                </p>
-                            )}
                         </div>
                         <p className="text-xs text-gray-500 md:col-span-2">
                             {useDefaultAIConfig
@@ -990,33 +917,16 @@ export const AIGenerator: React.FC = () => {
                         </label>
                         <select
                             value={tone}
-                            onChange={(e) => setTone(e.target.value as any)}
+                            onChange={(e) => setTone(e.target.value as SharedTone)}
                             disabled={isGenerating || isAutoGenerating}
                             className="input-field"
                         >
-                            <option value="professional">プロフェッショナル</option>
-                            <option value="casual">カジュアル</option>
-                            <option value="technical">テクニカル</option>
-                            <option value="friendly">フレンドリー</option>
-                        </select>
-                    </div>
-
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                            記事タイプ（構成）
-                        </label>
-                        <select
-                            value={articleStructureType}
-                            onChange={(e) => setArticleStructureType(e.target.value as ArticleStructureType)}
-                            disabled={isGenerating || isAutoGenerating}
-                            className="input-field"
-                        >
-                            {articleStructureOptions.map(option => (
+                            {sharedToneOptions.map((option) => (
                                 <option key={option.value} value={option.value}>{option.label}</option>
                             ))}
                         </select>
-                        <p className="mt-2 text-xs text-gray-500 leading-relaxed">
-                            構成: {selectedStructureDescription}
+                        <p className="mt-2 text-xs leading-relaxed text-gray-500">
+                            {getSharedToneDescription(tone)}
                         </p>
                     </div>
 
