@@ -3,7 +3,7 @@ export type ArticleLength = 'short' | 'medium' | 'long';
 export const TARGET_WORD_COUNT_BY_LENGTH: Record<ArticleLength, number> = {
   short: 1000,
   medium: 2000,
-  long: 4000,
+  long: 3000,
 };
 
 export const DEFAULT_TARGET_WORD_COUNT = TARGET_WORD_COUNT_BY_LENGTH.medium;

@@ -975,7 +975,7 @@ export const AIGenerator: React.FC = () => {
                             value={targetWordCount}
                             onChange={(e) => setTargetWordCount(parseInt(e.target.value) || 2000)}
                             min="500"
-                            max="10000"
+                            max="3000"
                             step="100"
                             disabled={isGenerating || isAutoGenerating}
                             className="input-field"

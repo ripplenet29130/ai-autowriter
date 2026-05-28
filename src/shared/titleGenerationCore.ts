@@ -309,7 +309,7 @@ ${outputExample}
   try {
     const raw = await params.callAI(prompt, 1800);
     const suggestions = parseAiTitleSuggestions(raw, keyword, count);
-    if (suggestions.length >= count) return suggestions;
+    if (suggestions.length >= 1) return suggestions;
 
     const retryPrompt = `
 次のキーワードから、ブログ記事タイトル案を必ず${count}件作成してください。
@@ -331,9 +331,9 @@ ${outputExample}
 `.trim();
     const retryRaw = await params.callAI(retryPrompt, 1200);
     const retrySuggestions = parseAiTitleSuggestions(retryRaw, keyword, count);
-    if (retrySuggestions.length >= count) return retrySuggestions;
+    if (retrySuggestions.length >= 1) return retrySuggestions;
 
-    throw new Error(`AIのタイトル候補が${count}件に満たない、または品質条件を満たしませんでした。`);
+    throw new Error(`AIのタイトル候補を1件も取得できませんでした。`);
   } catch (error) {
     if (error instanceof Error) throw error;
     throw new Error('AIタイトル生成に失敗しました。');

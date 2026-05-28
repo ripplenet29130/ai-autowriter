@@ -2454,6 +2454,15 @@ async function executeSchedule(
     fullContent = baselineNormalizedContent;
   }
 
+  const finalCharsBeforeCompaction = countGeneratedChars(fullContent);
+  fullContent = compactArticleToTargetLength(fullContent, targetWordCount);
+  const finalCharsAfterCompaction = countGeneratedChars(fullContent);
+  if (finalCharsAfterCompaction < finalCharsBeforeCompaction) {
+    console.log(`Compacted article length: ${finalCharsBeforeCompaction} -> ${finalCharsAfterCompaction}`);
+  }
+
+  validateGeneratedArticleCompleteness(fullContent, outline, targetWordCount);
+
   // 5. WordPress隰壽・・ｨ・ｿ繝ｻ莠･・､・ｱ隰ｨ邇ｲ蜃ｾ郢ｧ繧奇ｽｨ蛟・ｽｺ荵昴○郢晉ｿｫ繝｣郢晏干縺咏ｹ晢ｽｧ郢昴・繝ｨ郢ｧ蜑・ｽｿ譎擾ｽｭ蛛・ｽｼ繝ｻ
   let postId: string | null = null;
   let publishErrorMessage: string | null = null;
@@ -3016,9 +3025,11 @@ function normalizeHeadingHierarchy(lines: string[]): string[] {
     let title = sanitizeHeadingLabel(extractHeadingText(trimmed));
     if (!title) continue;
 
-    // Keep published article structure flat: all section headings become H2.
-    if (level >= 2) {
+    // Keep H2/H3 hierarchy. Only normalize overly deep headings into H3.
+    if (level === 1) {
       level = 2;
+    } else if (level > 3) {
+      level = 3;
     }
 
     if (!isSummaryHeadingText(title)) {
@@ -3421,9 +3432,10 @@ function formatOutlineForSinglePass(outline: ArticleOutline): string {
   return (outline.sections || [])
     .map((section, index) => {
       const level = section.isLead ? 'lead' : section.level === 3 ? 'H3' : 'H2';
-      const description = section.description ? ` - ${section.description}` : '';
-      const chars = section.estimatedWordCount ? ` (${section.estimatedWordCount} chars)` : '';
-      return `${index + 1}. [${level}] ${section.title}${chars}${description}`;
+      const indent = section.level === 3 ? '   ' : '';
+      const chars = section.estimatedWordCount ? ` (${section.estimatedWordCount}字)` : '';
+      const description = section.description ? ` — ${section.description}` : '';
+      return `${indent}${index + 1}. [${level}] ${section.title}${chars}${description}`;
     })
     .join('\n');
 }
@@ -3435,7 +3447,7 @@ function validateGeneratedArticleCompleteness(
 ): void {
   const normalized = String(content || '').trim();
   const charCount = countGeneratedChars(normalized);
-  const minChars = Math.max(500, Math.round(Math.max(800, targetWordCount) * 0.55));
+  const minChars = Math.max(500, Math.round(Math.max(800, targetWordCount) * 0.75));
   if (charCount < minChars) {
     throw new Error(`Generated article is too short (${charCount}/${targetWordCount} chars). AI output may have stopped midway.`);
   }
@@ -3459,6 +3471,47 @@ function validateGeneratedArticleCompleteness(
   }
 }
 
+function compactArticleToTargetLength(content: string, targetWordCount: number): string {
+  const maxChars = Math.round(Math.max(800, targetWordCount) * 1.2);
+  let text = String(content || '').trim();
+  if (!text || countGeneratedChars(text) <= maxChars) return text;
+
+  const blocks = text.split(/\n{2,}/).map((block) => block.trim()).filter(Boolean);
+  const compacted: string[] = [];
+  for (const block of blocks) {
+    const isHeading = /^#{1,6}\s+/.test(block) || /^<h[1-6][^>]*>/i.test(block);
+    if (isHeading) {
+      compacted.push(block);
+      continue;
+    }
+
+    const sentences = block
+      .split(/(?<=[。！？!?])\s*/)
+      .map((sentence) => sentence.trim())
+      .filter(Boolean);
+    const reduced = sentences.length >= 3
+      ? sentences.slice(0, Math.max(1, Math.ceil(sentences.length * 0.65))).join('')
+      : block;
+    compacted.push(reduced);
+  }
+
+  text = compacted.join('\n\n').trim();
+  if (countGeneratedChars(text) <= maxChars) return text;
+
+  const shortened: string[] = [];
+  let current = 0;
+  for (const block of compacted) {
+    const length = countGeneratedChars(block);
+    if (!/^#{1,6}\s+/.test(block) && current + length > maxChars) {
+      continue;
+    }
+    shortened.push(block);
+    current += length;
+  }
+
+  return shortened.join('\n\n').trim() || text;
+}
+
 async function generateSchedulerArticleSinglePass(params: {
   outline: ArticleOutline;
   keyword: string;
@@ -3477,39 +3530,69 @@ async function generateSchedulerArticleSinglePass(params: {
   const toneInstruction = params.tone === 'casual'
     ? 'Tone: natural, approachable Japanese. Use desu/masu consistently.'
     : 'Tone: professional Japanese for business readers. Use desu/masu consistently.';
+  const hardMaxChars = Math.round(params.targetWordCount * 1.2);
+  const hardMinChars = Math.round(params.targetWordCount * 0.85);
   const prompt = [
     'Write a complete Japanese article in Markdown.',
     '',
     `Title: ${params.outline.title}`,
     `Main keyword: ${params.keyword}`,
     keywordLine ? `Related keywords: ${keywordLine}` : '',
-    `Target length: around ${params.targetWordCount} Japanese characters.`,
+    `Target length: ${params.targetWordCount} Japanese characters. Stay between ${hardMinChars} and ${hardMaxChars} characters. Stop writing once the article reaches ${hardMaxChars} characters — do NOT exceed this limit.`,
     toneInstruction,
     '',
     'Hard requirements:',
     '- Output only the article body. Do not include explanations, JSON, code fences, or notes.',
     '- Do not repeat the title as an H1.',
-    '- Follow the outline order exactly.',
-    '- Use Markdown headings: H2 as "##", H3 as "###".',
-    '- Write 2 to 3 lead paragraphs BEFORE the first "##" heading. The lead must introduce the topic, state the article purpose, and highlight what the reader will learn. Do NOT skip the lead.',
-    '- Each heading must have at least 2 paragraphs of body text under it.',
+    '- Follow the outline structure exactly. Write every [H2] entry as "##" and every [H3] entry as "###". Do NOT skip any heading.',
+    '- [H3] entries (indented in the outline) are sub-sections of the preceding [H2]. Always place them inside that H2 section.',
+    '- Write 2 to 3 short lead paragraphs BEFORE the first "##" heading.',
+    '- H2 sections: 1-2 paragraphs of body text (2-4 sentences each).',
+    '- H3 sections: 1-2 paragraphs of body text (2-4 sentences each). Keep each H3 concise to stay within the character limit.',
     '- Separate EVERY paragraph with a blank line (one empty line between paragraphs).',
-    '- Separate headings from preceding and following paragraphs with a blank line.',
+    '- Separate headings from surrounding paragraphs with a blank line.',
     '- Avoid unfinished sentences and placeholder text.',
-    '- Keep paragraphs to 3-5 sentences for readability.',
     '',
-    'Outline:',
+    'Outline (indented entries = H3 sub-sections):',
     outlineText,
     '',
     params.customInstructions ? `Additional instructions:\n${params.customInstructions}` : '',
   ].filter(Boolean).join('\n');
 
   const maxTokens = Math.min(
-    16000,
-    Math.max(8000, params.aiConfig.max_tokens || 0, Math.ceil(params.targetWordCount * 4))
+    12000,
+    Math.max(3000, Math.ceil(params.targetWordCount * 2.5))
   );
-  const raw = await callAI(prompt, params.aiConfig, maxTokens);
-  const fullContent = String(raw || '').trim();
+
+  let rawText: string;
+  try {
+    rawText = await callAI(prompt, params.aiConfig, maxTokens);
+  } catch (firstError: any) {
+    if (firstError?.partialText && typeof firstError.partialText === 'string') {
+      // Gemini hit maxOutputTokens — retry with a higher limit before giving up
+      const retryMaxTokens = Math.min(16000, maxTokens * 2);
+      console.warn(`[singlepass] Gemini hit maxOutputTokens (${maxTokens}), retrying with ${retryMaxTokens}`);
+      try {
+        rawText = await callAI(prompt, params.aiConfig, retryMaxTokens);
+      } catch (retryError: any) {
+        // Both attempts hit the limit — use whichever partial text is longer
+        const partial1 = typeof firstError.partialText === 'string' ? firstError.partialText : '';
+        const partial2 = typeof retryError?.partialText === 'string' ? retryError.partialText : '';
+        const bestPartial = countGeneratedChars(partial2) >= countGeneratedChars(partial1) ? partial2 : partial1;
+        const minAcceptable = Math.max(400, Math.round(params.targetWordCount * 0.5));
+        if (countGeneratedChars(bestPartial) >= minAcceptable) {
+          console.warn(`[singlepass] Both attempts hit token limit; using partial text (${countGeneratedChars(bestPartial)} chars)`);
+          rawText = bestPartial;
+        } else {
+          throw retryError;
+        }
+      }
+    } else {
+      throw firstError;
+    }
+  }
+
+  const fullContent = String(rawText || '').trim();
   if (!fullContent) {
     throw new Error('Single-pass article generation returned empty content');
   }

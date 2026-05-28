@@ -6,7 +6,7 @@ import { DOMParser } from "https://deno.land/x/deno_dom/deno-dom-wasm.ts";
 var TARGET_WORD_COUNT_BY_LENGTH = {
   short: 1e3,
   medium: 2e3,
-  long: 4e3
+  long: 3e3
 };
 var DEFAULT_TARGET_WORD_COUNT = TARGET_WORD_COUNT_BY_LENGTH.medium;
 
@@ -677,6 +677,122 @@ function parseLooseH2Lines(text, defaultEstimatedWordCount = 300) {
   }
   return sections;
 }
+function selectH3TitlesForH2(h2Title, count) {
+  const title = String(h2Title || "").toLowerCase();
+  const pool = (() => {
+    if (title.includes("\u30E1\u30EA\u30C3\u30C8") && title.includes("\u30C7\u30E1\u30EA\u30C3\u30C8")) {
+      return ["\u30E1\u30EA\u30C3\u30C8\u9762\u306E\u6574\u7406", "\u30C7\u30E1\u30EA\u30C3\u30C8\u9762\u306E\u6574\u7406"];
+    }
+    if (title.includes("\u30E1\u30EA\u30C3\u30C8")) {
+      return ["\u4E3B\u306A\u30E1\u30EA\u30C3\u30C8", "\u4F53\u611F\u3057\u3084\u3059\u3044\u52B9\u679C"];
+    }
+    if (title.includes("\u30C7\u30E1\u30EA\u30C3\u30C8")) {
+      return ["\u4E3B\u306A\u30C7\u30E1\u30EA\u30C3\u30C8", "\u5F8C\u6094\u3092\u9632\u3050\u5BFE\u7B56"];
+    }
+    if (title.includes("\u8CBB\u7528") || title.includes("\u4FA1\u683C") || title.includes("\u30B3\u30B9\u30C8")) {
+      return ["\u8CBB\u7528\u306E\u5185\u8A33", "\u30B3\u30B9\u30C8\u3092\u6291\u3048\u308B\u30DD\u30A4\u30F3\u30C8"];
+    }
+    if (title.includes("\u9078\u3073\u65B9") || title.includes("\u6BD4\u8F03")) {
+      return ["\u6BD4\u8F03\u6642\u306E\u30C1\u30A7\u30C3\u30AF\u9805\u76EE", "\u5224\u65AD\u3092\u8AA4\u3089\u306A\u3044\u30B3\u30C4"];
+    }
+    if (title.includes("\u65B9\u6CD5") || title.includes("\u624B\u9806") || title.includes("\u3084\u308A\u65B9")) {
+      return ["\u57FA\u672C\u7684\u306A\u624B\u9806", "\u5B9F\u8DF5\u6642\u306E\u6CE8\u610F\u70B9"];
+    }
+    if (title.includes("\u7A2E\u985E") || title.includes("\u30BF\u30A4\u30D7") || title.includes("\u5206\u985E")) {
+      return ["\u4E3B\u306A\u7A2E\u985E\u3068\u7279\u5FB4", "\u7528\u9014\u306B\u5FDC\u3058\u305F\u9078\u3073\u65B9"];
+    }
+    if (title.includes("\u539F\u56E0") || title.includes("\u7406\u7531") || title.includes("\u306A\u305C")) {
+      return ["\u4E3B\u306A\u539F\u56E0\u306E\u6574\u7406", "\u6839\u672C\u7684\u306A\u5BFE\u51E6\u306E\u8003\u3048\u65B9"];
+    }
+    if (title.includes("\u7BA1\u7406") || title.includes("\u904B\u7528") || title.includes("\u30E1\u30F3\u30C6")) {
+      return ["\u65E5\u5E38\u7BA1\u7406\u306E\u30DD\u30A4\u30F3\u30C8", "\u30C8\u30E9\u30D6\u30EB\u3092\u9632\u3050\u5BFE\u7B56"];
+    }
+    return ["\u57FA\u672C\u7684\u306A\u8003\u3048\u65B9", "\u5B9F\u8DF5\u306B\u304A\u3051\u308B\u7740\u773C\u70B9"];
+  })();
+  return pool.slice(0, Math.max(1, Math.min(count, pool.length)));
+}
+function insertSubheadingsIntoLongSections(markdown, targetWordCount) {
+  if (Number.isFinite(targetWordCount) && Number(targetWordCount) <= 1200) {
+    return String(markdown || "").trim();
+  }
+  const text = String(markdown || "").trim();
+  if (!text) return text;
+  const h2Regex = /^##\s+(.+)$/gm;
+  const matches = [];
+  let m = null;
+  while ((m = h2Regex.exec(text)) !== null) {
+    matches.push({ index: m.index, full: m[0], title: String(m[1] || "").trim() });
+  }
+  if (matches.length === 0) return text;
+  const blocks = [];
+  let cursor = 0;
+  const pushUntil = (end) => {
+    if (end > cursor) {
+      blocks.push(text.slice(cursor, end));
+      cursor = end;
+    }
+  };
+  for (let i = 0; i < matches.length; i += 1) {
+    const current = matches[i];
+    const nextIndex = i + 1 < matches.length ? matches[i + 1].index : text.length;
+    pushUntil(current.index);
+    const blockRaw = text.slice(current.index, nextIndex);
+    const firstBreak = blockRaw.indexOf("\n");
+    if (firstBreak < 0) {
+      blocks.push(blockRaw);
+      cursor = nextIndex;
+      continue;
+    }
+    const headingLine = blockRaw.slice(0, firstBreak).trimEnd();
+    const body = blockRaw.slice(firstBreak + 1).trim();
+    if (!body || /^###\s+/m.test(body) || SUMMARY_TITLE_PATTERN.test(current.title) || countGeneratedChars(body) < 520) {
+      blocks.push(blockRaw);
+      cursor = nextIndex;
+      continue;
+    }
+    const paragraphs = body.split(/\n{2,}/).map((p) => p.trim()).filter(Boolean);
+    if (paragraphs.length < 3) {
+      blocks.push(blockRaw);
+      cursor = nextIndex;
+      continue;
+    }
+    const insertCount = paragraphs.length >= 5 ? 2 : 1;
+    const h3Titles = selectH3TitlesForH2(current.title, insertCount);
+    let rebuiltBody = "";
+    if (insertCount === 1) {
+      const split = Math.max(1, Math.floor(paragraphs.length / 2));
+      const part1 = paragraphs.slice(0, split).join("\n\n");
+      const part2 = paragraphs.slice(split).join("\n\n");
+      rebuiltBody = [
+        `### ${h3Titles[0] || "\u91CD\u8981\u30DD\u30A4\u30F3\u30C8"}`,
+        "",
+        part1,
+        "",
+        part2
+      ].join("\n").trim();
+    } else {
+      const split1 = Math.max(1, Math.floor(paragraphs.length / 2));
+      const part1 = paragraphs.slice(0, split1).join("\n\n");
+      const part2 = paragraphs.slice(split1).join("\n\n");
+      rebuiltBody = [
+        `### ${h3Titles[0] || "\u91CD\u8981\u30DD\u30A4\u30F3\u30C8"}`,
+        "",
+        part1,
+        "",
+        `### ${h3Titles[1] || "\u5B9F\u8DF5\u6642\u306E\u7740\u773C\u70B9"}`,
+        "",
+        part2
+      ].join("\n").trim();
+    }
+    blocks.push(`${headingLine}
+
+${rebuiltBody}
+`);
+    cursor = nextIndex;
+  }
+  pushUntil(text.length);
+  return blocks.join("").trim();
+}
 var SUMMARY_TITLE_PATTERN = /(まとめ|結論|総括|おわりに|最後に|summary|conclusion)/i;
 function calculateEdgeSectionWordCount(targetWordCount) {
   if (!Number.isFinite(targetWordCount) || targetWordCount <= 0) return 250;
@@ -1344,7 +1460,18 @@ async function generateOutlineWithSharedCore(params) {
     const prompt = retryInstruction ? `${basePrompt}
 
 ${retryInstruction}` : basePrompt;
-    const text = await params.callAI(prompt, 2400);
+    let text;
+    try {
+      text = await params.callAI(prompt, 4e3);
+    } catch (callError) {
+      if (callError?.partialText && typeof callError.partialText === "string" && callError.partialText.length > 100) {
+        console.warn(`[outline] callAI truncated on attempt ${attempt + 1}, trying partial text (${callError.partialText.length} chars)`);
+        text = callError.partialText;
+      } else {
+        attemptDiagnostics.push(`attempt${attempt + 1}: callAI error - ${String(callError?.message || callError)}`);
+        continue;
+      }
+    }
     console.debug(`[outline debug] attempt${attempt + 1} response (first 800 chars):`, text.slice(0, 800));
     let parsedSections = parseOutlineSections(text, 400, false);
     const parsedFromJson = parsedSections.length <= 1 ? parseOutlineSectionsFromJson(text, 400) : { sections: [] };
@@ -1554,13 +1681,6 @@ function evaluateAutoOutlineQuality(outline, options) {
   }
   if (genericHeadingCount >= 2) {
     issues.push(`too many generic headings (${genericHeadingCount})`);
-  }
-  if (options.selectedTitle) {
-    const outlineTitle = normalizeComparableText(outline.title);
-    const selectedTitle = normalizeComparableText(options.selectedTitle);
-    if (outlineTitle && selectedTitle && outlineTitle !== selectedTitle) {
-      issues.push("outline title differs from selected title");
-    }
   }
   return { passed: issues.length === 0, issues };
 }
@@ -1792,7 +1912,7 @@ ${outputExample}
   try {
     const raw = await params.callAI(prompt, 1800);
     const suggestions = parseAiTitleSuggestions(raw, keyword, count);
-    if (suggestions.length >= count) return suggestions;
+    if (suggestions.length >= 1) return suggestions;
     const retryPrompt = `
 \u6B21\u306E\u30AD\u30FC\u30EF\u30FC\u30C9\u304B\u3089\u3001\u30D6\u30ED\u30B0\u8A18\u4E8B\u30BF\u30A4\u30C8\u30EB\u6848\u3092\u5FC5\u305A${count}\u4EF6\u4F5C\u6210\u3057\u3066\u304F\u3060\u3055\u3044\u3002
 
@@ -1813,8 +1933,8 @@ ${outputExample}
 `.trim();
     const retryRaw = await params.callAI(retryPrompt, 1200);
     const retrySuggestions = parseAiTitleSuggestions(retryRaw, keyword, count);
-    if (retrySuggestions.length >= count) return retrySuggestions;
-    throw new Error(`AI\u306E\u30BF\u30A4\u30C8\u30EB\u5019\u88DC\u304C${count}\u4EF6\u306B\u6E80\u305F\u306A\u3044\u3001\u307E\u305F\u306F\u54C1\u8CEA\u6761\u4EF6\u3092\u6E80\u305F\u3057\u307E\u305B\u3093\u3067\u3057\u305F\u3002`);
+    if (retrySuggestions.length >= 1) return retrySuggestions;
+    throw new Error(`AI\u306E\u30BF\u30A4\u30C8\u30EB\u5019\u88DC\u30921\u4EF6\u3082\u53D6\u5F97\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F\u3002`);
   } catch (error) {
     if (error instanceof Error) throw error;
     throw new Error("AI\u30BF\u30A4\u30C8\u30EB\u751F\u6210\u306B\u5931\u6557\u3057\u307E\u3057\u305F\u3002");
@@ -2022,11 +2142,19 @@ var parseNumber = (value, fallback) => {
 };
 var SCHEDULE_EXECUTION_LOCK_TTL_SECONDS = 20 * 60;
 var FALLBACK_SCHEDULE_ROW_LOCK_WINDOW_SECONDS = 8 * 60;
-var AI_REQUEST_TIMEOUT_MS = 120 * 1e3;
+var AI_REQUEST_TIMEOUT_MS = 180 * 1e3;
 var STALE_RUNNING_EXECUTION_MINUTES = 12;
 var warnedMissingSchedulerLockRpc = false;
 var warnedUsingFallbackScheduleRowLock = false;
 var warnedSchedulerLockUnavailable = false;
+var AiOutputTruncatedError = class extends Error {
+  partialText;
+  constructor(message, partialText) {
+    super(message);
+    this.name = "AiOutputTruncatedError";
+    this.partialText = partialText;
+  }
+};
 async function fetchWithTimeout(url, init, timeoutMs = AI_REQUEST_TIMEOUT_MS) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
@@ -3020,11 +3148,14 @@ async function callAI(prompt, aiConfig, maxTokens) {
     }
     const data = await response.json();
     const candidate = data?.candidates?.[0];
-    if (candidate?.finishReason === "MAX_TOKENS") {
-      throw new Error("Gemini\u306E\u51FA\u529B\u304CmaxOutputTokens\u4E0A\u9650\u3067\u9014\u4E2D\u7D42\u4E86\u3057\u307E\u3057\u305F\u3002");
-    }
     const parts = candidate?.content?.parts;
     const text = Array.isArray(parts) ? parts.map((part) => typeof part?.text === "string" ? part.text : "").join("\n").trim() : "";
+    if (candidate?.finishReason === "MAX_TOKENS") {
+      if (text) {
+        throw new AiOutputTruncatedError("Gemini\u306E\u51FA\u529B\u304CmaxOutputTokens\u4E0A\u9650\u3067\u9014\u4E2D\u7D42\u4E86\u3057\u307E\u3057\u305F\u3002", text);
+      }
+      throw new Error("Gemini\u306E\u51FA\u529B\u304CmaxOutputTokens\u4E0A\u9650\u3067\u9014\u4E2D\u7D42\u4E86\u3057\u307E\u3057\u305F\u3002");
+    }
     if (!text) throw new Error("Gemini API returned empty content");
     return text;
   }
@@ -3454,20 +3585,26 @@ async function executeSchedule(schedule, wpConfig, aiConfig, supabase, chatworkA
       const normalizedFirst = normalize(firstLine);
       const normalizedTitle = normalize(articleTitle2);
       if (normalizedFirst.length > 0 && normalizedTitle.length > 0) {
-        if (normalizedFirst === normalizedTitle || normalizedFirst.startsWith(normalizedTitle) || normalizedTitle.startsWith(normalizedFirst) || normalizedFirst.includes(normalizedTitle) && firstLine.length < articleTitle2.length * 2 || normalizedFirst.includes(normalizedTitle.substring(0, Math.min(10, normalizedTitle.length)))) {
+        const isTitleLine = normalizedFirst === normalizedTitle || normalizedTitle.startsWith(normalizedFirst) && normalizedFirst.length >= normalizedTitle.length * 0.8 || normalizedFirst.startsWith(normalizedTitle) && firstLine.length <= articleTitle2.length * 1.3;
+        if (isTitleLine) {
           lines.splice(firstNonEmpty, 1);
           text = lines.join("\n");
         }
       }
     }
-    text = text.replace(/^(#{1,6}\s+.+)\n+(?=#{1,6}\s+)/gm, (match, heading) => {
-      console.log("Removed empty heading:", heading.trim());
+    text = text.replace(/^(#{1,6})(\s+.+)\n+(?=(#{1,6})\s+)/gm, (match, level1, rest, level2) => {
+      if (level2.length > level1.length) {
+        return match;
+      }
+      console.log("Removed empty heading:", `${level1}${rest}`.trim());
       return "";
     });
     text = text.replace(/^(邵ｺ・ｾ邵ｺ・ｨ郢ｧ・埼お蜊・ｫ鄙ｻ驍ｱ荵怜ｳ｡)[繝ｻ繝ｻ]\s*/gm, "");
     text = text.replace(/\*\*(.+?)\*\*/g, "$1");
     text = text.replace(/\*\*/g, "");
     text = text.replace(/\n{3,}/g, "\n\n");
+    text = text.replace(/([^\n])(\n)(#{1,6}\s)/g, "$1\n\n$3");
+    text = text.replace(/(#{1,6}\s[^\n]+)(\n)([^#\n-*])/g, "$1\n\n$3");
     return text.trim();
   }
   async function refineContentWithAI(content, _title, _keyword, _aiConfig) {
@@ -3486,6 +3623,8 @@ async function executeSchedule(schedule, wpConfig, aiConfig, supabase, chatworkA
   });
   fullContent = cleanupContentArtifacts(fullContent, articleTitle);
   console.log("Deterministic cleanup applied");
+  fullContent = insertSubheadingsIntoLongSections(fullContent, targetWordCount);
+  console.log("H3 subheadings inserted");
   const elapsedMs = Date.now() - schedulerStartTime;
   const REFINEMENT_TIME_LIMIT_MS = 12e4;
   if (elapsedMs < REFINEMENT_TIME_LIMIT_MS) {
@@ -3699,6 +3838,13 @@ async function executeSchedule(schedule, wpConfig, aiConfig, supabase, chatworkA
     );
     fullContent = baselineNormalizedContent;
   }
+  const finalCharsBeforeCompaction = countGeneratedChars(fullContent);
+  fullContent = compactArticleToTargetLength(fullContent, targetWordCount);
+  const finalCharsAfterCompaction = countGeneratedChars(fullContent);
+  if (finalCharsAfterCompaction < finalCharsBeforeCompaction) {
+    console.log(`Compacted article length: ${finalCharsBeforeCompaction} -> ${finalCharsAfterCompaction}`);
+  }
+  validateGeneratedArticleCompleteness(fullContent, outline, targetWordCount);
   let postId = null;
   let publishErrorMessage = null;
   let publishedAtIso = null;
@@ -4089,8 +4235,10 @@ function normalizeHeadingHierarchy(lines) {
     if (!Number.isFinite(level) || level <= 0) continue;
     let title = sanitizeHeadingLabel(extractHeadingText(trimmed));
     if (!title) continue;
-    if (level >= 2) {
+    if (level === 1) {
       level = 2;
+    } else if (level > 3) {
+      level = 3;
     }
     if (!isSummaryHeadingText(title)) {
       title = expandSimpleH2Heading(title);
@@ -4165,7 +4313,8 @@ function shouldRemoveLeadingTitleLine(line, articleTitle) {
   const withoutSummary = normalizeComparableText2(raw.replace(/繝ｻ驛・ｽｦ竏ｫ・ｴ繝ｻ・ｼ讎蚕(髫補悪・ｴﾐｫ)|邵ｲ蜊・ｦ竏ｫ・ｴ繝ｻﾂ謗・囎竏ｫ・ｴ繝ｻ/g, ""));
   if (normalizedLine === normalizedTitle) return true;
   if (withoutSummary === normalizedTitle) return true;
-  if (normalizedLine.startsWith(normalizedTitle) || normalizedTitle.startsWith(normalizedLine)) return true;
+  const lineIsShortEnough = raw.length <= articleTitle.length * 1.3 + 10;
+  if (lineIsShortEnough && (normalizedLine.startsWith(normalizedTitle) || normalizedTitle.startsWith(normalizedLine))) return true;
   const hasSummarySuffix = /(繝ｻ驛・ｽｦ竏ｫ・ｴ繝ｻ・ｼ讎蚕(髫補悪・ｴﾐｫ)|邵ｲ蜊・ｦ竏ｫ・ｴ繝ｻﾂ謗・囎竏ｫ・ｴ繝ｻ)/.test(raw);
   if (hasSummarySuffix && (normalizedLine.includes(normalizedTitle) || withoutSummary.includes(normalizedTitle))) {
     return true;
@@ -4362,15 +4511,16 @@ async function publishToWordPress(config, title, content, status) {
 function formatOutlineForSinglePass(outline) {
   return (outline.sections || []).map((section, index) => {
     const level = section.isLead ? "lead" : section.level === 3 ? "H3" : "H2";
-    const description = section.description ? ` - ${section.description}` : "";
-    const chars = section.estimatedWordCount ? ` (${section.estimatedWordCount} chars)` : "";
-    return `${index + 1}. [${level}] ${section.title}${chars}${description}`;
+    const indent = section.level === 3 ? "   " : "";
+    const chars = section.estimatedWordCount ? ` (${section.estimatedWordCount}\u5B57)` : "";
+    const description = section.description ? ` \u2014 ${section.description}` : "";
+    return `${indent}${index + 1}. [${level}] ${section.title}${chars}${description}`;
   }).join("\n");
 }
 function validateGeneratedArticleCompleteness(content, outline, targetWordCount) {
   const normalized = String(content || "").trim();
   const charCount = countGeneratedChars(normalized);
-  const minChars = Math.max(500, Math.round(Math.max(800, targetWordCount) * 0.55));
+  const minChars = Math.max(500, Math.round(Math.max(800, targetWordCount) * 0.75));
   if (charCount < minChars) {
     throw new Error(`Generated article is too short (${charCount}/${targetWordCount} chars). AI output may have stopped midway.`);
   }
@@ -4380,43 +4530,78 @@ function validateGeneratedArticleCompleteness(content, outline, targetWordCount)
   if (expectedHeadings >= 3 && actualHeadings < minHeadings) {
     throw new Error(`Generated article is missing headings (${actualHeadings}/${expectedHeadings}). AI output may be incomplete.`);
   }
-  const lastTextLine = normalized.split("\n").map((line) => line.trim()).filter(Boolean).pop() || "";
-  if (lastTextLine && !/[。！？.!?」』）)]$/.test(lastTextLine)) {
-    throw new Error(`Generated article appears to end mid-sentence: ${trimForLog(lastTextLine, 120)}`);
+  const lines = normalized.split("\n").map((line) => line.trim()).filter(Boolean);
+  const lastTextLine = lines.slice().reverse().find((line) => !/^#{1,6}\s/.test(line) && !/^[-*]\s/.test(line) && line.length >= 20) || "";
+  if (lastTextLine && !/[。！？.!?」』）)\w]$/.test(lastTextLine)) {
+    console.warn(`Generated article may end mid-sentence: ${trimForLog(lastTextLine, 120)}`);
   }
+}
+function compactArticleToTargetLength(content, targetWordCount) {
+  const maxChars = Math.round(Math.max(800, targetWordCount) * 1.2);
+  let text = String(content || "").trim();
+  if (!text || countGeneratedChars(text) <= maxChars) return text;
+  const blocks = text.split(/\n{2,}/).map((block) => block.trim()).filter(Boolean);
+  const compacted = [];
+  for (const block of blocks) {
+    const isHeading = /^#{1,6}\s+/.test(block) || /^<h[1-6][^>]*>/i.test(block);
+    if (isHeading) {
+      compacted.push(block);
+      continue;
+    }
+    const sentences = block.split(/(?<=[。！？!?])\s*/).map((sentence) => sentence.trim()).filter(Boolean);
+    const reduced = sentences.length >= 3 ? sentences.slice(0, Math.max(1, Math.ceil(sentences.length * 0.65))).join("") : block;
+    compacted.push(reduced);
+  }
+  text = compacted.join("\n\n").trim();
+  if (countGeneratedChars(text) <= maxChars) return text;
+  const shortened = [];
+  let current = 0;
+  for (const block of compacted) {
+    const length = countGeneratedChars(block);
+    if (!/^#{1,6}\s+/.test(block) && current + length > maxChars) {
+      continue;
+    }
+    shortened.push(block);
+    current += length;
+  }
+  return shortened.join("\n\n").trim() || text;
 }
 async function generateSchedulerArticleSinglePass(params) {
   const outlineText = formatOutlineForSinglePass(params.outline);
   const keywordLine = Array.from(new Set([params.keyword, ...params.keywords || []].map((item) => String(item || "").trim()).filter(Boolean))).slice(0, 6).join(", ");
   const toneInstruction = params.tone === "casual" ? "Tone: natural, approachable Japanese. Use desu/masu consistently." : "Tone: professional Japanese for business readers. Use desu/masu consistently.";
+  const hardMaxChars = Math.round(params.targetWordCount * 1.2);
+  const hardMinChars = Math.round(params.targetWordCount * 0.85);
   const prompt = [
     "Write a complete Japanese article in Markdown.",
     "",
     `Title: ${params.outline.title}`,
     `Main keyword: ${params.keyword}`,
     keywordLine ? `Related keywords: ${keywordLine}` : "",
-    `Target length: around ${params.targetWordCount} Japanese characters.`,
+    `Target length: ${params.targetWordCount} Japanese characters. Stay between ${hardMinChars} and ${hardMaxChars} characters. Stop writing once the article reaches ${hardMaxChars} characters \u2014 do NOT exceed this limit.`,
     toneInstruction,
     "",
     "Hard requirements:",
     "- Output only the article body. Do not include explanations, JSON, code fences, or notes.",
     "- Do not repeat the title as an H1.",
-    "- Follow the outline order exactly.",
-    '- Use Markdown headings: H2 as "##", H3 as "###".',
-    "- Include the lead section as normal paragraphs before the first H2.",
-    "- Each heading must have body text under it.",
+    '- Follow the outline structure exactly. Write every [H2] entry as "##" and every [H3] entry as "###". Do NOT skip any heading.',
+    "- [H3] entries (indented in the outline) are sub-sections of the preceding [H2]. Always place them inside that H2 section.",
+    '- Write 2 to 3 short lead paragraphs BEFORE the first "##" heading.',
+    "- H2 sections: 1-2 paragraphs of body text (2-4 sentences each).",
+    "- H3 sections: 1-2 paragraphs of body text (2-4 sentences each). Keep each H3 concise to stay within the character limit.",
+    "- Separate EVERY paragraph with a blank line (one empty line between paragraphs).",
+    "- Separate headings from surrounding paragraphs with a blank line.",
     "- Avoid unfinished sentences and placeholder text.",
-    "- Keep paragraphs readable and concise.",
     "",
-    "Outline:",
+    "Outline (indented entries = H3 sub-sections):",
     outlineText,
     "",
     params.customInstructions ? `Additional instructions:
 ${params.customInstructions}` : ""
   ].filter(Boolean).join("\n");
   const maxTokens = Math.min(
-    16e3,
-    Math.max(8e3, params.aiConfig.max_tokens || 0, Math.ceil(params.targetWordCount * 4))
+    12e3,
+    Math.max(3e3, Math.ceil(params.targetWordCount * 2.5))
   );
   const raw = await callAI(prompt, params.aiConfig, maxTokens);
   const fullContent = String(raw || "").trim();
