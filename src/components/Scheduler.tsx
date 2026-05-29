@@ -11,7 +11,7 @@ import { formatSharedTone, getSharedToneDescription, normalizeSharedTone, shared
 import toast from 'react-hot-toast';
 import { Play } from 'lucide-react';
 
-const SCHEDULE_LIMIT = 5;
+const SCHEDULE_LIMIT = 1;
 
 type ExecutionHistoryRow = {
   id: string;
@@ -109,6 +109,8 @@ export const Scheduler: React.FC = () => {
     image_generation_enabled: false,
     images_per_article: 0,
   });
+
+  const existingSchedule = schedules[0] || null;
 
   const timeOptions = useMemo(() => {
     const options: string[] = [];
@@ -416,8 +418,9 @@ export const Scheduler: React.FC = () => {
     try {
       setLoading(true);
 
-      if (editingSchedule) {
-        await scheduleService.updateSchedule(editingSchedule.id!, submitData);
+      const scheduleToUpdate = editingSchedule || existingSchedule;
+      if (scheduleToUpdate?.id) {
+        await scheduleService.updateSchedule(scheduleToUpdate.id, submitData);
         toast.success('スケジュールを更新しました');
       } else {
         await scheduleService.createSchedule(submitData);
@@ -835,10 +838,10 @@ export const Scheduler: React.FC = () => {
         <section className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 space-y-6">
           <div>
             <h3 className="text-lg font-semibold text-gray-900 mb-2">
-              {editingSchedule ? '記事生成設定を編集' : '記事生成設定'}
+              {editingSchedule || existingSchedule ? '記事生成設定を編集' : '記事生成設定'}
             </h3>
             <p className="text-sm text-gray-600">
-              AI、生成元、投稿先、文字数、文体を設定します
+              登録できるスケジュールは1件です。保存すると既存設定を更新します
             </p>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1419,7 +1422,7 @@ export const Scheduler: React.FC = () => {
               disabled={loading}
               className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {loading ? '保存中...' : editingSchedule ? 'スケジュールを更新' : 'スケジュールを作成'}
+              {loading ? '保存中...' : (editingSchedule || existingSchedule) ? 'スケジュールを更新' : 'スケジュールを作成'}
             </button>
           </div>
       </form>
@@ -1593,7 +1596,7 @@ export const Scheduler: React.FC = () => {
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-semibold text-gray-900">登録済みスケジュール</h3>
-          <span className="text-sm text-gray-500">全 {schedules.length} 件</span>
+          <span className="text-sm text-gray-500">全 {schedules.length} / {SCHEDULE_LIMIT} 件</span>
         </div>
 
         {
@@ -1603,7 +1606,7 @@ export const Scheduler: React.FC = () => {
             <div className="text-center py-8">
               <Calendar className="w-16 h-16 text-gray-400 mx-auto mb-4" />
               <p className="text-gray-500 mb-2">登録済みのスケジュールがありません</p>
-              <p className="text-sm text-gray-400">上のボタンから新しいスケジュールを作成してください</p>
+              <p className="text-sm text-gray-400">上のフォームからスケジュールを作成してください</p>
             </div>
           ) : (
             <div className="space-y-3">

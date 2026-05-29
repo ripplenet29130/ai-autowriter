@@ -4,6 +4,7 @@ import { getCurrentAccountId, getRequiredAccountId } from './accountScope';
 
 export interface ArticleFilters {
   status?: string;
+  postState?: 'published' | 'unpublished' | 'failed';
   category?: string;
   dateFrom?: string;
   dateTo?: string;
@@ -112,14 +113,43 @@ export const articlesService = {
     }
   },
 
-  async deleteArticle(id: string): Promise<boolean> {
+  async deleteArticle(id: string, options?: { unpublishedOnly?: boolean }): Promise<boolean> {
     try {
       if (!supabase) return false;
-      const { error } = await supabase
+      const accountId = getRequiredAccountId();
+      if (options?.unpublishedOnly) {
+        const { data: existing, error: fetchError } = await supabase
+          .from('articles')
+          .select('status, is_published, wordpress_post_id, wordpress_url')
+          .eq('id', id)
+          .eq('account_id', accountId)
+          .single();
+
+        if (fetchError || !existing) {
+          console.error('削除対象の記事確認に失敗しました:', fetchError);
+          return false;
+        }
+
+        const hasWordPressPost = Boolean(
+          existing.is_published ||
+          existing.status === 'published' ||
+          existing.wordpress_post_id ||
+          existing.wordpress_url
+        );
+
+        if (hasWordPressPost) {
+          console.warn('投稿済みの記事削除をブロックしました:', id);
+          return false;
+        }
+      }
+
+      let query = supabase
         .from('articles')
         .delete()
         .eq('id', id)
-        .eq('account_id', getRequiredAccountId());
+        .eq('account_id', accountId);
+
+      const { error } = await query;
 
       if (error) {
         console.error('險倅ｺ九・蜑企勁縺ｫ螟ｱ謨励＠縺ｾ縺励◆:', error);
@@ -178,6 +208,19 @@ export const articlesService = {
 
       if (filters?.status) {
         query = query.eq('status', filters.status);
+      }
+
+      if (filters?.postState === 'failed') {
+        query = query.eq('status', 'failed');
+      } else if (filters?.postState === 'published') {
+        query = query.or('is_published.eq.true,status.eq.published,wordpress_post_id.not.is.null,wordpress_url.not.is.null');
+      } else if (filters?.postState === 'unpublished') {
+        query = query
+          .neq('status', 'published')
+          .neq('status', 'failed')
+          .or('is_published.is.null,is_published.eq.false')
+          .is('wordpress_post_id', null)
+          .is('wordpress_url', null);
       }
 
       if (filters?.category) {
@@ -241,6 +284,19 @@ export const articlesService = {
 
       if (filters?.status) {
         query = query.eq('status', filters.status);
+      }
+
+      if (filters?.postState === 'failed') {
+        query = query.eq('status', 'failed');
+      } else if (filters?.postState === 'published') {
+        query = query.or('is_published.eq.true,status.eq.published,wordpress_post_id.not.is.null,wordpress_url.not.is.null');
+      } else if (filters?.postState === 'unpublished') {
+        query = query
+          .neq('status', 'published')
+          .neq('status', 'failed')
+          .or('is_published.is.null,is_published.eq.false')
+          .is('wordpress_post_id', null)
+          .is('wordpress_url', null);
       }
 
       if (filters?.category) {

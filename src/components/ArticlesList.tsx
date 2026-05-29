@@ -14,15 +14,17 @@ import { FactCheckItem, FactCheckResult } from '../types/factCheck';
 import { factCheckService } from '../services/factCheckService';
 import { FactCheckResultsDisplay } from './FactCheckResultsDisplay';
 
+const ARTICLES_PAGE_SIZE = 100;
+
 export const ArticlesList: React.FC = () => {
   const { deleteArticle } = useAppStore();
   const [searchTerm, setSearchTerm] = useState('');
-  const [statusFilter, setStatusFilter] = useState<string>('all');
-  const [categoryFilter, setCategoryFilter] = useState<string>('all');
-  const [publishedFilter, setPublishedFilter] = useState<string>('all');
+  const [postStateFilter, setPostStateFilter] = useState<string>('all');
   const [sortField, setSortField] = useState<'created_at' | 'updated_at' | 'title'>('created_at');
   const [sortAscending, setSortAscending] = useState(false);
   const [localArticles, setLocalArticles] = useState<Article[]>([]);
+  const [totalArticleCount, setTotalArticleCount] = useState(0);
+  const [currentPage, setCurrentPage] = useState(1);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedArticle, setSelectedArticle] = useState<Article | null>(null);
   const [publishingArticle, setPublishingArticle] = useState<Article | null>(null);
@@ -68,7 +70,11 @@ export const ArticlesList: React.FC = () => {
 
   useEffect(() => {
     loadArticles();
-  }, [statusFilter, categoryFilter, publishedFilter, sortField, sortAscending, searchTerm]);
+  }, [postStateFilter, sortField, sortAscending, searchTerm, currentPage]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [postStateFilter, sortField, sortAscending, searchTerm]);
 
   useEffect(() => {
     const loadFactCheckSettings = async () => {
@@ -109,8 +115,9 @@ export const ArticlesList: React.FC = () => {
       setIsLoading(true);
 
       const filters: ArticleFilters = {};
-      if (statusFilter !== 'all') filters.status = statusFilter;
-      if (categoryFilter !== 'all') filters.category = categoryFilter;
+      if (postStateFilter !== 'all') {
+        filters.postState = postStateFilter as ArticleFilters['postState'];
+      }
       if (searchTerm) filters.searchTerm = searchTerm;
 
       const sortOptions: ArticleSortOptions = {
@@ -118,17 +125,14 @@ export const ArticlesList: React.FC = () => {
         ascending: sortAscending
       };
 
-      let fetchedArticles = await articlesService.getAllArticles(filters, sortOptions, 100);
-
-      if (publishedFilter !== 'all') {
-        fetchedArticles = fetchedArticles.filter(article => {
-          if (publishedFilter === 'published') return article.isPublished === true;
-          if (publishedFilter === 'unpublished') return article.isPublished !== true;
-          return true;
-        });
-      }
+      const offset = (currentPage - 1) * ARTICLES_PAGE_SIZE;
+      const [fetchedArticles, count] = await Promise.all([
+        articlesService.getAllArticles(filters, sortOptions, ARTICLES_PAGE_SIZE, offset),
+        articlesService.getArticleCount(filters),
+      ]);
 
       setLocalArticles(fetchedArticles);
+      setTotalArticleCount(count);
     } catch (error) {
       console.error('記事の読み込みエラー:', error);
       toast.error('記事の読み込みに失敗しました');
@@ -137,11 +141,23 @@ export const ArticlesList: React.FC = () => {
     }
   };
 
-  const handleDeleteArticle = async (id: string, title: string) => {
+  const isArticlePublished = (article: Article) => (
+    article.isPublished === true ||
+    article.status === 'published' ||
+    Boolean(article.wordPressPostId || article.wordPressId || article.wordPressUrl)
+  );
+
+  const handleDeleteArticle = async (article: Article) => {
+    if (isArticlePublished(article)) {
+      toast.error('WordPress投稿済みの記事はこの画面から削除できません');
+      return;
+    }
+
+    const { id, title } = article;
     if (!confirm(`「${title}」を削除しますか？`)) return;
 
     try {
-      const success = await articlesService.deleteArticle(id);
+      const success = await articlesService.deleteArticle(id, { unpublishedOnly: true });
       if (success) {
         deleteArticle(id);
         setLocalArticles(prev => prev.filter(a => a.id !== id));
@@ -333,8 +349,42 @@ export const ArticlesList: React.FC = () => {
       .map((line, idx) => (markedSet.has(idx + 1) && line.trim() ? '【AI修正】' + line : line))
       .join('\n');
   }, [selectedArticle, factCheckFixedLineNumbers]);
-  const categories = Array.from(new Set(localArticles.map(a => a.category).filter(Boolean)));
   const canApplyFactCheckFix = hasFixableIssues(factCheckResults);
+  const totalPages = Math.max(1, Math.ceil(totalArticleCount / ARTICLES_PAGE_SIZE));
+  const pageStart = totalArticleCount === 0 ? 0 : (currentPage - 1) * ARTICLES_PAGE_SIZE + 1;
+  const pageEnd = Math.min(currentPage * ARTICLES_PAGE_SIZE, totalArticleCount);
+  const renderPagination = () => {
+    if (totalPages <= 1) return null;
+
+    return (
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="text-sm text-gray-600">
+          {pageStart}-{pageEnd}件目を表示中（全{totalArticleCount}件）
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
+            disabled={currentPage <= 1 || isLoading}
+            className="px-3 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            前へ
+          </button>
+          <span className="min-w-[6rem] text-center text-sm text-gray-600">
+            {currentPage} / {totalPages}
+          </span>
+          <button
+            type="button"
+            onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
+            disabled={currentPage >= totalPages || isLoading}
+            className="px-3 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            次へ
+          </button>
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div className="space-y-6">
@@ -357,15 +407,20 @@ export const ArticlesList: React.FC = () => {
             <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
             更新
           </button>
-          <div className="text-sm text-gray-600">
-            合計: <span className="font-semibold text-gray-900">{localArticles.length}</span> 件
-          </div>
         </div>
       </div>
 
+      {totalPages > 1 && (
+        <div className="border-t border-gray-100 pt-4">
+          {renderPagination()}
+        </div>
+      )}
+
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-        <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
-          <div className="relative">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">検索</label>
+            <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
             <input
               type="text"
@@ -374,55 +429,40 @@ export const ArticlesList: React.FC = () => {
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             />
+            </div>
           </div>
 
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-          >
-            <option value="all">すべてのステータス</option>
-            <option value="draft">下書き</option>
-            <option value="scheduled">予約済み</option>
-            <option value="published">公開済み</option>
-            <option value="failed">失敗</option>
-          </select>
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">投稿状態</label>
+            <select
+              value={postStateFilter}
+              onChange={(e) => setPostStateFilter(e.target.value)}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            >
+              <option value="all">すべて</option>
+              <option value="unpublished">未投稿</option>
+              <option value="published">投稿済み</option>
+              <option value="failed">失敗</option>
+            </select>
+          </div>
 
-          <select
-            value={publishedFilter}
-            onChange={(e) => setPublishedFilter(e.target.value)}
-            className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-          >
-            <option value="all">すべて</option>
-            <option value="published">WordPress投稿済み</option>
-            <option value="unpublished">未投稿</option>
-          </select>
-
-          <select
-            value={categoryFilter}
-            onChange={(e) => setCategoryFilter(e.target.value)}
-            className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-          >
-            <option value="all">すべてのカテゴリ</option>
-            {categories.map(cat => (
-              <option key={cat} value={cat}>{cat}</option>
-            ))}
-          </select>
-
-          <select
-            value={`${sortField}-${sortAscending}`}
-            onChange={(e) => {
-              const [field, order] = e.target.value.split('-');
-              setSortField(field as any);
-              setSortAscending(order === 'true');
-            }}
-            className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-          >
-            <option value="created_at-false">新しい順</option>
-            <option value="created_at-true">古い順</option>
-            <option value="updated_at-false">更新日（新）</option>
-            <option value="title-true">タイトル（A-Z）</option>
-          </select>
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">並び順</label>
+            <select
+              value={`${sortField}-${sortAscending}`}
+              onChange={(e) => {
+                const [field, order] = e.target.value.split('-');
+                setSortField(field as any);
+                setSortAscending(order === 'true');
+              }}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            >
+              <option value="created_at-false">新しい順</option>
+              <option value="created_at-true">古い順</option>
+              <option value="updated_at-false">更新日（新）</option>
+              <option value="title-true">タイトル（A-Z）</option>
+            </select>
+          </div>
         </div>
 
         {isLoading ? (
@@ -437,23 +477,24 @@ export const ArticlesList: React.FC = () => {
             <p className="text-gray-600">AI記事生成から新しい記事を作成してください</p>
           </div>
         ) : (
-          <div className="space-y-4">
-            {localArticles.map(article => (
-              <div
-                key={article.id}
-                onClick={() => {
-                  setSelectedArticle(article);
-                  setFactCheckResults([]); // Reset fact check results
-                  setFactCheckProgress(null);
-                  setShowFactCheckCandidateConfirm(false);
-                  setManualCandidateClaim('');
-                  setFactCheckFixDiff(null);
-                  setFactCheckFixedLineNumbers([]);
-                  setLastAppliedFixTargets([]);
-                  setIsEditing(false); // Reset editing state when opening
-                }}
-                className="article-card"
-              >
+          <>
+            <div className="space-y-4">
+              {localArticles.map(article => (
+                <div
+                  key={article.id}
+                  onClick={() => {
+                    setSelectedArticle(article);
+                    setFactCheckResults([]); // Reset fact check results
+                    setFactCheckProgress(null);
+                    setShowFactCheckCandidateConfirm(false);
+                    setManualCandidateClaim('');
+                    setFactCheckFixDiff(null);
+                    setFactCheckFixedLineNumbers([]);
+                    setLastAppliedFixTargets([]);
+                    setIsEditing(false); // Reset editing state when opening
+                  }}
+                  className="article-card"
+                >
                 <div className="flex items-start justify-between">
                   <div className="flex-1">
                     <div className="flex items-start gap-3 mb-2">
@@ -462,7 +503,7 @@ export const ArticlesList: React.FC = () => {
                       </h3>
                       <div className="flex gap-2">
                         {getStatusBadge(article.status)}
-                        {article.isPublished && (
+                        {isArticlePublished(article) && (
                           <span className="px-2 py-1 text-xs rounded-full bg-blue-100 text-blue-800">
                             WordPress投稿済み
                           </span>
@@ -493,7 +534,7 @@ export const ArticlesList: React.FC = () => {
                         <span>{article.wordCount.toLocaleString()}文字</span>
                       )}
 
-                      {article.isPublished && article.wordPressUrl && (
+                      {isArticlePublished(article) && article.wordPressUrl && (
                         <a
                           href={article.wordPressUrl}
                           target="_blank"
@@ -518,7 +559,7 @@ export const ArticlesList: React.FC = () => {
                         ))}
                       </div>
 
-                      {!article.isPublished && (
+                      {!isArticlePublished(article) && (
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
@@ -536,21 +577,31 @@ export const ArticlesList: React.FC = () => {
                   </div>
 
                   <div className="flex items-center gap-2 ml-4">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleDeleteArticle(article.id, article.title);
-                      }}
-                      className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                      title="削除"
-                    >
-                      <Trash2 className="w-5 h-5" />
-                    </button>
+                    {!isArticlePublished(article) && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteArticle(article);
+                        }}
+                        className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                        title="未投稿記事を削除"
+                        aria-label="未投稿記事を削除"
+                      >
+                        <Trash2 className="w-5 h-5" />
+                      </button>
+                    )}
                   </div>
                 </div>
+                </div>
+              ))}
+            </div>
+
+            {totalPages > 1 && (
+              <div className="mt-6 border-t border-gray-100 pt-4">
+                {renderPagination()}
               </div>
-            ))}
-          </div>
+            )}
+          </>
         )}
       </div>
 
@@ -651,7 +702,7 @@ export const ArticlesList: React.FC = () => {
                           自動修正ON
                         </span>
                       )}
-                      {selectedArticle.isPublished && (
+                      {isArticlePublished(selectedArticle) && (
                         <span className="px-2 py-1 text-xs rounded-full bg-blue-100 text-blue-800">
                           WordPress投稿済み
                         </span>
@@ -660,7 +711,7 @@ export const ArticlesList: React.FC = () => {
                       {selectedArticle.generatedAt && (
                         <span>{format(new Date(selectedArticle.generatedAt), 'yyyy/MM/dd HH:mm')}</span>
                       )}
-                      {selectedArticle.isPublished && selectedArticle.wordPressUrl && (
+                      {isArticlePublished(selectedArticle) && selectedArticle.wordPressUrl && (
                         <a
                           href={selectedArticle.wordPressUrl}
                           target="_blank"

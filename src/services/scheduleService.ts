@@ -197,6 +197,21 @@ class ScheduleService {
         await this.ensureWpConfigReference(schedule.wp_config_id);
         const accountId = getRequiredAccountId();
 
+        const { data: existingSchedules, error: existingSchedulesError } = await supabase
+            .from('schedule_settings')
+            .select('id')
+            .eq('account_id', accountId)
+            .order('created_at', { ascending: true })
+            .limit(1);
+
+        if (existingSchedulesError) {
+            throw new Error(`既存スケジュールの確認に失敗しました: ${this.getErrorText(existingSchedulesError)}`);
+        }
+
+        if (existingSchedules && existingSchedules.length > 0) {
+            return this.updateSchedule(existingSchedules[0].id, schedule);
+        }
+
         let currentUserId: string | null = null;
         try {
             const {
