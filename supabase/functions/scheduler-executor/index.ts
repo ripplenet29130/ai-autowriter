@@ -1672,8 +1672,8 @@ async function generateTitleWithAI(
     if (isGenericTitleOnly(title, currentYear)) return false;
     if (hasRedundantPattern || repeatsWholeKeyword) return false;
     if (/^(タイトル|記事タイトル|SEOタイトル)[:：]/.test(title)) return false;
-    const hasFreshness = new RegExp(String(currentYear)).test(title);
-    const hasReaderValue = /(方法|ポイント|比較|解説|事例|手順|メリット|注意点|成功)/.test(title);
+    const hasFreshness = new RegExp(`${currentYear}年|最新版|最新`).test(title);
+    const hasReaderValue = /(方法|ポイント|比較|解説|事例|手順|メリット|注意点|成功|選び方|費用|効果|評判|おすすめ|ガイド|始め方)/.test(title);
     if (!hasFreshness && !hasReaderValue) return false;
     return true;
   };
@@ -1697,7 +1697,7 @@ async function generateTitleWithAI(
       keyword,
       relatedKeywords,
       competitors: competitorInputs,
-      count: 3,
+      count: 1,
       callAI: (prompt, maxTokens) => callAI(prompt, aiConfig, Math.max(600, maxTokens)),
     });
 
@@ -1711,7 +1711,8 @@ async function generateTitleWithAI(
     }
   } catch (err) {
     console.error('Shared title core failed:', err);
-    throw new Error('AI title generation failed.');
+    const detail = formatScheduleFailureReason(err);
+    throw new Error(`AI title generation failed: ${detail}`);
   }
 
   throw new Error('AI title generation did not return a valid title.');
