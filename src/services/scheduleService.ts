@@ -4,6 +4,7 @@ import { getCurrentAccountId, getRequiredAccountId } from './accountScope';
 
 class ScheduleService {
     private readonly maxSchemaRetryCount = 48;
+    private executionHistoryAccountScoped: boolean | null = null;
     private readonly schemaOptionalColumns = [
         'user_id',
         'ai_provider_override',
@@ -196,21 +197,6 @@ class ScheduleService {
 
         await this.ensureWpConfigReference(schedule.wp_config_id);
         const accountId = getRequiredAccountId();
-
-        const { data: existingSchedules, error: existingSchedulesError } = await supabase
-            .from('schedule_settings')
-            .select('id')
-            .eq('account_id', accountId)
-            .order('created_at', { ascending: true })
-            .limit(1);
-
-        if (existingSchedulesError) {
-            throw new Error(`既存スケジュールの確認に失敗しました: ${this.getErrorText(existingSchedulesError)}`);
-        }
-
-        if (existingSchedules && existingSchedules.length > 0) {
-            return this.updateSchedule(existingSchedules[0].id, schedule);
-        }
 
         let currentUserId: string | null = null;
         try {
@@ -673,21 +659,30 @@ class ScheduleService {
             throw new Error('Supabase is not initialized');
         }
         const accountId = getRequiredAccountId();
-        const { data, error } = await supabase
+        let query = supabase
             .from('execution_history')
             .select('executed_at')
-            .eq('schedule_id', scheduleId)
-            .eq('account_id', accountId)
+            .eq('schedule_id', scheduleId);
+
+        if (this.executionHistoryAccountScoped !== false) {
+            query = query.eq('account_id', accountId);
+        }
+
+        const { data, error } = await query
             .order('executed_at', { ascending: false })
             .limit(1)
             .maybeSingle();
 
         if (!error && data) {
+            if (this.executionHistoryAccountScoped !== false) {
+                this.executionHistoryAccountScoped = true;
+            }
             return data.executed_at;
         }
 
         const errorMessage = String(error?.message || error?.details || '').toLowerCase();
         if (errorMessage.includes('account_id')) {
+            this.executionHistoryAccountScoped = false;
             const fallback = await supabase
                 .from('execution_history')
                 .select('executed_at')

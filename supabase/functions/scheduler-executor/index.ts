@@ -1623,8 +1623,8 @@ async function generateTitleWithAI(
   aiConfig: AIConfig,
   competitorData?: any
 ): Promise<string> {
-  const TITLE_MIN_LENGTH = 24;
-  const TITLE_MAX_LENGTH = 68;
+  const TITLE_MIN_LENGTH = 16;
+  const TITLE_MAX_LENGTH = 80;
 
   const normalizeTitle = (raw: string): string => {
     let cleaned = String(raw || '').trim()
@@ -1654,31 +1654,14 @@ async function generateTitleWithAI(
     return keywordTokens.some((token) => compactTitle.includes(token));
   };
 
-  const isGenericTitleOnly = (title: string, currentYear: number): boolean => {
-    const normalized = title.replace(/\s+/g, '');
-    const genericPattern = new RegExp('^(?:' + currentYear + '年)?(?:SEO対策|記事タイトル|ブログ記事)$');
-    return genericPattern.test(normalized);
-  };
-
-  const isValidSeoTitle = (title: string, baseKeyword: string, currentYear: number): boolean => {
-    const compactTitle = title.replace(/\s+/g, '');
-    const compactKeyword = baseKeyword.replace(/\s+/g, '');
-    const hasRedundantPattern = /(まとめまとめ|とはとは|方法方法)/.test(compactTitle);
-    const repeatsWholeKeyword = compactKeyword.length >= 4 && compactTitle.includes(`${compactKeyword}邵ｺ・ｮ${compactKeyword}`);
-
+  const isValidSeoTitle = (title: string, baseKeyword: string): boolean => {
     if (!title) return false;
     if (title.length < TITLE_MIN_LENGTH || title.length > TITLE_MAX_LENGTH) return false;
     if (!includesKeyword(title, baseKeyword)) return false;
-    if (isGenericTitleOnly(title, currentYear)) return false;
-    if (hasRedundantPattern || repeatsWholeKeyword) return false;
     if (/^(タイトル|記事タイトル|SEOタイトル)[:：]/.test(title)) return false;
-    const hasFreshness = new RegExp(`${currentYear}年|最新版|最新`).test(title);
-    const hasReaderValue = /(方法|ポイント|比較|解説|事例|手順|メリット|注意点|成功|選び方|費用|効果|評判|おすすめ|ガイド|始め方)/.test(title);
-    if (!hasFreshness && !hasReaderValue) return false;
     return true;
   };
 
-  const currentYear = new Date().getFullYear();
   const competitorInputs = Array.isArray(competitorData?.articles) && competitorData.articles.length > 0
     ? competitorData.articles
       .slice(0, 6)
@@ -1704,7 +1687,7 @@ async function generateTitleWithAI(
     for (const candidate of suggestions) {
       const title = normalizeTitle(candidate.title);
       if (!title) continue;
-      if (isValidSeoTitle(title, keyword, currentYear)) {
+      if (isValidSeoTitle(title, keyword)) {
         return title;
       }
       console.warn(`AI title rejected by validator: ${title}`);

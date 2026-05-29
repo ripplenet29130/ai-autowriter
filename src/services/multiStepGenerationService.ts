@@ -276,11 +276,12 @@ export class MultiStepGenerationService {
      */
     async generateTitles(
         trendData: TrendAnalysisResult,
-        keywordPreferences?: Record<string, import('../types').KeywordPreference>
+        keywordPreferences?: Record<string, import('../types').KeywordPreference>,
+        count: number = 3
     ): Promise<import('../types').TitleSuggestion[]> {
         try {
             console.log('Step 2: タイトル生成開始');
-            return await titleGenerationService.generateTitleSuggestions(trendData, 3, keywordPreferences);
+            return await titleGenerationService.generateTitleSuggestions(trendData, count, keywordPreferences);
         } catch (error) {
             console.error('Title generation failed:', error);
             throw new Error('タイトル生成に失敗しました');
@@ -533,7 +534,7 @@ export class MultiStepGenerationService {
             selectedTitle = options.selectedTitle;
             options?.onStepComplete?.(2, [{ title: selectedTitle }]);
         } else {
-            const titles = await this.generateTitles(trendData);
+            const titles = await this.generateTitles(trendData, undefined, 1);
             selectedTitle = titles[0]?.title || `${keywords[0]}について`;
             options?.onStepComplete?.(2, titles);
         }
