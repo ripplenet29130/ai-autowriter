@@ -1081,9 +1081,17 @@ export const ArticlesList: React.FC = () => {
                     }
 
                     const date = publishStatus === 'future' ? new Date(scheduledDate) : undefined;
-                    const success = await publishToWordPress(publishingArticle, selectedConfigId, undefined, publishStatus, date);
+                    const publishedArticle = await publishToWordPress(publishingArticle, selectedConfigId, undefined, publishStatus, date);
 
-                    if (success) {
+                    if (publishedArticle && typeof publishedArticle !== 'boolean') {
+                      setLocalArticles(prev => prev.map(article =>
+                        article.id === publishedArticle.id ? publishedArticle : article
+                      ));
+                      if (selectedArticle?.id === publishedArticle.id) {
+                        setSelectedArticle(publishedArticle);
+                      }
+                      setPublishingArticle(null);
+                    } else if (publishedArticle) {
                       setPublishingArticle(null);
                       loadArticles();
                     }

@@ -18,10 +18,10 @@ export const ClientTemplates: React.FC = () => {
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-3">
-        <BookOpen className="w-8 h-8 text-gray-700" />
+        <BookOpen className="h-8 w-8 text-gray-700" />
         <div>
-          <h2 className="text-2xl font-bold text-gray-900">テンプレート</h2>
-          <p className="text-gray-600">記事作成で使用するキーワード、タイトル、プロンプトを管理します。</p>
+          <h2 className="text-2xl font-bold text-gray-900">キーワード・型</h2>
+          <p className="text-gray-600">記事作成で使うキーワード、タイトル、プロンプトを管理します。</p>
         </div>
       </div>
 
@@ -41,7 +41,7 @@ export const ClientTemplates: React.FC = () => {
                   : 'text-gray-700 hover:bg-gray-100'
               }`}
             >
-              <Icon className="w-4 h-4" />
+              <Icon className="h-4 w-4" />
               {tab.label}
             </button>
           );

@@ -10,6 +10,19 @@ interface AIConfigFormProps {
   onCancel: () => void;
 }
 
+const normalizeGeminiModel = (model: string | undefined): string => {
+  const normalizedModel = String(model || '').replace(/^models\//, '');
+  const unsupportedModels = new Set([
+    'gemini-1.0-pro',
+    'gemini-1.5-pro-latest',
+    'gemini-2.0-flash',
+    'gemini-2.0-flash-001',
+    'gemini-3.0-pro',
+    'gemini-3.0-flash',
+  ]);
+  return !normalizedModel || unsupportedModels.has(normalizedModel) ? 'gemini-2.5-flash' : normalizedModel;
+};
+
 export const AIConfigForm: React.FC<AIConfigFormProps> = ({
   initialConfig,
   provider,
@@ -42,6 +55,7 @@ export const AIConfigForm: React.FC<AIConfigFormProps> = ({
         ...initialConfig,
         apiKey: '',
         provider,
+        model: provider === 'gemini' ? normalizeGeminiModel(initialConfig.model) : initialConfig.model,
         imageGenerationEnabled: false,
         imageProvider: 'nanobanana',
         imagesPerArticle: 0,
@@ -72,6 +86,7 @@ export const AIConfigForm: React.FC<AIConfigFormProps> = ({
     onSubmit({
       ...config,
       provider,
+      model: provider === 'gemini' ? normalizeGeminiModel(config.model) : config.model,
       imageGenerationEnabled: false,
       imagesPerArticle: 0,
       imageProvider: 'nanobanana',
@@ -136,7 +151,7 @@ export const AIConfigForm: React.FC<AIConfigFormProps> = ({
           toast.error(`Claude API接続エラー: ${error?.error?.message || 'Unknown error'}`);
         }
       } else {
-        const modelName = 'gemini-2.0-flash-preview-image-generation';
+        const modelName = normalizeGeminiModel(config.model);
         const response = await fetch(
           `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${config.apiKey}`,
           {
@@ -169,7 +184,7 @@ export const AIConfigForm: React.FC<AIConfigFormProps> = ({
   const getModelOptions = () => {
     const tierLabel = (model: string): string => {
       if (['gemini-2.5-pro', 'claude-4-5-opus-20251124', 'gpt-5.2', 'gpt-5'].includes(model)) {
-        return '高品質・高単価';
+        return '高品質・高価格';
       }
       if (['gemini-2.5-flash', 'claude-4-5-sonnet-20250929', 'claude-3-5-sonnet-latest', 'gpt-4.1', 'gpt-4o'].includes(model)) {
         return 'バランス';
@@ -196,7 +211,6 @@ export const AIConfigForm: React.FC<AIConfigFormProps> = ({
         return [
           { value: 'gemini-2.5-pro', label: `Google Gemini (gemini-2.5-pro) (${tierLabel('gemini-2.5-pro')})` },
           { value: 'gemini-2.5-flash', label: `Google Gemini (gemini-2.5-flash) (${tierLabel('gemini-2.5-flash')})` },
-          { value: 'gemini-2.0-flash', label: `Google Gemini (gemini-2.0-flash) (${tierLabel('gemini-2.0-flash')})` },
         ];
       default:
         return [];
@@ -225,19 +239,6 @@ export const AIConfigForm: React.FC<AIConfigFormProps> = ({
       default:
         return provider;
     }
-  };
-
-  const getGeminiCostNote = (model: string): string => {
-    if (model === 'gemini-2.5-pro') {
-      return 'コスト目安（1M tokens）: 入力 $1.25 / 出力 $10.00（品質重視・高コスト）';
-    }
-    if (model === 'gemini-2.5-flash') {
-      return 'コスト目安（1M tokens）: 入力 $0.30 / 出力 $2.50（バランス型）';
-    }
-    if (model === 'gemini-2.0-flash') {
-      return 'コスト目安（1M tokens）: 入力 $0.10 / 出力 $0.40（最安・高速）';
-    }
-    return 'モデルごとにコスト差があります。特に出力単価を確認してください。';
   };
 
   return (
@@ -281,7 +282,7 @@ export const AIConfigForm: React.FC<AIConfigFormProps> = ({
               type="password"
               value={config.apiKey}
               onChange={(e) => setConfig((prev) => ({ ...prev, apiKey: e.target.value }))}
-              placeholder={hasStoredApiKey ? '保存済みです。変更する場合だけ入力' : 'APIキーを入力'}
+              placeholder={hasStoredApiKey ? '保存済みです。変更する場合のみ入力してください' : 'APIキーを入力'}
               className="input-field pr-10"
               autoComplete="new-password"
             />
@@ -298,39 +299,8 @@ export const AIConfigForm: React.FC<AIConfigFormProps> = ({
               </option>
             ))}
           </select>
-          {config.provider === 'gemini' && <p className="text-xs text-gray-600 mt-2">{getGeminiCostNote(config.model)}</p>}
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Temperature ({config.temperature})</label>
-            <input
-              type="range"
-              min="0"
-              max="1"
-              step="0.1"
-              value={config.temperature}
-              onChange={(e) => setConfig((prev) => ({ ...prev, temperature: parseFloat(e.target.value) }))}
-              className="w-full"
-            />
-            <div className="flex justify-between text-xs text-gray-500 mt-1">
-              <span>低い</span>
-              <span>高い</span>
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">最大トークン数</label>
-            <input
-              type="number"
-              value={config.maxTokens}
-              onChange={(e) => setConfig((prev) => ({ ...prev, maxTokens: parseInt(e.target.value || '0', 10) || 4000 }))}
-              min="1000"
-              max="8000"
-              className="input-field"
-            />
-          </div>
-        </div>
       </div>
 
       <div className="flex justify-end space-x-3 mt-6 pt-4 border-t border-gray-200">

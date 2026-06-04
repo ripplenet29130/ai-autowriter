@@ -84,7 +84,7 @@ serve(async (req) => {
     return json({ error: "WordPress config was not found." }, 404);
   }
 
-  const tokenResult = await getValidGscToken(adminClient, env, user.id);
+  const tokenResult = await getValidGscToken(adminClient, env, profile.account_id, user.id);
   if (!tokenResult.accessToken) {
     await saveStatus(adminClient, wordpressConfigId, profile.account_id, {
       verified: false,
@@ -154,20 +154,44 @@ function getEnv() {
 async function getValidGscToken(
   adminClient: ReturnType<typeof createClient>,
   env: NonNullable<ReturnType<typeof getEnv>>,
+  accountId: string,
   userId: string,
 ): Promise<{ accessToken: string | null; errorCode?: string; errorMessage?: string }> {
-  const { data: token, error } = await adminClient
+  let { data: token, error } = await adminClient
     .from("gsc_tokens")
-    .select("provider_token,provider_refresh_token,expires_at")
-    .eq("user_id", userId)
+    .select("user_id,account_id,provider_token,provider_refresh_token,expires_at")
+    .eq("account_id", accountId)
+    .order("updated_at", { ascending: false })
+    .limit(1)
     .maybeSingle();
 
   if (error) {
     return { accessToken: null, errorCode: "token_load_failed", errorMessage: error.message };
   }
 
+  if (!token) {
+    const fallbackResult = await adminClient
+      .from("gsc_tokens")
+      .select("user_id,account_id,provider_token,provider_refresh_token,expires_at")
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    if (fallbackResult.error) {
+      return { accessToken: null, errorCode: "token_load_failed", errorMessage: fallbackResult.error.message };
+    }
+
+    token = fallbackResult.data;
+  }
+
   if (!token?.provider_token) {
     return { accessToken: null, errorCode: "missing_token", errorMessage: "Google Search Console is not connected." };
+  }
+
+  if (token.account_id !== accountId) {
+    await adminClient
+      .from("gsc_tokens")
+      .update({ account_id: accountId, updated_at: new Date().toISOString() })
+      .eq("user_id", token.user_id);
   }
 
   const expiresAt = token.expires_at ? new Date(token.expires_at).getTime() : 0;
@@ -212,10 +236,11 @@ async function getValidGscToken(
     .update({
       provider_token: data.access_token,
       provider_refresh_token: data.refresh_token || token.provider_refresh_token,
+      account_id: accountId,
       expires_at: expiresAtIso,
       updated_at: new Date().toISOString(),
     })
-    .eq("user_id", userId);
+    .eq("user_id", token.user_id);
 
   return { accessToken: data.access_token };
 }

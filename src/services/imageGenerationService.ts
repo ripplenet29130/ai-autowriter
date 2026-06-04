@@ -16,7 +16,7 @@ export interface GeneratedImage {
  * nanobanana (Gemini Image) and DALL-E 3 image generation service
  */
 export const imageGenerationService = {
-    GEMINI_IMAGE_MODEL: 'gemini-2.0-flash-preview-image-generation',
+    GEMINI_IMAGE_MODEL: 'gemini-2.5-flash-image',
 
     async generateImage(options: ImageGenerationOptions): Promise<GeneratedImage> {
         try {

@@ -72,10 +72,16 @@ serve(async (req) => {
     return redirectWithFallback(stateRow.redirect_to, "missing_scope");
   }
 
-  const { data: existingToken, error: existingError } = await adminClient
+  if (!stateRow.account_id) {
+    return redirectWithFallback(stateRow.redirect_to, "missing_account");
+  }
+
+  let { data: existingToken, error: existingError } = await adminClient
     .from("gsc_tokens")
-    .select("provider_refresh_token")
-    .eq("user_id", stateRow.user_id)
+    .select("user_id,provider_refresh_token")
+    .eq("account_id", stateRow.account_id)
+    .order("updated_at", { ascending: false })
+    .limit(1)
     .maybeSingle();
 
   if (existingError) {
@@ -83,27 +89,48 @@ serve(async (req) => {
     return redirectWithFallback(stateRow.redirect_to, "token_load_failed");
   }
 
+  if (!existingToken) {
+    const fallbackResult = await adminClient
+      .from("gsc_tokens")
+      .select("user_id,provider_refresh_token")
+      .eq("user_id", stateRow.user_id)
+      .maybeSingle();
+
+    if (fallbackResult.error) {
+      console.error("[GSC OAuth] Failed to load fallback token:", fallbackResult.error);
+      return redirectWithFallback(stateRow.redirect_to, "token_load_failed");
+    }
+
+    existingToken = fallbackResult.data;
+  }
+
   const refreshTokenToSave =
     tokenData.refresh_token || existingToken?.provider_refresh_token || null;
   const expiresIn = Math.max(60, Number(tokenData.expires_in ?? 3500));
   const expiresAt = new Date(Date.now() + expiresIn * 1000).toISOString();
 
-  const { error: upsertError } = await adminClient
-    .from("gsc_tokens")
-    .upsert(
-      {
-        user_id: stateRow.user_id,
-        account_id: stateRow.account_id,
-        provider_token: tokenData.access_token,
-        provider_refresh_token: refreshTokenToSave,
-        expires_at: expiresAt,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "user_id" },
-    );
+  const savePayload = {
+    account_id: stateRow.account_id,
+    provider_token: tokenData.access_token,
+    provider_refresh_token: refreshTokenToSave,
+    expires_at: expiresAt,
+    updated_at: new Date().toISOString(),
+  };
 
-  if (upsertError) {
-    console.error("[GSC OAuth] Failed to save token:", upsertError);
+  const saveResult = existingToken?.user_id
+    ? await adminClient
+      .from("gsc_tokens")
+      .update(savePayload)
+      .eq("user_id", existingToken.user_id)
+    : await adminClient
+      .from("gsc_tokens")
+      .insert({
+        user_id: stateRow.user_id,
+        ...savePayload,
+      });
+
+  if (saveResult.error) {
+    console.error("[GSC OAuth] Failed to save token:", saveResult.error);
     return redirectWithFallback(stateRow.redirect_to, "token_save_failed");
   }
 

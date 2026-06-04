@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { KeyRound, LogOut, Mail, Save, UserCircle } from 'lucide-react';
+import toast from 'react-hot-toast';
 import { useAppStore } from '../store/useAppStore';
 import { useAuthStore } from '../store/useAuthStore';
+import { getAuthErrorMessage } from '../utils/authErrorMessages';
 
 export const ClientAccount: React.FC = () => {
   const { wordPressConfigs } = useAppStore();
@@ -36,11 +38,15 @@ export const ClientAccount: React.FC = () => {
     }
 
     setIsUpdatingEmail(true);
+    const loadingToast = toast.loading('メールアドレス変更を送信しています...');
     try {
       await updateEmail(nextEmail);
       setEmailMessage('メールアドレス変更を開始しました。確認メールが届いた場合は、メール内のリンクを開いて変更を完了してください。');
+      toast.success('メールアドレス変更の確認メールを送信しました', { id: loadingToast });
     } catch (error) {
-      setFormError(error instanceof Error ? error.message : 'メールアドレスを変更できませんでした。再ログインが必要な場合があります。');
+      const message = getAuthErrorMessage(error, 'メールアドレスを変更できませんでした。再ログインが必要な場合があります。');
+      setFormError(message);
+      toast.error(message, { id: loadingToast });
     } finally {
       setIsUpdatingEmail(false);
     }
@@ -61,13 +67,17 @@ export const ClientAccount: React.FC = () => {
     }
 
     setIsUpdatingPassword(true);
+    const loadingToast = toast.loading('パスワードを変更しています...');
     try {
       await updatePassword(newPassword);
       setNewPassword('');
       setConfirmPassword('');
       setPasswordMessage('パスワードを変更しました。');
+      toast.success('パスワードを変更しました', { id: loadingToast });
     } catch (error) {
-      setFormError(error instanceof Error ? error.message : 'パスワードを変更できませんでした。再ログインが必要な場合があります。');
+      const message = getAuthErrorMessage(error, 'パスワードを変更できませんでした。再ログインが必要な場合があります。');
+      setFormError(message);
+      toast.error(message, { id: loadingToast });
     } finally {
       setIsUpdatingPassword(false);
     }

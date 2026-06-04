@@ -1,12 +1,11 @@
 ﻿import React, { useState, useEffect, useMemo } from 'react';
-import { AlertCircle, Calendar, Globe, Clock, Tag, Trash2, Edit2, Power, MessageSquare, Zap, ShieldCheck } from 'lucide-react';
+import { AlertCircle, Calendar, Globe, Clock, Tag, Trash2, Edit2, Power, MessageSquare, Zap } from 'lucide-react';
 import { scheduleService } from '../services/scheduleService';
 import { supabaseSchedulerService } from '../services/supabaseSchedulerService';
 import { supabase } from '../services/supabaseClient';
 import { ScheduleSetting } from '../types';
 import { useAppStore } from '../store/useAppStore';
 import { PromptSetManager } from './AIGenerator/PromptSetManager';
-import { getCurrentAccountId } from '../services/accountScope';
 import { formatSharedTone, getSharedToneDescription, normalizeSharedTone, sharedToneOptions } from '../shared/toneOptions';
 import toast from 'react-hot-toast';
 import { Play } from 'lucide-react';
@@ -48,7 +47,7 @@ const DEFAULT_CHATWORK_TEMPLATE = `いつもお世話になっております。
 
 const getProviderModelOptions = (provider: string): string[] => {
   if (provider === 'gemini') {
-    return ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.0-flash'];
+    return ['gemini-2.5-pro', 'gemini-2.5-flash'];
   }
   if (provider === 'openai') {
     return ['gpt-5.2', 'gpt-5-mini', 'gpt-4.1', 'gpt-4o-mini'];
@@ -68,8 +67,6 @@ export const Scheduler: React.FC = () => {
   const [executionHistory, setExecutionHistory] = useState<ExecutionHistoryRow[]>([]);
   const [selectedFailedHistoryIds, setSelectedFailedHistoryIds] = useState<string[]>([]);
   const [isDeletingFailedHistory, setIsDeletingFailedHistory] = useState(false);
-  const [defaultFactCheckAutoFixEnabled, setDefaultFactCheckAutoFixEnabled] = useState(false);
-
   const [loading, setLoading] = useState(false);
   const [editingSchedule, setEditingSchedule] = useState<ScheduleSetting | null>(null);
   const [isPromptManagerOpen, setIsPromptManagerOpen] = useState(false);
@@ -98,7 +95,7 @@ export const Scheduler: React.FC = () => {
     target_word_count: 2000,
     writing_tone: 'professional',
     status: true,
-    enable_fact_check: false,
+    enable_fact_check: true,
     fact_check_note: '',
     fact_check_auto_fix_enabled: false,
     fact_check_alert_chatwork_room_id: '',
@@ -172,7 +169,6 @@ export const Scheduler: React.FC = () => {
     loadKeywordSets();
     loadTitleSets();
     loadPromptSets();
-    loadFactCheckSettings();
     loadExecutionHistory();
   }, []);
 
@@ -265,52 +261,6 @@ export const Scheduler: React.FC = () => {
     });
   }, [useDefaultAiConfig, aiConfigs, activeAiConfig, selectedAiProvider, selectedAiModel]);
 
-  const loadFactCheckSettings = async () => {
-    if (!supabase) {
-      setDefaultFactCheckAutoFixEnabled(false);
-      return;
-    }
-    const accountId = getCurrentAccountId();
-    if (!accountId) {
-      setDefaultFactCheckAutoFixEnabled(false);
-      return;
-    }
-
-    try {
-      const {
-        data: { user },
-        error: authError,
-      } = await supabase.auth.getUser();
-
-      if (!authError && user) {
-        const { data } = await supabase
-          .from('fact_check_settings')
-          .select('auto_fix_enabled')
-          .eq('user_id', user.id)
-          .eq('account_id', accountId)
-          .order('updated_at', { ascending: false })
-          .limit(1)
-          .maybeSingle();
-
-        setDefaultFactCheckAutoFixEnabled(Boolean(data?.auto_fix_enabled));
-        return;
-      }
-
-      const { data: globalRows } = await supabase
-        .from('app_settings')
-        .select('key, value')
-        .eq('key', 'fact_check_auto_fix_enabled')
-        .eq('account_id', accountId)
-        .limit(1);
-
-      const raw = String(globalRows?.[0]?.value ?? '').toLowerCase();
-      setDefaultFactCheckAutoFixEnabled(['1', 'true', 'yes', 'on'].includes(raw));
-    } catch (error) {
-      console.error('Failed to load fact check settings:', error);
-      setDefaultFactCheckAutoFixEnabled(false);
-    }
-  };
-
   const loadExecutionHistory = async () => {
     try {
       const rows = await supabaseSchedulerService.getExecutionHistory(8);
@@ -366,15 +316,18 @@ export const Scheduler: React.FC = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    const notifyMode = formData.fact_check_notify_on_every_run ? 'every' : 'anomaly';
     const submitData = {
       ...formData,
       ai_provider_override: useDefaultAiConfig ? '' : selectedAiProvider,
       ai_model_override: useDefaultAiConfig ? '' : selectedAiModel,
       target_word_count: Math.min(Math.max(formData.target_word_count || 2000, 500), 3000),
+      chatwork_room_id: '',
+      chatwork_message_template: '',
       fact_check_note: '',
-      fact_check_notify_on_anomaly: notifyMode === 'anomaly',
-      fact_check_notify_on_every_run: notifyMode === 'every',
+      fact_check_auto_fix_enabled: null as any,
+      fact_check_alert_chatwork_room_id: '',
+      fact_check_notify_on_anomaly: null as any,
+      fact_check_notify_on_every_run: null as any,
     };
 
     // Validation
@@ -422,7 +375,7 @@ export const Scheduler: React.FC = () => {
         toast.success('スケジュールを作成しました');
       }
 
-      await Promise.all([loadSchedules(), loadFactCheckSettings(), loadExecutionHistory()]);
+      await Promise.all([loadSchedules(), loadExecutionHistory()]);
       resetForm();
     } catch (error) {
       console.error('Failed to save schedule:', error);
@@ -474,9 +427,9 @@ export const Scheduler: React.FC = () => {
       target_word_count: Math.min(schedule.target_word_count || 2000, 3000),
       writing_tone: normalizeSharedTone(schedule.writing_tone),
       status: schedule.status,
-      enable_fact_check: schedule.enable_fact_check || false,
+      enable_fact_check: true,
       fact_check_note: '',
-      fact_check_auto_fix_enabled: schedule.fact_check_auto_fix_enabled ?? defaultFactCheckAutoFixEnabled,
+      fact_check_auto_fix_enabled: false,
       fact_check_alert_chatwork_room_id: schedule.fact_check_alert_chatwork_room_id || '',
       fact_check_notify_on_anomaly: notifyMode === 'anomaly',
       fact_check_notify_on_every_run: notifyMode === 'every',
@@ -572,9 +525,9 @@ export const Scheduler: React.FC = () => {
       target_word_count: 2000,
       writing_tone: 'professional',
       status: true,
-      enable_fact_check: false,
+      enable_fact_check: true,
       fact_check_note: '',
-      fact_check_auto_fix_enabled: defaultFactCheckAutoFixEnabled,
+      fact_check_auto_fix_enabled: false,
       fact_check_alert_chatwork_room_id: '',
       fact_check_notify_on_anomaly: true,
       fact_check_notify_on_every_run: false,
@@ -1279,130 +1232,6 @@ export const Scheduler: React.FC = () => {
             </label>
         </section>
 
-        <section className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 space-y-4">
-          <div>
-            <h3 className="text-lg font-semibold text-gray-900">通知・チェック設定</h3>
-            <p className="text-sm text-gray-600 mt-1">
-              ChatWork通知とファクトチェックの動作を設定します
-            </p>
-          </div>
-          {/* ChatWorkルームID */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              ChatWorkルームID（任意）
-            </label>
-            <input
-              type="text"
-              value={formData.chatwork_room_id}
-              onChange={(e) => setFormData({ ...formData, chatwork_room_id: e.target.value })}
-              placeholder="例: 123456789"
-              className="input-field"
-            />
-            <p className="text-xs text-gray-500 mt-1">
-              ※ 空欄の場合はChatWorkに送信されません。複数送る場合はカンマ(,)で区切ってください
-            </p>
-          </div>
-
-          {/* ChatWork メッセージテンプレート */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              通知メッセージテンプレート（任意）
-            </label>
-            <textarea
-              value={formData.chatwork_message_template}
-              onChange={(e) => setFormData({ ...formData, chatwork_message_template: e.target.value })}
-              placeholder="[info][title]記事投稿完了：{title}[/title]URL: {url}[/info]"
-              rows={3}
-              className="input-field font-mono text-sm"
-            />
-            <p className="text-xs text-gray-500 mt-1">
-              使用可能な変数: {`{title}`} (記事タイトル), {`{url}`} (記事URL), {`{keyword}`} (キーワード), {`{status}`} (投稿状態)
-            </p>
-          </div>
-
-          {/* 事実確認（ベータ）設定 */}
-          <div className="border-t border-gray-200 pt-4">
-            <div className="flex items-center space-x-2 mb-3">
-              <input
-                type="checkbox"
-                id="enable_fact_check"
-                checked={formData.enable_fact_check || false}
-                onChange={(e) => setFormData({ ...formData, enable_fact_check: e.target.checked })}
-                className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-              />
-              <label htmlFor="enable_fact_check" className="text-sm font-medium text-gray-700">
-                事実確認（ベータ）を有効化
-              </label>
-            </div>
-            <p className="text-xs text-gray-500 mb-3">
-              AIによる補助確認です。公開前に必ず内容をご確認ください。
-            </p>
-
-            {formData.enable_fact_check && (
-              <div>
-                <label className="flex items-center space-x-2 text-sm text-gray-700 mt-3">
-                  <input
-                    type="checkbox"
-                    checked={formData.fact_check_auto_fix_enabled ?? false}
-                    onChange={(e) => setFormData({ ...formData, fact_check_auto_fix_enabled: e.target.checked })}
-                    className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-                  />
-                  <span>ファクトチェック後に自動修正を行う</span>
-                </label>
-                <p className="text-xs text-gray-500 mt-1">
-                  ON: 指摘がある場合に本文を自動補正して再チェックします。
-                </p>
-
-                <label className="block text-sm font-medium text-gray-700 mb-1 mt-4">
-                  異常時のChatWorkルームID（任意）
-                </label>
-                <input
-                  type="text"
-                  value={formData.fact_check_alert_chatwork_room_id || ''}
-                  onChange={(e) => setFormData({ ...formData, fact_check_alert_chatwork_room_id: e.target.value })}
-                  placeholder="例: 123456789"
-                  className="input-field"
-                />
-                <p className="text-xs text-gray-500 mt-1">
-                  重大な不整合・ファクトチェック失敗時のみ通知します。複数指定はカンマ区切り。
-                </p>
-
-                <div className="mt-3 space-y-2">
-                  <p className="text-xs font-medium text-gray-600">通知モード（どちらか1つ）</p>
-                  <label className="flex items-center space-x-2 text-sm text-gray-700">
-                    <input
-                      type="radio"
-                      name="fact_check_notify_mode"
-                      checked={(formData.fact_check_notify_on_every_run ?? false) === false}
-                      onChange={() => setFormData({
-                        ...formData,
-                        fact_check_notify_on_anomaly: true,
-                        fact_check_notify_on_every_run: false
-                      })}
-                      className="w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500"
-                    />
-                    <span>異常時に通知する（重大不整合・エラー時）</span>
-                  </label>
-                  <label className="flex items-center space-x-2 text-sm text-gray-700">
-                    <input
-                      type="radio"
-                      name="fact_check_notify_mode"
-                      checked={formData.fact_check_notify_on_every_run ?? false}
-                      onChange={() => setFormData({
-                        ...formData,
-                        fact_check_notify_on_anomaly: false,
-                        fact_check_notify_on_every_run: true
-                      })}
-                      className="w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500"
-                    />
-                    <span>毎回、ファクトチェック結果を通知する</span>
-                  </label>
-                </div>
-              </div>
-            )}
-          </div>
-        </section>
-
           {/* ボタン */}
           <div className="flex justify-end space-x-3 pt-4 border-t border-gray-200">
             <button
@@ -1746,8 +1575,7 @@ export const Scheduler: React.FC = () => {
                     </div>
 
                     {/* Additional Info Block (Moved to bottom) */}
-                    {(schedule.start_date || schedule.chatwork_room_id || promptSetName || schedule.enable_fact_check) && (
-                      <div className="mb-4 pt-4 border-t border-gray-100 flex flex-wrap gap-6">
+                    <div className="mb-4 pt-4 border-t border-gray-100 flex flex-wrap gap-6">
                         {schedule.start_date && (
                           <div className="flex items-center space-x-2 text-sm">
                             <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Start Date:</span>
@@ -1779,36 +1607,8 @@ export const Scheduler: React.FC = () => {
                           <span className="font-mono text-xs bg-gray-50 text-gray-600 px-2 py-0.5 rounded border border-gray-200">
                             {Math.min(schedule.target_word_count || 3000, 3000)}文字
                           </span>
-                        </div>
-
-                        {schedule.enable_fact_check && (
-                          <div className="flex items-center space-x-2 text-sm">
-                            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Fact Check:</span>
-                            <span className="flex items-center space-x-1 text-xs text-green-700 bg-green-50 px-2 py-0.5 rounded border border-green-100">
-                              <ShieldCheck className="w-3 h-3" />
-                              <span className="font-medium">Enabled</span>
-                            </span>
-                            <span className={`text-xs px-2 py-0.5 rounded border ${(schedule.fact_check_auto_fix_enabled ?? defaultFactCheckAutoFixEnabled)
-                              ? 'text-emerald-700 bg-emerald-50 border-emerald-100'
-                              : 'text-gray-600 bg-gray-50 border-gray-200'
-                              }`}>
-                              Auto Fix: {(schedule.fact_check_auto_fix_enabled ?? defaultFactCheckAutoFixEnabled) ? 'ON' : 'OFF'}
-                            </span>
-                            {schedule.fact_check_alert_chatwork_room_id && (
-                              <span className="font-mono text-xs bg-amber-50 text-amber-700 px-2 py-0.5 rounded border border-amber-200">
-                                Alert: {schedule.fact_check_alert_chatwork_room_id}
-                              </span>
-                            )}
-                            <span className={`text-xs px-2 py-0.5 rounded border ${(schedule.fact_check_notify_on_every_run ?? false)
-                              ? 'text-sky-700 bg-sky-50 border-sky-100'
-                              : 'text-amber-700 bg-amber-50 border-amber-100'
-                              }`}>
-                              通知モード: {(schedule.fact_check_notify_on_every_run ?? false) ? '毎回結果' : '異常時のみ'}
-                            </span>
-                          </div>
-                        )}
                       </div>
-                    )}
+                    </div>
 
                     <div>
                       <div className="flex items-center justify-between mb-2">

@@ -132,7 +132,7 @@ export const AIGenerator: React.FC = () => {
             return ['claude-4-5-sonnet-20250929', 'claude-4-5-opus-20251124', 'claude-4-5-haiku-20251015', 'claude-3-5-sonnet-latest'];
         }
         if (provider === 'gemini') {
-            return ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.0-flash'];
+            return ['gemini-2.5-pro', 'gemini-2.5-flash'];
         }
         return [];
     };

@@ -349,6 +349,48 @@ function hasSameH2Sequence(original: string, candidate: string): boolean {
   return true;
 }
 
+function findHeadingsWithoutBody(markdown: string, minBodyChars = 40): string[] {
+  const text = String(markdown || '').trim();
+  if (!text) return [];
+
+  const headingRegex = /^#{2,3}\s+(.+)$/gm;
+  const headings: Array<{ index: number; end: number; level: number; title: string }> = [];
+  let match: RegExpExecArray | null = null;
+  while ((match = headingRegex.exec(text)) !== null) {
+    const line = match[0] || '';
+    const title = String(match[1] || '').trim();
+    if (!title) continue;
+    headings.push({
+      index: match.index,
+      end: match.index + line.length,
+      level: line.startsWith('###') ? 3 : 2,
+      title,
+    });
+  }
+
+  const missing: string[] = [];
+  for (let i = 0; i < headings.length; i += 1) {
+    const current = headings[i];
+    const nextSameOrHigher = headings.find((candidate, candidateIndex) =>
+      candidateIndex > i && candidate.level <= current.level
+    );
+    const sectionEnd = nextSameOrHigher ? nextSameOrHigher.index : text.length;
+    const body = text
+      .slice(current.end, sectionEnd)
+      .replace(/^#{2,6}\s+.+$/gm, '')
+      .trim();
+    const requiredChars = SUMMARY_TITLE_PATTERN.test(current.title) ? 20 : minBodyChars;
+    if (countGeneratedChars(body) < requiredChars) {
+      missing.push(current.title);
+    }
+  }
+  return missing;
+}
+
+function hasHeadingWithoutBody(markdown: string): boolean {
+  return findHeadingsWithoutBody(markdown).length > 0;
+}
+
 function normalizeHeadingKey(value: string): string {
   return String(value || '')
     .replace(/\s+/g, '')
@@ -400,6 +442,7 @@ function isValidPolishedArticle(
   if (looksLikeMetaResponse(cleanedCandidate)) return false;
 
   if (!hasSameH2Sequence(original, cleanedCandidate)) return false;
+  if (hasHeadingWithoutBody(cleanedCandidate)) return false;
 
   const origLen = Math.max(1, countGeneratedChars(original));
   const candLen = Math.max(1, countGeneratedChars(cleanedCandidate));
@@ -924,9 +967,44 @@ function countDetectedPoints(content: string): number {
 
   const headingCount = lines.filter((line) => /^###\s+\S+/.test(line)).length;
   const bulletCount = lines.filter((line) => /^[-*]\s+\S+/.test(line) || /^\d+[.)]\s+\S+/.test(line)).length;
-  const leadInCount = lines.filter((line) => /^(まず|第一に|次に|第二に|さらに|第三に|最後に|第四に|最後に|一つ目|二つ目|三つ目|四つ目)/.test(line)).length;
+  const leadInLineCount = lines.filter((line) => /^(まず|第一に|次に|第二に|さらに|第三に|最後に|第四に|一つ目|二つ目|三つ目|四つ目)/.test(line)).length;
+  const ordinalMentions = text.match(/(?:一|二|三|四|五|六|七|八|九|十)つ目/g)?.length || 0;
+  const numberedMentions = text.match(/(?:^|[^\d])(?:[1-9]|1[0-2])\s*(?:つ目|点目|個目|項目)/g)?.length || 0;
 
-  return Math.max(headingCount, bulletCount, leadInCount);
+  return Math.max(headingCount, bulletCount, leadInLineCount, ordinalMentions, numberedMentions);
+}
+
+function hasStructuredListOrTable(content: string): boolean {
+  return /(^|\n)\s*(?:[-*]\s+\S+|\d+[.)]\s+\S+|\|.+\|)/.test(String(content || ''));
+}
+
+function sectionLikelyNeedsStructuredFormat(section: SharedOutlineSection): boolean {
+  const source = `${section.title || ''} ${section.description || ''}`;
+  return /(比較|料金|費用|価格|相場|手順|ステップ|チェックリスト|ポイント|選び方|注意点|メリット|デメリット)/.test(source);
+}
+
+function evaluateAiCitationSectionIssues(
+  content: string,
+  section: SharedOutlineSection
+): string[] {
+  const issues: string[] = [];
+  const expectedPoints = extractExpectedPointCount(section.title, section.description);
+  if (expectedPoints != null) {
+    const detected = countDetectedPoints(content);
+    if (detected > 0 && detected < expectedPoints) {
+      issues.push(`数字付き見出しの列挙数が不足しています（${detected}/${expectedPoints}）。`);
+    }
+  }
+
+  if (
+    sectionLikelyNeedsStructuredFormat(section) &&
+    countGeneratedChars(content) >= 260 &&
+    !hasStructuredListOrTable(content)
+  ) {
+    issues.push('比較・料金・手順・ポイントなどを扱う見出しですが、表または箇条書きで整理されていません。');
+  }
+
+  return issues;
 }
 
 function endsWithContinuationCue(content: string): boolean {
@@ -1000,6 +1078,55 @@ async function completeSectionIfIncomplete(
   }
 }
 
+async function improveSectionForAiCitation(
+  content: string,
+  section: SharedOutlineSection,
+  outlineTitle: string,
+  issues: string[],
+  callAI: SharedCallAI,
+  maxTokens: number,
+  customInstructions?: string
+): Promise<string> {
+  if (issues.length === 0) return content;
+
+  const prompt = [
+    '以下のセクション本文を、AI検索に引用されやすい形へ必要最小限で修正してください。',
+    '全文を書き換えすぎず、指摘された点だけを直してください。',
+    '',
+    `記事タイトル: ${outlineTitle}`,
+    `セクション見出し: ${section.title}`,
+    section.description ? `セクション意図: ${section.description}` : '',
+    '',
+    '修正すべき点:',
+    ...issues.map((issue) => `- ${issue}`),
+    '',
+    '出力ルール:',
+    '- 修正後のセクション本文のみを出力（見出し・タイトルは出さない）',
+    '- 事実関係や固有名詞を勝手に増やさない',
+    '- 数字付きの見出しや表現を使う場合は、本文内の列挙数と一致させる',
+    '- 比較、料金、条件、手順、ポイントは必要に応じて表または箇条書きで整理する',
+    '- 元本文の主要な内容と文体を維持する',
+    '',
+    '元本文:',
+    content,
+  ].filter(Boolean).join('\n');
+
+  try {
+    const raw = await callAI(appendCustomInstructions(prompt, customInstructions), maxTokens);
+    const improved = sanitizeRewriterOutput(raw, content, true);
+    if (!improved) return content;
+
+    const originalLength = countGeneratedChars(content);
+    const improvedLength = countGeneratedChars(improved);
+    if (improvedLength < Math.max(120, Math.floor(originalLength * 0.65))) return content;
+    if (improvedLength > Math.ceil(originalLength * 1.55)) return content;
+
+    return trimDanglingTailSafe(formatReadableParagraphs(improved));
+  } catch {
+    return content;
+  }
+}
+
 function formatReadableParagraphs(content: string): string {
   let text = (content || '').trim();
   if (!text) return '';
@@ -1059,6 +1186,68 @@ export function assembleArticleMarkdown(sections: SharedSectionWithContent[]): s
   }).join('\n\n');
 }
 const SUMMARY_TITLE_PATTERN = /(まとめ|結論|総括|おわりに|最後に|summary|conclusion)/i;
+
+function repairHeadingBodiesFromGeneratedSections(
+  markdown: string,
+  sections: SharedSectionWithContent[]
+): string {
+  const text = String(markdown || '').trim();
+  if (!text || findHeadingsWithoutBody(text).length === 0) return text;
+
+  const contentByTitle = new Map<string, string>();
+  for (const section of sections) {
+    if (section.isLead) continue;
+    const key = normalizeHeadingKey(section.title);
+    const content = String(section.content || '').trim();
+    if (key && countGeneratedChars(content) >= 40) {
+      contentByTitle.set(key, content);
+    }
+  }
+  if (contentByTitle.size === 0) return text;
+
+  const headingRegex = /^#{2,3}\s+(.+)$/gm;
+  const headings: Array<{ index: number; end: number; line: string; level: number; title: string }> = [];
+  let match: RegExpExecArray | null = null;
+  while ((match = headingRegex.exec(text)) !== null) {
+    const line = match[0] || '';
+    const title = String(match[1] || '').trim();
+    if (!title) continue;
+    headings.push({
+      index: match.index,
+      end: match.index + line.length,
+      line,
+      level: line.startsWith('###') ? 3 : 2,
+      title,
+    });
+  }
+  if (headings.length === 0) return text;
+
+  let result = '';
+  let cursor = 0;
+  for (let i = 0; i < headings.length; i += 1) {
+    const current = headings[i];
+    const sectionEnd = i + 1 < headings.length ? headings[i + 1].index : text.length;
+    const sectionRaw = text.slice(current.index, sectionEnd);
+    const body = text
+      .slice(current.end, sectionEnd)
+      .replace(/^#{2,6}\s+.+$/gm, '')
+      .trim();
+    const requiredChars = SUMMARY_TITLE_PATTERN.test(current.title) ? 20 : 40;
+
+    result += text.slice(cursor, current.index);
+    if (countGeneratedChars(body) < requiredChars) {
+      const replacement = contentByTitle.get(normalizeHeadingKey(current.title));
+      result += replacement
+        ? `${current.line}\n\n${replacement}\n\n`
+        : sectionRaw;
+    } else {
+      result += sectionRaw;
+    }
+    cursor = sectionEnd;
+  }
+  result += text.slice(cursor);
+  return result.trim();
+}
 
 function calculateEdgeSectionWordCount(targetWordCount: number): number {
   if (!Number.isFinite(targetWordCount) || targetWordCount <= 0) return 250;
@@ -2073,6 +2262,7 @@ async function generateSectionWithQualityGate(
   );
   let content = stripHeading(await params.callAI(prompt, sectionMaxTokens));
   const { minAllowed, maxAllowed } = getWordCountBounds(section.estimatedWordCount, DEFAULT_WORD_COUNT_TOLERANCE);
+  let citationRepairAttempted = false;
 
   for (let attempt = 0; attempt <= params.qualityRetryCount; attempt++) {
     const currentCount = countGeneratedChars(content);
@@ -2111,6 +2301,21 @@ async function generateSectionWithQualityGate(
         content,
         section,
         outline.title,
+        params.callAI,
+        params.maxTokens,
+        params.customInstructions
+      );
+      continue;
+    }
+
+    const citationIssues = evaluateAiCitationSectionIssues(content, section);
+    if (!citationRepairAttempted && citationIssues.length > 0) {
+      citationRepairAttempted = true;
+      content = await improveSectionForAiCitation(
+        content,
+        section,
+        outline.title,
+        citationIssues,
         params.callAI,
         params.maxTokens,
         params.customInstructions
@@ -2456,6 +2661,16 @@ export async function generateArticleFromOutlineWithSharedCore(
       FINAL_ARTICLE_WORD_COUNT_TOLERANCE
     );
     fullContent = trimDanglingTailSafe(formatReadableParagraphs(fullContent));
+  }
+  fullContent = repairHeadingBodiesFromGeneratedSections(fullContent, sectionsWithContent);
+  if (hasHeadingWithoutBody(fullContent)) {
+    const restored = trimDanglingTailSafe(formatReadableParagraphs(ensureSummarySection(
+      assembleArticleMarkdown(sectionsWithContent),
+      params.outline
+    )));
+    if (!hasHeadingWithoutBody(restored)) {
+      fullContent = restored;
+    }
   }
   if (!fullContent.endsWith('\n')) {
     fullContent = `${fullContent}\n`;

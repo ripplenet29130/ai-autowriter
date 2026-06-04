@@ -66,6 +66,10 @@ serve(async (req) => {
     return json({ error: profileError.message }, 500);
   }
 
+  if (!profile?.account_id) {
+    return json({ error: "Active account is required." }, 400);
+  }
+
   const state = crypto.randomUUID();
   const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
 
@@ -74,7 +78,7 @@ serve(async (req) => {
     .insert({
       state,
       user_id: user.id,
-      account_id: profile?.account_id ?? null,
+      account_id: profile.account_id,
       redirect_to: redirectTo,
       expires_at: expiresAt,
     });

@@ -10,6 +10,20 @@ const corsHeaders = {
     'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+function normalizeGeminiModel(model?: string): string {
+    const normalizedModel = String(model || '').replace(/^models\//, '');
+    const unsupportedModels = new Set([
+        'gemini-1.0-pro',
+        'gemini-1.5-pro-latest',
+        'gemini-2.0-flash',
+        'gemini-2.0-flash-001',
+        'gemini-3.0-pro',
+        'gemini-3.0-flash',
+        'gemini-pro',
+    ]);
+    return !normalizedModel || unsupportedModels.has(normalizedModel) ? 'gemini-2.5-flash' : normalizedModel;
+}
+
 serve(async (req) => {
     // CORS handling
     if (req.method === 'OPTIONS') {
@@ -151,7 +165,7 @@ async function callClaude(apiKey: string, model: string, temperature: number, ma
 async function callGemini(apiKey: string, model: string, temperature: number, maxTokens: number, prompt: string) {
     if (!apiKey) throw new Error("Gemini API Key is missing");
 
-    const modelName = model || "gemini-pro";
+    const modelName = normalizeGeminiModel(model);
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
 
     const response = await fetch(url, {

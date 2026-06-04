@@ -188,6 +188,8 @@ type WritingTone = 'professional' | 'casual';
 const INVALID_GEMINI_MODELS = new Set([
   'gemini-1.0-pro',
   'gemini-1.5-pro-latest',
+  'gemini-2.0-flash',
+  'gemini-2.0-flash-001',
   'gemini-3.0-pro',
   'gemini-3.0-flash',
 ]);
@@ -195,7 +197,8 @@ const INVALID_GEMINI_MODELS = new Set([
 function normalizeAiConfig(config: AIConfig): AIConfig {
   const provider = String(config.provider || '').toLowerCase();
   if (provider !== 'gemini') return config;
-  if (!INVALID_GEMINI_MODELS.has(String(config.model || ''))) return config;
+  const model = String(config.model || '').replace(/^models\//, '');
+  if (model && !INVALID_GEMINI_MODELS.has(model)) return { ...config, model };
   return { ...config, model: 'gemini-2.5-flash' };
 }
 
@@ -372,6 +375,10 @@ Deno.serve(async (req: Request) => {
 
       // 1.5 髯ｷ・ｷ郢晢ｽｻ繝ｻ・ｨ繝ｻ・ｮAPI驛｢譎冗樟郢晢ｽｻ驛｢・ｧ繝ｻ・ｯ驛｢譎｢・ｽ・ｳ驛｢譎｢・ｽ・ｻ驛｢・ｧ繝ｻ・ｭ驛｢譎｢・ｽ・ｼ驍ｵ・ｺ繝ｻ・ｮ髯ｷ・ｿ鬮｢ﾂ繝ｻ・ｾ郢晢ｽｻ
       let chatworkApiToken: string | null = null;
+      let chatworkRoomId: string | null = null;
+      let chatworkMessageTemplate: string | null = null;
+      let factCheckAlertChatworkRoomId: string | null = null;
+      let factCheckNotifyMode: string | null = null;
       let serpApiKey: string | null = null;
       let googleApiKey: string | null = null;
       let searchEngineId: string | null = null;
@@ -384,6 +391,10 @@ Deno.serve(async (req: Request) => {
         .select('key, value')
         .in('key', [
           'chatwork_api_token',
+          'chatwork_room_id',
+          'chatwork_message_template',
+          'fact_check_alert_chatwork_room_id',
+          'fact_check_notify_mode',
           'serpapi_key',
           'google_custom_search_api_key',
           'google_custom_search_engine_id',
@@ -401,6 +412,10 @@ Deno.serve(async (req: Request) => {
       if (appSettings) {
         appSettings.forEach((setting: any) => {
           if (setting.key === 'chatwork_api_token') chatworkApiToken = setting.value;
+          if (setting.key === 'chatwork_room_id') chatworkRoomId = setting.value;
+          if (setting.key === 'chatwork_message_template') chatworkMessageTemplate = setting.value;
+          if (setting.key === 'fact_check_alert_chatwork_room_id') factCheckAlertChatworkRoomId = setting.value;
+          if (setting.key === 'fact_check_notify_mode') factCheckNotifyMode = setting.value;
           if (setting.key === 'serpapi_key') serpApiKey = setting.value;
           if (setting.key === 'google_custom_search_api_key') googleApiKey = setting.value;
           if (setting.key === 'google_custom_search_engine_id') searchEngineId = setting.value;
@@ -595,6 +610,10 @@ Deno.serve(async (req: Request) => {
           }
 
           let accountChatworkApiToken = chatworkApiToken;
+          let accountChatworkRoomId = chatworkRoomId;
+          let accountChatworkMessageTemplate = chatworkMessageTemplate;
+          let accountFactCheckAlertChatworkRoomId = factCheckAlertChatworkRoomId;
+          let accountFactCheckNotifyMode = factCheckNotifyMode;
           let accountSerpApiKey = serpApiKey;
           let accountGoogleApiKey = googleApiKey;
           let accountSearchEngineId = searchEngineId;
@@ -608,6 +627,10 @@ Deno.serve(async (req: Request) => {
               .eq('account_id', scheduleAccountId)
               .in('key', [
                 'chatwork_api_token',
+                'chatwork_room_id',
+                'chatwork_message_template',
+                'fact_check_alert_chatwork_room_id',
+                'fact_check_notify_mode',
                 'serpapi_key',
                 'google_custom_search_api_key',
                 'google_custom_search_engine_id',
@@ -620,6 +643,10 @@ Deno.serve(async (req: Request) => {
 
             (accountAppSettings || []).forEach((setting: any) => {
               if (setting.key === 'chatwork_api_token') accountChatworkApiToken = setting.value;
+              if (setting.key === 'chatwork_room_id') accountChatworkRoomId = setting.value;
+              if (setting.key === 'chatwork_message_template') accountChatworkMessageTemplate = setting.value;
+              if (setting.key === 'fact_check_alert_chatwork_room_id') accountFactCheckAlertChatworkRoomId = setting.value;
+              if (setting.key === 'fact_check_notify_mode') accountFactCheckNotifyMode = setting.value;
               if (setting.key === 'serpapi_key') accountSerpApiKey = setting.value;
               if (setting.key === 'google_custom_search_api_key') accountGoogleApiKey = setting.value;
               if (setting.key === 'google_custom_search_engine_id') accountSearchEngineId = setting.value;
@@ -676,15 +703,26 @@ Deno.serve(async (req: Request) => {
             );
           }
 
-          try {
-            const effectiveScheduleSetting = accountImageGenerationAllowed
-              ? scheduleSetting
+          const effectiveScheduleSetting = {
+            ...scheduleSetting,
+            chatwork_room_id: scheduleSetting.chatwork_room_id || accountChatworkRoomId || '',
+            chatwork_message_template: scheduleSetting.chatwork_message_template || accountChatworkMessageTemplate || '',
+            fact_check_alert_chatwork_room_id: scheduleSetting.fact_check_alert_chatwork_room_id || accountFactCheckAlertChatworkRoomId || '',
+            fact_check_notify_on_every_run: typeof scheduleSetting.fact_check_notify_on_every_run === 'boolean'
+              ? scheduleSetting.fact_check_notify_on_every_run
+              : accountFactCheckNotifyMode === 'every',
+            fact_check_notify_on_anomaly: typeof scheduleSetting.fact_check_notify_on_anomaly === 'boolean'
+              ? scheduleSetting.fact_check_notify_on_anomaly
+              : accountFactCheckNotifyMode !== 'every',
+            ...(accountImageGenerationAllowed
+              ? {}
               : {
-                  ...scheduleSetting,
                   image_generation_enabled: false,
                   images_per_article: 0,
-                };
+                }),
+          };
 
+          try {
             await executeSchedule(
               effectiveScheduleSetting,
               wpConfig,
@@ -715,7 +753,7 @@ Deno.serve(async (req: Request) => {
                 forceExecute ? 'manual' : 'automatic'
               );
               await notifyScheduleExecutionFailure(
-                scheduleSetting,
+                effectiveScheduleSetting,
                 wpConfig,
                 accountChatworkApiToken,
                 error
@@ -1373,11 +1411,12 @@ async function callAI(
   aiConfig: AIConfig,
   maxTokens?: number
 ): Promise<string> {
-  const provider = String(aiConfig.provider || '').toLowerCase();
-  const model = aiConfig.model;
-  const apiKey = aiConfig.api_key;
-  const temperature = aiConfig.temperature ?? 0.7;
-  const resolvedMaxTokens = maxTokens ?? aiConfig.max_tokens ?? 2000;
+  const resolvedAiConfig = normalizeAiConfig(aiConfig);
+  const provider = String(resolvedAiConfig.provider || '').toLowerCase();
+  const model = resolvedAiConfig.model;
+  const apiKey = resolvedAiConfig.api_key;
+  const temperature = resolvedAiConfig.temperature ?? 0.7;
+  const resolvedMaxTokens = maxTokens ?? resolvedAiConfig.max_tokens ?? 2000;
 
   if (!apiKey) {
     throw new Error(`Missing API key for provider: ${provider}`);
@@ -2221,7 +2260,8 @@ async function executeSchedule(
   let factCheckChangeSummaries: string[] = [];
   let factCheckAutoFixApplied = false;
 
-  if ((schedule as any).enable_fact_check) {
+  const shouldRunFactCheck = true;
+  if (shouldRunFactCheck) {
     console.log(`Starting fact-check for article: ${articleTitle}`);
 
     try {
@@ -2275,7 +2315,7 @@ async function executeSchedule(
           const apiKey = map.get('perplexity_api_key');
           if (apiKey) {
             factCheckSettings = {
-              enabled: parseBoolean(map.get('fact_check_enabled'), true),
+              enabled: true,
               perplexity_api_key: apiKey,
               model_name: map.get('fact_check_model_name') || 'sonar',
               max_items_to_check: parseNumber(map.get('fact_check_max_items'), 10),
@@ -2289,7 +2329,7 @@ async function executeSchedule(
         factCheckExecuted = true;
         // 鬮ｫ・ｪ陋溘・・ｽ・ｺ闕ｵ謨厄ｽｰ驛｢・ｧ陝ｲ・ｨ郢晢ｽｵ驛｢・ｧ繝ｻ・｡驛｢・ｧ繝ｻ・ｯ驛｢譎乗ｲｺ郢晢ｽ･髯懶ｽ｣繝ｻ・ｱ驛｢・ｧ陷ｻ蝓滂ｽｭ讌｢諤弱・・ｺ
         const factsToCheck = await extractFactsFromContent(fullContent, (schedule as any).fact_check_note);
-        const maxItems = factCheckSettings.max_items_to_check || 10;
+        const maxItems = factCheckSettings.max_items_to_check || 50;
         const itemsToCheck = factsToCheck.slice(0, maxItems);
         factCheckItemsChecked = itemsToCheck.length;
 
@@ -2515,7 +2555,7 @@ async function executeSchedule(
   const factCheckNotifyOnAnomaly = rawNotifyEveryRun ? false : rawNotifyOnAnomaly;
   const factCheckAlertRoomIds = String((schedule as any).fact_check_alert_chatwork_room_id || schedule.chatwork_room_id || '').trim();
   if (
-    (schedule as any).enable_fact_check &&
+    shouldRunFactCheck &&
     factCheckAlertRoomIds &&
     chatworkApiToken
   ) {
@@ -2958,6 +2998,37 @@ function isSummaryHeadingText(text: string): boolean {
   if (!normalized) return false;
   const tokens = ['まとめ', '結論', '要約', '総括', 'summary', 'conclusion'];
   return tokens.some((token) => normalized.includes(normalizeComparableText(token)));
+}
+
+function findHeadingOnlySections(content: string): string[] {
+  const lines = String(content || '').split('\n');
+  const headings: Array<{ index: number; level: number; title: string }> = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = String(lines[i] || '').trim();
+    if (!isHeadingLine(line)) continue;
+    const title = extractHeadingText(line);
+    if (!title) continue;
+    headings.push({ index: i, level: getHeadingLevel(line), title });
+  }
+
+  const missing: string[] = [];
+  for (let i = 0; i < headings.length; i++) {
+    const current = headings[i];
+    const nextSameOrHigher = headings.find((candidate, candidateIndex) =>
+      candidateIndex > i && candidate.level <= current.level
+    );
+    const end = nextSameOrHigher ? nextSameOrHigher.index : lines.length;
+    const body = lines
+      .slice(current.index + 1, end)
+      .filter((line) => !isHeadingLine(line))
+      .join('\n')
+      .trim();
+    const minChars = isSummaryHeadingText(current.title) ? 20 : 40;
+    if (countGeneratedChars(body) < minChars) {
+      missing.push(current.title);
+    }
+  }
+  return missing;
 }
 
 function sanitizeHeadingLabel(text: string): string {
@@ -3443,6 +3514,11 @@ function validateGeneratedArticleCompleteness(
     throw new Error(`Generated article is missing headings (${actualHeadings}/${expectedHeadings}). AI output may be incomplete.`);
   }
 
+  const headingOnlySections = findHeadingOnlySections(normalized);
+  if (headingOnlySections.length > 0) {
+    throw new Error(`Generated article has headings without body text: ${headingOnlySections.slice(0, 5).join(', ')}`);
+  }
+
   // Only flag truncation when the last paragraph looks genuinely cut off:
   // skip heading lines, list items, and short label-like lines.
   const lines = normalized.split('\n').map((line) => line.trim()).filter(Boolean);
@@ -3512,8 +3588,8 @@ async function generateSchedulerArticleSinglePass(params: {
     .slice(0, 6)
     .join(', ');
   const toneInstruction = params.tone === 'casual'
-    ? 'Tone: natural, approachable Japanese. Use desu/masu consistently.'
-    : 'Tone: professional Japanese for business readers. Use desu/masu consistently.';
+    ? 'Tone: natural, approachable Japanese. Use desu/masu consistently, but do not sound childish.'
+    : 'Tone: natural professional Japanese for business readers. Write like answering a reader consultation. Avoid stiff manual-like prose, sales copy, and overusing overly polite phrases such as 「いたします」「させていただきます」「となります」.';
   const hardMaxChars = Math.round(params.targetWordCount * 1.2);
   const hardMinChars = Math.round(params.targetWordCount * 0.85);
   const prompt = [

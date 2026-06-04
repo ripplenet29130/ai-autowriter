@@ -163,8 +163,8 @@ export interface ScheduleSetting {
   keyword_set_id?: string;
   title_set_id?: string;
   generation_mode?: 'keyword' | 'title' | 'both';
-  enable_fact_check?: boolean; // 繝輔ぃ繧ｯ繝医メ繧ｧ繝・け譛牙柑蛹・
-  fact_check_note?: string; // [[]]縺ｧ蝗ｲ繧繝√ぉ繝・け蜆ｪ蜈育ｮ・園
+  enable_fact_check?: boolean; // ファクトチェック有効化（Phase 5以降は内部固定）
+  fact_check_note?: string; // [[ ]]で囲むチェック優先範囲
   fact_check_auto_fix_enabled?: boolean;
   fact_check_alert_chatwork_room_id?: string;
   fact_check_notify_on_anomaly?: boolean;

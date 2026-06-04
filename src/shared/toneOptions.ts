@@ -4,7 +4,7 @@ export const sharedToneOptions: Array<{ value: SharedTone; label: string; descri
   {
     value: 'professional',
     label: 'プロフェッショナル（ビジネス）',
-    description: '丁寧で信頼感のある実務的な文体。法人サイトや専門業者の解説に向いています。',
+    description: '専門性は保ちつつ、読者からの相談に答えるように自然に説明します。',
   },
   {
     value: 'casual',

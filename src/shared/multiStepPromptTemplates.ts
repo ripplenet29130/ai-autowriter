@@ -296,9 +296,9 @@ Estimated: [推定文字数]
 
 export function resolveToneInstruction(writingTone: string): string {
   if (writingTone === 'casual' || writingTone === 'friendly' || writingTone === 'desu_masu') {
-    return '親しみやすい文体。くだけすぎない。';
+    return '親しみやすい文体。くだけすぎず、読者に自然に説明する。';
   }
-  return '専門的で丁寧な文体。根拠に基づいて説明する。';
+  return '専門性は保ちつつ、読者からの相談に答えるような自然で読みやすい文体。過度な敬語や営業文を避け、根拠に基づいて説明する。';
 }
 
 export function buildSchedulerSectionPrompt(input: SectionPromptInput): string {

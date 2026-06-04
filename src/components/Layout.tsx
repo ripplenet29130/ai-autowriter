@@ -5,6 +5,7 @@ import {
   Calendar,
   FileText,
   LayoutDashboard,
+  ListChecks,
   LogOut,
   Plug,
   Search,
@@ -18,64 +19,111 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
   const { account, user, signOut } = useAuthStore();
   const featureFlags = account?.feature_flags ?? {};
 
-  const navigationItems = useMemo(() => [
+  const navigationGroups = useMemo(() => [
     {
-      id: 'dashboard',
-      label: 'ホーム',
-      icon: LayoutDashboard,
-      description: '運用状況と次の操作',
+      label: 'はじめる',
+      items: [
+        {
+          id: 'dashboard',
+          label: '初期設定ガイド',
+          icon: ListChecks,
+          description: '順番に設定を進める',
+        },
+      ],
     },
     {
-      id: 'generator',
-      label: '記事作成',
-      icon: Bot,
-      description: '確認しながら作成・おまかせ作成',
+      label: '記事を作る',
+      items: [
+        {
+          id: 'generator',
+          label: '新規記事作成',
+          icon: Bot,
+          description: 'AIで記事を作成・編集',
+        },
+        {
+          id: 'templates',
+          label: 'キーワード・型',
+          icon: BookOpen,
+          description: 'キーワード、タイトル、プロンプト',
+        },
+      ],
     },
     {
-      id: 'articles',
-      label: '記事管理',
-      icon: FileText,
-      description: '生成済み記事の管理',
+      label: '自動投稿',
+      items: [
+        {
+          id: 'scheduler',
+          label: '予約投稿設定',
+          icon: Calendar,
+          description: '投稿頻度と実行内容',
+          enabled: featureFlags.scheduler !== false,
+        },
+        {
+          id: 'operations',
+          label: '稼働状況',
+          icon: LayoutDashboard,
+          description: '投稿予定と実行状況',
+        },
+      ],
     },
     {
-      id: 'scheduler',
-      label: '予約投稿',
-      icon: Calendar,
-      description: '自動投稿スケジュール',
-      enabled: featureFlags.scheduler !== false,
+      label: '記事を管理する',
+      items: [
+        {
+          id: 'articles',
+          label: '作成した記事',
+          icon: FileText,
+          description: '下書き・公開済みを確認',
+        },
+      ],
     },
     {
-      id: 'templates',
-      label: 'テンプレート',
-      icon: BookOpen,
-      description: 'キーワード・タイトル管理',
+      label: '分析',
+      items: [
+        {
+          id: 'seo-report',
+          label: '分析・改善',
+          icon: Search,
+          description: 'Search Consoleレポート',
+          enabled: featureFlags.wordpress_publish !== false,
+        },
+      ],
     },
     {
-      id: 'seo-report',
-      label: 'SEOレポート',
-      icon: Search,
-      description: 'Search Console分析',
-      enabled: featureFlags.wordpress_publish !== false,
-    },
-    {
-      id: 'connections',
-      label: '接続設定',
-      icon: Plug,
-      description: 'WordPress・AI・通知設定',
-      enabled: featureFlags.wordpress_publish !== false,
-    },
-    {
-      id: 'account',
-      label: 'アカウント',
-      icon: UserCircle,
-      description: '利用状況とログアウト',
+      label: '設定',
+      items: [
+        {
+          id: 'connections',
+          label: '接続・API設定',
+          icon: Plug,
+          description: 'WordPress、AI、検索API',
+          enabled: featureFlags.wordpress_publish !== false,
+        },
+        {
+          id: 'account',
+          label: 'アカウント',
+          icon: UserCircle,
+          description: '利用状況とログアウト',
+        },
+      ],
     },
   ], [featureFlags.scheduler, featureFlags.wordpress_publish]);
 
-  const visibleNavigationItems = navigationItems.filter((item) => item.enabled !== false);
+  const visibleNavigationGroups = navigationGroups
+    .map((group) => ({
+      ...group,
+      items: group.items.filter((item) => item.enabled !== false),
+    }))
+    .filter((group) => group.items.length > 0);
+
+  const visibleNavigationItems = visibleNavigationGroups.flatMap((group) => group.items);
+  const hiddenNavigationItemIds = ['wordpress', 'ai-config', 'keywords', 'titles', 'settings'];
 
   useEffect(() => {
-    if (!visibleNavigationItems.some((item) => item.id === activeView)) {
+    const isVisibleItem = visibleNavigationItems.some((item) => item.id === activeView);
+    const isHiddenItem = hiddenNavigationItemIds.includes(activeView);
+
+    if (!isVisibleItem && !isHiddenItem) {
       setActiveView('dashboard');
     }
   }, [activeView, setActiveView, visibleNavigationItems]);
@@ -85,36 +133,41 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
       <aside className="w-64 border-r border-gray-200 bg-white shadow-lg">
         <div className="border-b border-gray-200 p-6">
           <h1 className="text-xl font-bold text-gray-900">AI Auto Writer ver.3.0</h1>
-          <p className="mt-1 text-sm text-gray-600">自動記事生成・投稿ツール</p>
+          <p className="mt-1 text-sm text-gray-600">AI記事作成・自動投稿ツール</p>
         </div>
 
-        <nav className="p-4">
-          <ul className="space-y-2">
-            {visibleNavigationItems.map((item) => {
-              const Icon = item.icon;
-              const isActive = activeView === item.id;
+        <nav className="space-y-5 p-4">
+          {visibleNavigationGroups.map((group) => (
+            <div key={group.label}>
+              <div className="mb-2 px-2 text-xs font-semibold uppercase tracking-wide text-gray-400">{group.label}</div>
+              <ul className="space-y-2">
+                {group.items.map((item) => {
+                  const Icon = item.icon;
+                  const isActive = activeView === item.id;
 
-              return (
-                <li key={item.id}>
-                  <button
-                    type="button"
-                    onClick={() => setActiveView(item.id)}
-                    className={`flex w-full items-center space-x-3 rounded-lg px-4 py-3 text-left transition-all duration-200 ${
-                      isActive
-                        ? 'border border-blue-200 bg-blue-100 text-blue-700'
-                        : 'text-gray-700 hover:bg-gray-100 hover:text-gray-900'
-                    }`}
-                  >
-                    <Icon className={`h-5 w-5 ${isActive ? 'text-blue-600' : 'text-gray-500'}`} />
-                    <div className="min-w-0 flex-1">
-                      <div className="font-medium">{item.label}</div>
-                      <div className="mt-0.5 text-xs text-gray-500">{item.description}</div>
-                    </div>
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
+                  return (
+                    <li key={item.id}>
+                      <button
+                        type="button"
+                        onClick={() => setActiveView(item.id)}
+                        className={`flex w-full items-center space-x-3 rounded-lg px-4 py-3 text-left transition-all duration-200 ${
+                          isActive
+                            ? 'border border-blue-200 bg-blue-100 text-blue-700'
+                            : 'text-gray-700 hover:bg-gray-100 hover:text-gray-900'
+                        }`}
+                      >
+                        <Icon className={`h-5 w-5 ${isActive ? 'text-blue-600' : 'text-gray-500'}`} />
+                        <div className="min-w-0 flex-1">
+                          <div className="font-medium">{item.label}</div>
+                          <div className="mt-0.5 text-xs text-gray-500">{item.description}</div>
+                        </div>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          ))}
         </nav>
       </aside>
 
@@ -122,7 +175,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
         <header className="border-b border-gray-200 bg-white px-8 py-4">
           <div className="flex items-center justify-between">
             <div>
-              <div className="text-xl font-bold text-gray-900">{account?.name ?? '未設定'}</div>
+              <div className="text-xl font-bold text-gray-900">{account?.name ?? '未設定アカウント'}</div>
             </div>
             <div className="flex items-center gap-3">
               <div className="text-sm text-gray-700">{user?.email}</div>

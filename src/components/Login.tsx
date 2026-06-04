@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { Lock } from 'lucide-react';
+import toast from 'react-hot-toast';
 import { useAuthStore } from '../store/useAuthStore';
+import { getAuthErrorMessage } from '../utils/authErrorMessages';
 
 type LoginMode = 'login' | 'forgot' | 'update-password';
 
@@ -46,14 +48,15 @@ export const Login: React.FC<LoginProps> = ({ initialMode = 'login', onPasswordU
       return;
     }
 
+    const loadingToast = toast.loading('パスワード再設定メールを送信しています...');
     try {
       await requestPasswordReset(email.trim());
       setMessage('パスワード再設定メールを送信しました。メール内のリンクから新しいパスワードを設定してください。');
+      toast.success('パスワード再設定メールを送信しました', { id: loadingToast });
     } catch (resetError) {
-      const message = resetError instanceof Error
-        ? resetError.message
-        : 'パスワード再設定メールを送信できませんでした。';
+      const message = getAuthErrorMessage(resetError, 'パスワード再設定メールを送信できませんでした。');
       setLocalError(message);
+      toast.error(message, { id: loadingToast });
     }
   };
 
@@ -72,15 +75,16 @@ export const Login: React.FC<LoginProps> = ({ initialMode = 'login', onPasswordU
       return;
     }
 
+    const loadingToast = toast.loading('パスワードを更新しています...');
     try {
       await updatePassword(newPassword);
       onPasswordUpdated?.();
       setMessage('パスワードを更新しました。');
+      toast.success('パスワードを更新しました', { id: loadingToast });
     } catch (updateError) {
-      const message = updateError instanceof Error
-        ? updateError.message
-        : 'パスワードを更新できませんでした。リセットメールのリンクを開き直してください。';
+      const message = getAuthErrorMessage(updateError, 'パスワードを更新できませんでした。リセットメールのリンクを開き直してください。');
       setLocalError(message);
+      toast.error(message, { id: loadingToast });
     }
   };
 
@@ -233,7 +237,7 @@ export const Login: React.FC<LoginProps> = ({ initialMode = 'login', onPasswordU
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                新しいパスワード確認
+                新しいパスワード（確認）
               </label>
               <input
                 type="password"

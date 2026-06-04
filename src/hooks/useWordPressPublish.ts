@@ -120,9 +120,20 @@ export function useWordPressPublish() {
                 const newStatus = status === 'future' ? 'scheduled' : status === 'publish' ? 'published' : 'draft';
                 const now = new Date().toISOString();
 
-                updateArticle(article.id, {
+                const updatedArticle: Article = {
+                    ...processedArticle,
                     status: newStatus,
-                    content: processedArticle.content, // ここで置換後のコンテンツを保存
+                    publishedAt: status === 'publish' ? now : processedArticle.publishedAt,
+                    scheduledAt: status === 'future' && publishDate ? publishDate.toISOString() : processedArticle.scheduledAt,
+                    wordPressPostId: result.wordPressId.toString(),
+                    wordPressConfigId: configId,
+                    wordPressUrl: result.url,
+                    isPublished: status === 'publish',
+                };
+
+                await updateArticle(article.id, {
+                    status: newStatus,
+                    content: processedArticle.content,
                     publishedAt: status === 'publish' ? now : undefined,
                     scheduledAt: status === 'future' && publishDate ? publishDate.toISOString() : undefined,
                     wordPressPostId: result.wordPressId.toString(),
@@ -133,7 +144,7 @@ export function useWordPressPublish() {
 
                 toast.success('記事を投稿しました');
                 publishLogger.info(`投稿成功: ${article.title}`, { wordPressId: result.wordPressId });
-                return processedArticle; // 処理後の記事を返す
+                return updatedArticle; // 投稿状態を反映した記事を返す
             } else {
                 toast.error(result.error || '投稿に失敗しました');
                 publishLogger.error(`投稿失敗: ${result.error}`);

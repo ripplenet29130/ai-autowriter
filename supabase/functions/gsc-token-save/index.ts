@@ -78,36 +78,58 @@ serve(async (req) => {
     return json({ error: "Active account is required." }, 400);
   }
 
-  const { data: existingToken, error: existingError } = await adminClient
+  let { data: existingToken, error: existingError } = await adminClient
     .from("gsc_tokens")
-    .select("provider_refresh_token")
-    .eq("user_id", user.id)
+    .select("user_id,provider_refresh_token")
+    .eq("account_id", profile.account_id)
+    .order("updated_at", { ascending: false })
+    .limit(1)
     .maybeSingle();
 
   if (existingError) {
     return json({ error: existingError.message }, 500);
   }
 
+  if (!existingToken) {
+    const fallbackResult = await adminClient
+      .from("gsc_tokens")
+      .select("user_id,provider_refresh_token")
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (fallbackResult.error) {
+      return json({ error: fallbackResult.error.message }, 500);
+    }
+
+    existingToken = fallbackResult.data;
+  }
+
   const refreshTokenToSave =
     providerRefreshToken || existingToken?.provider_refresh_token || null;
   const expiresAt = new Date(Date.now() + expiresIn * 1000).toISOString();
 
-  const { error: upsertError } = await adminClient
-    .from("gsc_tokens")
-    .upsert(
-      {
-        user_id: user.id,
-        account_id: profile.account_id,
-        provider_token: providerToken,
-        provider_refresh_token: refreshTokenToSave,
-        expires_at: expiresAt,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "user_id" },
-    );
+  const savePayload = {
+    account_id: profile.account_id,
+    provider_token: providerToken,
+    provider_refresh_token: refreshTokenToSave,
+    expires_at: expiresAt,
+    updated_at: new Date().toISOString(),
+  };
 
-  if (upsertError) {
-    return json({ error: upsertError.message }, 500);
+  const saveResult = existingToken?.user_id
+    ? await adminClient
+      .from("gsc_tokens")
+      .update(savePayload)
+      .eq("user_id", existingToken.user_id)
+    : await adminClient
+      .from("gsc_tokens")
+      .insert({
+        user_id: user.id,
+        ...savePayload,
+      });
+
+  if (saveResult.error) {
+    return json({ error: saveResult.error.message }, 500);
   }
 
   return json({
