@@ -2,6 +2,9 @@ import { create } from 'zustand';
 import type { Session, User } from '@supabase/supabase-js';
 import { supabase } from '../services/supabaseClient';
 
+const authRedirectOrigin = (import.meta.env.VITE_AUTH_REDIRECT_ORIGIN || 'https://ai-autowriter.vercel.app').replace(/\/+$/, '');
+const getAuthRedirectUrl = (pathAndQuery: string) => `${authRedirectOrigin}${pathAndQuery}`;
+
 export type UserRole = 'admin' | 'client';
 
 export interface Account {
@@ -183,7 +186,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
     set({ isLoading: true, error: null });
 
-    const { error } = await supabase.auth.updateUser({ email });
+    const { error } = await supabase.auth.updateUser(
+      { email },
+      { emailRedirectTo: getAuthRedirectUrl('/?auth=email-change') }
+    );
     if (error) {
       set({ isLoading: false, error: error.message });
       throw error;
