@@ -94,7 +94,9 @@ export const AIConfigForm: React.FC<AIConfigFormProps> = ({
   };
 
   const handleTestConnection = async () => {
-    if (!config.apiKey.trim()) {
+    const testApiKey = config.apiKey.trim() || initialConfig?.apiKey?.trim() || '';
+
+    if (!testApiKey) {
       toast.error('APIキーを入力してください');
       return;
     }
@@ -109,7 +111,7 @@ export const AIConfigForm: React.FC<AIConfigFormProps> = ({
         const response = await fetch('https://api.openai.com/v1/chat/completions', {
           method: 'POST',
           headers: {
-            Authorization: `Bearer ${config.apiKey}`,
+            Authorization: `Bearer ${testApiKey}`,
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
@@ -131,7 +133,7 @@ export const AIConfigForm: React.FC<AIConfigFormProps> = ({
         const response = await fetch('https://api.anthropic.com/v1/messages', {
           method: 'POST',
           headers: {
-            'x-api-key': config.apiKey,
+            'x-api-key': testApiKey,
             'anthropic-version': '2023-06-01',
             'Content-Type': 'application/json',
           },
@@ -153,7 +155,7 @@ export const AIConfigForm: React.FC<AIConfigFormProps> = ({
       } else {
         const modelName = normalizeGeminiModel(config.model);
         const response = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${config.apiKey}`,
+          `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${testApiKey}`,
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -306,7 +308,7 @@ export const AIConfigForm: React.FC<AIConfigFormProps> = ({
       <div className="flex justify-end space-x-3 mt-6 pt-4 border-t border-gray-200">
         <button
           onClick={handleTestConnection}
-          disabled={testingConnection || !config.apiKey.trim()}
+          disabled={testingConnection || (!config.apiKey.trim() && !hasStoredApiKey)}
           className="btn-secondary flex items-center space-x-2 disabled:opacity-50"
         >
           {testingConnection ? (
