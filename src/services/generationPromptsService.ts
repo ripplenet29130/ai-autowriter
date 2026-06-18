@@ -38,13 +38,13 @@ export const generationPromptsService = {
         .single();
 
       if (error) {
-        console.error('繝励Ο繝ｳ繝励ヨ縺ｮ菫晏ｭ倥↓螟ｱ謨励＠縺ｾ縺励◆:', error);
+        console.error('プロンプトの保存に失敗しました:', error);
         return null;
       }
 
       return this.mapFromDatabase(data);
     } catch (err) {
-      console.error('繝励Ο繝ｳ繝励ヨ菫晏ｭ倥お繝ｩ繝ｼ:', err);
+      console.error('プロンプト保存エラー:', err);
       return null;
     }
   },
@@ -59,13 +59,13 @@ export const generationPromptsService = {
         .order('created_at', { ascending: false });
 
       if (error) {
-        console.error('險倅ｺ九・繝励Ο繝ｳ繝励ヨ蜿門ｾ励↓螟ｱ謨励＠縺ｾ縺励◆:', error);
+        console.error('記事のプロンプト取得に失敗しました:', error);
         return [];
       }
 
       return data.map((item: any) => this.mapFromDatabase(item));
     } catch (err) {
-      console.error('繝励Ο繝ｳ繝励ヨ蜿門ｾ励お繝ｩ繝ｼ:', err);
+      console.error('プロンプト取得エラー:', err);
       return [];
     }
   },
@@ -80,13 +80,13 @@ export const generationPromptsService = {
         .limit(limit);
 
       if (error) {
-        console.error('譛霑代・繝励Ο繝ｳ繝励ヨ蜿門ｾ励↓螟ｱ謨励＠縺ｾ縺励◆:', error);
+        console.error('最近のプロンプト取得に失敗しました:', error);
         return [];
       }
 
       return data.map((item: any) => this.mapFromDatabase(item));
     } catch (err) {
-      console.error('繝励Ο繝ｳ繝励ヨ蜿門ｾ励お繝ｩ繝ｼ:', err);
+      console.error('プロンプト取得エラー:', err);
       return [];
     }
   },

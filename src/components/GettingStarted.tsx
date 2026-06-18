@@ -127,7 +127,10 @@ export const GettingStarted: React.FC = () => {
     },
   ], [aiConfigs, articles.length, hasSerpApiKey, scheduleCount, wordPressConfigs]);
 
-  const completedCount = steps.filter((step) => step.isDone).length;
+  const requiredSetupStarted = steps
+    .filter((step) => step.id === 'wordpress' || step.id === 'ai')
+    .some((step) => step.isDone);
+  const completedCount = requiredSetupStarted ? steps.filter((step) => step.isDone).length : 0;
   const progressPercent = Math.round((completedCount / steps.length) * 100);
 
   return (

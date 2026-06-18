@@ -34,13 +34,13 @@ export const customTopicsService = {
         .single();
 
       if (error) {
-        console.error('繝医ヴ繝・け縺ｮ菴懈・縺ｫ螟ｱ謨励＠縺ｾ縺励◆:', error);
+        console.error('トピックの作成に失敗しました:', error);
         return null;
       }
 
       return this.mapFromDatabase(data);
     } catch (err) {
-      console.error('繝医ヴ繝・け菴懈・繧ｨ繝ｩ繝ｼ:', err);
+      console.error('トピック作成エラー:', err);
       return null;
     }
   },
@@ -67,13 +67,13 @@ export const customTopicsService = {
         .single();
 
       if (error) {
-        console.error('繝医ヴ繝・け縺ｮ譖ｴ譁ｰ縺ｫ螟ｱ謨励＠縺ｾ縺励◆:', error);
+        console.error('トピックの更新に失敗しました:', error);
         return null;
       }
 
       return this.mapFromDatabase(data);
     } catch (err) {
-      console.error('繝医ヴ繝・け譖ｴ譁ｰ繧ｨ繝ｩ繝ｼ:', err);
+      console.error('トピック更新エラー:', err);
       return null;
     }
   },
@@ -87,13 +87,13 @@ export const customTopicsService = {
         .eq('id', id);
 
       if (error) {
-        console.error('繝医ヴ繝・け縺ｮ蜑企勁縺ｫ螟ｱ謨励＠縺ｾ縺励◆:', error);
+        console.error('トピックの削除に失敗しました:', error);
         return false;
       }
 
       return true;
     } catch (err) {
-      console.error('繝医ヴ繝・け蜑企勁繧ｨ繝ｩ繝ｼ:', err);
+      console.error('トピック削除エラー:', err);
       return false;
     }
   },
@@ -108,13 +108,13 @@ export const customTopicsService = {
         .single();
 
       if (error) {
-        console.error('繝医ヴ繝・け縺ｮ蜿門ｾ励↓螟ｱ謨励＠縺ｾ縺励◆:', error);
+        console.error('トピックの取得に失敗しました:', error);
         return null;
       }
 
       return this.mapFromDatabase(data);
     } catch (err) {
-      console.error('繝医ヴ繝・け蜿門ｾ励お繝ｩ繝ｼ:', err);
+      console.error('トピック取得エラー:', err);
       return null;
     }
   },
@@ -142,13 +142,13 @@ export const customTopicsService = {
       const { data, error } = await query;
 
       if (error) {
-        console.error('繝医ヴ繝・け荳隕ｧ縺ｮ蜿門ｾ励↓螟ｱ謨励＠縺ｾ縺励◆:', error);
+        console.error('トピック一覧の取得に失敗しました:', error);
         return [];
       }
 
       return data.map((item: any) => this.mapFromDatabase(item));
     } catch (err) {
-      console.error('繝医ヴ繝・け荳隕ｧ蜿門ｾ励お繝ｩ繝ｼ:', err);
+      console.error('トピック一覧取得エラー:', err);
       return [];
     }
   },
@@ -167,13 +167,13 @@ export const customTopicsService = {
         .maybeSingle();
 
       if (error) {
-        console.error('繝医ヴ繝・け蜷阪〒縺ｮ蜿門ｾ励↓螟ｱ謨励＠縺ｾ縺励◆:', error);
+        console.error('トピック名での取得に失敗しました:', error);
         return null;
       }
 
       return data ? this.mapFromDatabase(data) : null;
     } catch (err) {
-      console.error('繝医ヴ繝・け蜷榊叙蠕励お繝ｩ繝ｼ:', err);
+      console.error('トピック名取得エラー:', err);
       return null;
     }
   },
@@ -214,7 +214,7 @@ export const customTopicsService = {
       await this.updateTopic(id, { isFavorite: !topic.isFavorite });
       return true;
     } catch (err) {
-      console.error('縺頑ｰ励↓蜈･繧雁・譖ｿ繧ｨ繝ｩ繝ｼ:', err);
+      console.error('お気に入り並べ替えエラー:', err);
       return false;
     }
   },

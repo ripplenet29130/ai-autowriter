@@ -12,8 +12,6 @@ type SettingsState = {
 };
 
 const LOCAL_STORAGE_KEY = 'fact_check_settings_local';
-const DEFAULT_MAX_ITEMS_TO_CHECK = 50;
-
 const parseBoolean = (value: string | null | undefined, fallback = false) => {
   if (value == null) return fallback;
   return ['1', 'true', 'yes', 'on'].includes(String(value).toLowerCase());
@@ -128,7 +126,6 @@ export const FactCheckSettings: React.FC = () => {
           perplexityApiKey: settings.perplexityApiKey,
           alertChatworkRoomId: settings.alertChatworkRoomId,
           notifyMode: settings.notifyMode,
-          maxItemsToCheck: DEFAULT_MAX_ITEMS_TO_CHECK,
           modelName: 'sonar',
         })
       );
@@ -160,7 +157,6 @@ export const FactCheckSettings: React.FC = () => {
           enabled: true,
           auto_fix_enabled: settings.autoFixEnabled,
           perplexity_api_key: settings.perplexityApiKey,
-          max_items_to_check: DEFAULT_MAX_ITEMS_TO_CHECK,
           updated_at: new Date().toISOString(),
         };
 
@@ -176,7 +172,6 @@ export const FactCheckSettings: React.FC = () => {
       const globalSettingsToSave = [
         { key: 'perplexity_api_key', value: settings.perplexityApiKey, description: 'Perplexity API key' },
         { key: 'fact_check_enabled', value: 'true', description: 'Enable fact check' },
-        { key: 'fact_check_max_items', value: String(DEFAULT_MAX_ITEMS_TO_CHECK), description: 'Max fact-check items' },
         {
           key: 'fact_check_auto_fix_enabled',
           value: String(settings.autoFixEnabled),

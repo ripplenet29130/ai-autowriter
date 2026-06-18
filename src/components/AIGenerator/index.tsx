@@ -16,7 +16,6 @@ import { titleKeywordInferenceService } from '../../services/titleKeywordInferen
 import { getSharedToneDescription, sharedToneOptions, type SharedTone } from '../../shared/toneOptions';
 import type { TitleKeywordInference } from '../../services/titleKeywordInferenceService';
 import type { FactCheckResult } from '../../types';
-import type { FactCheckItem } from '../../types/factCheck';
 import type { Article, ArticleStructureType } from '../../types';
 import toast from 'react-hot-toast';
 
@@ -40,7 +39,7 @@ export const AIGenerator: React.FC = () => {
     const [selectedAIProvider, setSelectedAIProvider] = useState<'' | 'openai' | 'claude' | 'gemini'>('');
     const [selectedAIConfigId, setSelectedAIConfigId] = useState<string>('');
     const [selectedAIModel, setSelectedAIModel] = useState<string>('');
-    const [factCheckModel, setFactCheckModel] = useState<'sonar' | 'sonar-reasoning'>('sonar');
+    const [factCheckModel] = useState<'sonar' | 'sonar-reasoning'>('sonar');
 
     // Fact Check State
     const [factCheckResults, setFactCheckResults] = useState<FactCheckResult[]>([]);
@@ -49,10 +48,6 @@ export const AIGenerator: React.FC = () => {
     const [autoFixEnabled, setAutoFixEnabled] = useState(false);
     const [factCheckProgress, setFactCheckProgress] = useState<{ total: number; processed: number } | null>(null);
     const [factCheckFixDiff, setFactCheckFixDiff] = useState<{ before: string; after: string } | null>(null);
-    const [showFactCheckCandidateConfirm, setShowFactCheckCandidateConfirm] = useState(false);
-    const [factCheckDraftKeyword, setFactCheckDraftKeyword] = useState('');
-    const [factCheckDraftItems, setFactCheckDraftItems] = useState<Array<FactCheckItem & { id: string; enabled: boolean }>>([]);
-    const [manualCandidateClaim, setManualCandidateClaim] = useState('');
 
     // Publish Status State
     const [publishStatus, setPublishStatus] = useState<'publish' | 'draft' | 'future'>('publish');
@@ -389,12 +384,13 @@ export const AIGenerator: React.FC = () => {
         });
     };
 
-    const runFactCheck = async (items: FactCheckItem[], keyword: string) => {
+    const runFactCheck = async () => {
         if (!generatedArticle) return;
 
         setIsFactChecking(true);
         setFactCheckProgress(null);
         try {
+            const items = factCheckService.extractFacts(generatedArticle.content);
             if (items.length === 0) {
                 toast('検証する事実情報が見つかりませんでした', { icon: 'ℹ️' });
                 setIsFactChecking(false);
@@ -402,7 +398,9 @@ export const AIGenerator: React.FC = () => {
             }
 
             toast.loading('ファクトチェックを実行中...', { duration: 2000 });
-            const effectiveKeyword = keyword.trim() || generatedArticle.keywords?.[0] || generatedArticle.title;
+            const effectiveKeyword = generatedArticle.keywords && generatedArticle.keywords.length > 0
+                ? generatedArticle.keywords.slice(0, 5).join(', ')
+                : generatedArticle.title;
             const results = await factCheckService.verifyFacts(items, effectiveKeyword, factCheckModel, (progress) => {
                 setFactCheckProgress(progress);
             });
@@ -443,25 +441,7 @@ export const AIGenerator: React.FC = () => {
     };
 
     const handleManualFactCheck = () => {
-        if (!generatedArticle) return;
-        const extracted = factCheckService.extractFacts(generatedArticle.content);
-        if (extracted.length === 0) {
-            toast('検証する事実情報が見つかりませんでした', { icon: 'ℹ️' });
-            return;
-        }
-        const initialKeyword = generatedArticle.keywords && generatedArticle.keywords.length > 0
-            ? generatedArticle.keywords.slice(0, 5).join(', ')
-            : generatedArticle.title;
-        setFactCheckDraftKeyword(initialKeyword);
-        setFactCheckDraftItems(
-            extracted.map((item, idx) => ({
-                ...item,
-                id: `${idx}-${item.claim.slice(0, 20)}`,
-                enabled: true,
-            }))
-        );
-        setManualCandidateClaim('');
-        setShowFactCheckCandidateConfirm(true);
+        void runFactCheck();
     };
 
     const handleApplyFactCheckFixes = async (baseResults?: FactCheckResult[]) => {
@@ -514,10 +494,6 @@ export const AIGenerator: React.FC = () => {
     const handleBackToForm = () => {
         clearArticle();
         setShowMultiStep(false);
-        setShowFactCheckCandidateConfirm(false);
-        setManualCandidateClaim('');
-        setFactCheckDraftItems([]);
-        setFactCheckDraftKeyword('');
     };
 
     const canApplyFactCheckFix = hasFixableIssues((generatedArticle?.factCheckResults || factCheckResults || []));
@@ -1045,133 +1021,6 @@ export const AIGenerator: React.FC = () => {
 
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                         <div className="lg:col-span-2 space-y-6">
-                            {showFactCheckCandidateConfirm && (
-                                <div className="mb-5 p-4 border border-blue-200 bg-blue-50 rounded-xl space-y-3">
-                                    <h4 className="text-sm font-semibold text-blue-900">ファクトチェック実行前の確認</h4>
-                                    <p className="text-xs text-blue-800">「高優先」は数値・日付など重要度が高い候補です。「通常優先」は補助候補です。</p>
-                                    <div>
-                                        <label className="block text-xs font-medium text-blue-900 mb-1">関連キーワード（編集可）</label>
-                                        <input
-                                            value={factCheckDraftKeyword}
-                                            onChange={(e) => setFactCheckDraftKeyword(e.target.value)}
-                                            className="w-full px-3 py-2 border border-blue-200 rounded-md text-sm"
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="block text-xs font-medium text-blue-900 mb-1">候補文を手動追加</label>
-                                        <div className="flex gap-2">
-                                            <input
-                                                value={manualCandidateClaim}
-                                                onChange={(e) => setManualCandidateClaim(e.target.value)}
-                                                className="flex-1 px-3 py-2 border border-blue-200 rounded-md text-sm"
-                                                placeholder="追加したい主張文を入力"
-                                                disabled={isFactChecking}
-                                            />
-                                            <button
-                                                type="button"
-                                                className="px-3 py-2 text-sm border border-blue-300 rounded bg-white disabled:opacity-50"
-                                                disabled={!manualCandidateClaim.trim() || isFactChecking}
-                                                onClick={() => {
-                                                    const claim = manualCandidateClaim.trim();
-                                                    if (!claim) return;
-                                                    setFactCheckDraftItems((prev) => [
-                                                        ...prev,
-                                                        {
-                                                            id: `manual-${Date.now()}`,
-                                                            claim,
-                                                            context: generatedArticle.content || '',
-                                                            priority: 'normal',
-                                                            enabled: true,
-                                                        },
-                                                    ]);
-                                                    setManualCandidateClaim('');
-                                                }}
-                                            >
-                                                追加
-                                            </button>
-                                        </div>
-                                    </div>
-                                    <div className="flex items-center justify-between">
-                                        <p className="text-xs text-blue-800">候補文（チェック/編集可）</p>
-                                        <div className="flex gap-2">
-                                            <button
-                                                onClick={() => setFactCheckDraftItems((prev) => prev.map((i) => ({ ...i, enabled: true })))}
-                                                disabled={isFactChecking}
-                                                className="px-2 py-1 text-xs border border-blue-300 rounded bg-white disabled:opacity-50"
-                                            >
-                                                全選択
-                                            </button>
-                                            <button
-                                                onClick={() => setFactCheckDraftItems((prev) => prev.map((i) => ({ ...i, enabled: false })))}
-                                                disabled={isFactChecking}
-                                                className="px-2 py-1 text-xs border border-blue-300 rounded bg-white disabled:opacity-50"
-                                            >
-                                                全解除
-                                            </button>
-                                        </div>
-                                    </div>
-                                    <div className="max-h-56 overflow-y-auto space-y-2">
-                                        {factCheckDraftItems.map((item) => (
-                                            <div key={item.id} className="bg-white border border-blue-100 rounded-md p-2">
-                                                <label className="flex items-center gap-2 text-xs mb-2">
-                                                    <input
-                                                        type="checkbox"
-                                                        checked={item.enabled}
-                                                        disabled={isFactChecking}
-                                                        onChange={(e) =>
-                                                            setFactCheckDraftItems((prev) =>
-                                                                prev.map((it) => (it.id === item.id ? { ...it, enabled: e.target.checked } : it))
-                                                            )
-                                                        }
-                                                    />
-                                                    <span className={item.priority === 'high' ? 'text-red-600 font-semibold' : 'text-gray-600'}>
-                                                        {item.priority === 'high' ? '高優先（重要）' : '通常優先（補助）'}
-                                                    </span>
-                                                </label>
-                                                <label className="block text-[11px] text-gray-500 mb-1">主張（何を検証するか）</label>
-                                                <textarea
-                                                    value={item.claim}
-                                                    rows={2}
-                                                    onChange={(e) =>
-                                                        setFactCheckDraftItems((prev) =>
-                                                            prev.map((it) => (it.id === item.id ? { ...it, claim: e.target.value } : it))
-                                                        )
-                                                    }
-                                                    className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
-                                                />
-                                            </div>
-                                        ))}
-                                    </div>
-                                    <div className="flex justify-end gap-2">
-                                        <button
-                                            onClick={() => setShowFactCheckCandidateConfirm(false)}
-                                            disabled={isFactChecking}
-                                            className="px-3 py-1.5 text-sm border border-gray-300 rounded bg-white disabled:opacity-50"
-                                        >
-                                            キャンセル
-                                        </button>
-                                        <button
-                                            onClick={async () => {
-                                                const selected = factCheckDraftItems
-                                                    .filter((item) => item.enabled)
-                                                    .map((item) => ({
-                                                        claim: item.claim.trim(),
-                                                        context: item.context,
-                                                        priority: item.priority,
-                                                    }))
-                                                    .filter((item) => item.claim.length > 0);
-                                                setShowFactCheckCandidateConfirm(false);
-                                                setManualCandidateClaim('');
-                                                await runFactCheck(selected, factCheckDraftKeyword.trim());
-                                            }}
-                                            className="px-3 py-1.5 text-sm rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
-                                            disabled={factCheckDraftItems.filter((item) => item.enabled).length === 0 || isFactChecking}
-                                        >
-                                            {isFactChecking ? "実行中..." : "この内容で実行"}
-                                        </button>
-                                    </div>
-                                </div>
-                            )}
                             {isFactChecking && factCheckProgress && (
                                 <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
                                     <div className="text-sm text-blue-900 font-medium">ファクトチェック実行中...</div>

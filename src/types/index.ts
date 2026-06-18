@@ -48,7 +48,7 @@ export interface WordPressConfig {
 
 export interface AIConfig {
   id?: string;
-  name?: string; // 陦ｨ遉ｺ逕ｨ・・B縺ｫ繧ｫ繝ｩ繝縺後↑縺・ｴ蜷医・繝輔Ο繝ｳ繝医お繝ｳ繝峨〒逕滓・・・
+  name?: string; // 表示用。DBにカラムがない場合はフロントエンドで生成する
   provider: 'openai' | 'claude' | 'gemini';
   apiKey: string;
   model: string;
@@ -86,7 +86,7 @@ export interface GenerationPrompt {
   selectedTitleSuggestion?: TitleSuggestion;
   selectedTitle?: string;
   keywordPreferences?: Record<string, KeywordPreference>;
-  // === 繧ｻ繧ｯ繧ｷ繝ｧ繝ｳ蛻･逕滓・逕ｨ縺ｮ霑ｽ蜉繝輔ぅ繝ｼ繝ｫ繝・===
+  // === セクション別生成用の追加フィールド ===
   generationType?: 'full_article' | 'section';
   sectionTitle?: string;
   articleTitle?: string;
@@ -270,12 +270,12 @@ export interface TrendConfig {
   competitorDomains: string[];
 }
 
-// === 繝槭Ν繝√せ繝・ャ繝苓ｨ倅ｺ狗函謌千畑縺ｮ蝙句ｮ夂ｾｩ ===
+// === マルチステップ記事生成用の型定義 ===
 
 export type KeywordPreference = 'default' | 'ng' | 'essential';
 
 /**
- * 險倅ｺ九・繧｢繧ｦ繝医Λ繧､繝ｳ・郁ｦ句・縺玲ｧ区・・・
+ * 記事のアウトライン（見出し構成）
  */
 export interface ArticleOutline {
   id: string;
@@ -289,7 +289,7 @@ export interface ArticleOutline {
 }
 
 /**
- * 繧｢繧ｦ繝医Λ繧､繝ｳ縺ｮ繧ｻ繧ｯ繧ｷ繝ｧ繝ｳ・郁ｦ句・縺暦ｼ・
+ * アウトラインのセクション（見出し）
  */
 export interface OutlineSection {
   id: string;
@@ -316,7 +316,7 @@ export interface StepResult {
 }
 
 /**
- * 繝槭Ν繝√せ繝・ャ繝礼函謌舌・迥ｶ諷・
+ * マルチステップ生成の状態
  */
 export interface MultiStepGenerationState {
   mode: GenerationMode;
@@ -332,7 +332,7 @@ export interface MultiStepGenerationState {
 }
 
 /**
- * 繧｢繧ｦ繝医Λ繧､繝ｳ逕滓・縺ｮ繝ｪ繧ｯ繧ｨ繧ｹ繝・
+ * アウトライン生成のリクエスト
  */
 export interface OutlineGenerationRequest {
   keywords: string[];
@@ -348,7 +348,7 @@ export interface OutlineGenerationRequest {
 }
 
 /**
- * 繧ｻ繧ｯ繧ｷ繝ｧ繝ｳ逕滓・縺ｮ繝ｪ繧ｯ繧ｨ繧ｹ繝・
+ * セクション生成のリクエスト
  */
 export interface SectionGenerationRequest {
   section: OutlineSection;

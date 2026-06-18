@@ -343,6 +343,10 @@ export const Scheduler: React.FC = () => {
       toast.error('WordPress設定を選択してください');
       return;
     }
+    if (schedules.some((schedule) => schedule.wp_config_id === submitData.wp_config_id && schedule.id !== editingSchedule?.id)) {
+      toast.error('このWordPress設定には既に予約投稿スケジュールがあります。既存のスケジュールを編集してください。');
+      return;
+    }
     const minute = Number(submitData.post_time.split(':')[1]);
     if (!Number.isFinite(minute) || minute % 10 !== 0) {
       toast.error('投稿時刻は10分単位で選択してください');
@@ -755,9 +759,25 @@ export const Scheduler: React.FC = () => {
 
   // フィルタリングされたWordPress設定（アクティブのみ）
   const activeWordPressConfigs = wordPressConfigs.filter(config => config.isActive);
-  const sortedSchedules = useMemo(
-    () => [...schedules].sort((a, b) => Number(b.status) - Number(a.status)),
+  const scheduledWpConfigIds = useMemo(
+    () => new Set(
+      schedules
+        .filter((schedule) => schedule.id !== editingSchedule?.id)
+        .map((schedule) => schedule.wp_config_id)
+    ),
+    [schedules, editingSchedule?.id]
+  );
+  const activeSchedules = useMemo(
+    () => schedules.filter((schedule) => schedule.status),
     [schedules]
+  );
+  const inactiveSchedules = useMemo(
+    () => schedules.filter((schedule) => !schedule.status),
+    [schedules]
+  );
+  const sortedSchedules = useMemo(
+    () => [...activeSchedules, ...inactiveSchedules],
+    [activeSchedules, inactiveSchedules]
   );
   const failedExecutionHistory = useMemo(
     () => executionHistory.filter((history) => history.status === 'failed'),
@@ -873,11 +893,14 @@ export const Scheduler: React.FC = () => {
               required
             >
               <option value="">選択してください</option>
-              {activeWordPressConfigs.map((config) => (
-                <option key={config.id} value={config.id}>
-                  {config.name} ({config.url})
-                </option>
-              ))}
+              {activeWordPressConfigs.map((config) => {
+                const alreadyScheduled = scheduledWpConfigIds.has(config.id);
+                return (
+                  <option key={config.id} value={config.id} disabled={alreadyScheduled}>
+                    {config.name} ({config.url}){alreadyScheduled ? ' - 設定済み' : ''}
+                  </option>
+                );
+              })}
             </select>
             {activeWordPressConfigs.length === 0 && (
               <p className="text-xs text-red-500 mt-1">
@@ -1434,15 +1457,33 @@ export const Scheduler: React.FC = () => {
             </div>
           ) : (
             <div className="space-y-3">
-              {sortedSchedules.map((schedule) => {
+              {sortedSchedules.map((schedule, index) => {
                 const keywordsList = schedule.keyword ? schedule.keyword.split(',').map(k => k.trim()).filter(k => k) : [];
                 const usedList = schedule.id ? (usedKeywordsMap[schedule.id] || []) : [];
                 const promptSetName = getPromptSetName(schedule.prompt_set_id);
                 const nextRunAt = schedule.status ? getNextExecutionDate(schedule) : null;
+                const showActiveHeader = schedule.status && index === 0;
+                const showInactiveHeader = !schedule.status && index === activeSchedules.length;
 
                 return (
+                  <React.Fragment key={schedule.id}>
+                    {showActiveHeader && (
+                      <div className="flex items-center justify-between pt-1">
+                        <h4 className="text-sm font-semibold text-gray-900">有効なスケジュール</h4>
+                        <span className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-1 rounded">
+                          {activeSchedules.length}件
+                        </span>
+                      </div>
+                    )}
+                    {showInactiveHeader && (
+                      <div className={`${activeSchedules.length > 0 ? 'pt-5 mt-2 border-t border-gray-200' : 'pt-1'} flex items-center justify-between`}>
+                        <h4 className="text-sm font-semibold text-gray-700">停止中のスケジュール</h4>
+                        <span className="text-xs text-gray-600 bg-gray-50 border border-gray-200 px-2 py-1 rounded">
+                          {inactiveSchedules.length}件
+                        </span>
+                      </div>
+                    )}
                   <div
-                    key={schedule.id}
                     className={`border rounded-xl p-6 shadow-md transition-all ${schedule.status ? 'bg-white border-emerald-300 ring-1 ring-emerald-100 hover:shadow-lg' : 'bg-gray-50 border-gray-200'
                       }`}
                   >
@@ -1726,6 +1767,7 @@ export const Scheduler: React.FC = () => {
                       );
                     })()}
                   </div>
+                  </React.Fragment>
                 );
               })}
             </div>

@@ -19,13 +19,6 @@ const defaultFeatureFlags = {
   fact_check: true,
 };
 
-const featureOptions: Array<{ key: keyof typeof defaultFeatureFlags; label: string }> = [
-  { key: 'wordpress_publish', label: 'WP投稿' },
-  { key: 'scheduler', label: '予約' },
-  { key: 'image_generation', label: '画像' },
-  { key: 'fact_check', label: '校正' },
-];
-
 const getSupabaseErrorMessage = async (error: unknown) => {
   if (!error) return null;
   const maybeContext = (error as { context?: unknown }).context;
@@ -471,7 +464,7 @@ export const AdminDashboard: React.FC = () => {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 gap-3">
                     <label className="space-y-1">
                       <span className="block text-xs font-medium text-gray-500">WordPress上限</span>
                       <input
@@ -489,35 +482,6 @@ export const AdminDashboard: React.FC = () => {
                       />
                       <div className="text-xs text-gray-500">登録済み {account.wordpress_count ?? 0}</div>
                     </label>
-                    <div className="space-y-1">
-                      <span className="block text-xs font-medium text-gray-500">機能</span>
-                      <div className="grid grid-cols-2 gap-2">
-                        {featureOptions.map((feature) => (
-                          <label key={feature.key} className="inline-flex items-center gap-1.5 text-xs text-gray-600">
-                            <input
-                              type="checkbox"
-                              checked={Boolean((account.feature_flags ?? defaultFeatureFlags)[feature.key])}
-                              onChange={(event) =>
-                                setAccounts((prev) =>
-                                  prev.map((item) => item.id === account.id
-                                    ? {
-                                        ...item,
-                                        feature_flags: {
-                                          ...defaultFeatureFlags,
-                                          ...(item.feature_flags ?? {}),
-                                          [feature.key]: event.target.checked,
-                                        },
-                                      }
-                                    : item)
-                                )
-                              }
-                              className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                            />
-                            <span>{feature.label}</span>
-                          </label>
-                        ))}
-                      </div>
-                    </div>
                   </div>
 
                   <div className="flex xl:flex-col gap-2 xl:items-stretch justify-end">
@@ -560,7 +524,6 @@ export const AdminDashboard: React.FC = () => {
                   <th className="text-left px-4 py-3 font-medium text-gray-600">状態</th>
                   <th className="text-left px-4 py-3 font-medium text-gray-600">WordPress</th>
                   <th className="text-left px-4 py-3 font-medium text-gray-600">利用状況</th>
-                  <th className="text-left px-4 py-3 font-medium text-gray-600">機能</th>
                   <th className="text-left px-4 py-3 font-medium text-gray-600">更新日</th>
                   <th className="text-left px-4 py-3 font-medium text-gray-600">操作</th>
                 </tr>
@@ -568,13 +531,13 @@ export const AdminDashboard: React.FC = () => {
               <tbody>
                 {isLoading ? (
                   <tr>
-                    <td colSpan={7} className="px-4 py-8 text-center text-gray-500">
+                    <td colSpan={6} className="px-4 py-8 text-center text-gray-500">
                       読み込み中です
                     </td>
                   </tr>
                 ) : accounts.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="px-4 py-8 text-center text-gray-500">
+                    <td colSpan={6} className="px-4 py-8 text-center text-gray-500">
                       アカウントがありません
                     </td>
                   </tr>
@@ -639,34 +602,6 @@ export const AdminDashboard: React.FC = () => {
                       <td className="px-4 py-3 text-gray-600">
                         <div>記事 {account.article_count ?? 0}</div>
                         <div>予約 {account.schedule_count ?? 0}</div>
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="grid grid-cols-2 gap-2 min-w-48">
-                          {featureOptions.map((feature) => (
-                            <label key={feature.key} className="inline-flex items-center gap-1.5 text-xs text-gray-600">
-                              <input
-                                type="checkbox"
-                                checked={Boolean((account.feature_flags ?? defaultFeatureFlags)[feature.key])}
-                                onChange={(event) =>
-                                  setAccounts((prev) =>
-                                    prev.map((item) => item.id === account.id
-                                      ? {
-                                          ...item,
-                                          feature_flags: {
-                                            ...defaultFeatureFlags,
-                                            ...(item.feature_flags ?? {}),
-                                            [feature.key]: event.target.checked,
-                                          },
-                                        }
-                                      : item)
-                                  )
-                                }
-                                className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                              />
-                              <span>{feature.label}</span>
-                            </label>
-                          ))}
-                        </div>
                       </td>
                       <td className="px-4 py-3 text-gray-500 whitespace-nowrap">
                         <div>{formatDate(account.updated_at)}</div>

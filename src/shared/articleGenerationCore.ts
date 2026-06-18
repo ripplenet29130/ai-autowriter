@@ -488,6 +488,77 @@ function selectH3TitlesForH2(h2Title: string, count: number): string[] {
   return pool.slice(0, Math.max(1, Math.min(count, pool.length)));
 }
 
+function isMarkdownStructuralBlock(block: string): boolean {
+  return /^(```|#{1,6}\s|[-*]\s|\d+\.\s|>\s|\|)/m.test(block.trim());
+}
+
+function splitJapaneseParagraphForReadability(paragraph: string): string {
+  const trimmed = String(paragraph || '').trim();
+  if (!trimmed || trimmed.length < 180) return trimmed;
+
+  const sentences = trimmed
+    .replace(/([。！？])(?=\S)/g, '$1\n')
+    .split('\n')
+    .map((sentence) => sentence.trim())
+    .filter(Boolean);
+
+  if (sentences.length <= 2) return trimmed;
+
+  const chunks: string[] = [];
+  let current: string[] = [];
+  let currentLength = 0;
+
+  for (const sentence of sentences) {
+    current.push(sentence);
+    currentLength += sentence.length;
+
+    if (current.length >= 3 || currentLength >= 220) {
+      chunks.push(current.join(''));
+      current = [];
+      currentLength = 0;
+    }
+  }
+
+  if (current.length > 0) {
+    chunks.push(current.join(''));
+  }
+
+  return chunks.join('\n\n');
+}
+
+export function formatArticleBodyForReadability(content: string): string {
+  const text = String(content || '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .trim();
+  if (!text) return '';
+
+  const blocks = text.split(/\n{2,}/);
+  return blocks
+    .map((block) => {
+      const trimmed = block.trim();
+      if (!trimmed) return '';
+      if (/^#{1,6}\s/m.test(trimmed) && /\n/.test(trimmed)) {
+        return trimmed
+          .split('\n')
+          .map((line) => {
+            const current = line.trim();
+            if (!current) return '';
+            if (isMarkdownStructuralBlock(current)) return current;
+            return splitJapaneseParagraphForReadability(current);
+          })
+          .filter(Boolean)
+          .join('\n\n');
+      }
+      if (isMarkdownStructuralBlock(trimmed)) return trimmed;
+      return splitJapaneseParagraphForReadability(trimmed);
+    })
+    .filter(Boolean)
+    .join('\n\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 export function insertSubheadingsIntoLongSections(markdown: string, targetWordCount?: number): string {
   if (Number.isFinite(targetWordCount) && Number(targetWordCount) <= 1200) {
     return String(markdown || '').trim();
@@ -2645,7 +2716,7 @@ export async function generateArticleFromOutlineWithSharedCore(
 
   fullContent = removeDuplicateTitleAtStart(fullContent, params.outline.title);
   fullContent = insertSubheadingsIntoLongSections(fullContent, params.targetWordCount);
-  fullContent = trimDanglingTailSafe(formatReadableParagraphs(fullContent));
+  fullContent = trimDanglingTailSafe(formatArticleBodyForReadability(formatReadableParagraphs(fullContent)));
   // まとめセクション保険は最後に一度だけ実行
   fullContent = ensureSummarySection(fullContent, params.outline);
   if (params.targetWordCount && params.targetWordCount > 0) {
@@ -2660,14 +2731,14 @@ export async function generateArticleFromOutlineWithSharedCore(
       params.customInstructions,
       FINAL_ARTICLE_WORD_COUNT_TOLERANCE
     );
-    fullContent = trimDanglingTailSafe(formatReadableParagraphs(fullContent));
+    fullContent = trimDanglingTailSafe(formatArticleBodyForReadability(formatReadableParagraphs(fullContent)));
   }
   fullContent = repairHeadingBodiesFromGeneratedSections(fullContent, sectionsWithContent);
   if (hasHeadingWithoutBody(fullContent)) {
-    const restored = trimDanglingTailSafe(formatReadableParagraphs(ensureSummarySection(
+    const restored = trimDanglingTailSafe(formatArticleBodyForReadability(formatReadableParagraphs(ensureSummarySection(
       assembleArticleMarkdown(sectionsWithContent),
       params.outline
-    )));
+    ))));
     if (!hasHeadingWithoutBody(restored)) {
       fullContent = restored;
     }

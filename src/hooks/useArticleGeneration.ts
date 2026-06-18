@@ -28,7 +28,7 @@ export function useArticleGeneration() {
     genLogger.info('Article generation started', options);
 
     try {
-      toast.loading('險倅ｺ九ｒ逕滓・荳ｭ...', { duration: 3000 });
+      toast.loading('記事を生成中...', { duration: 3000 });
 
       const article = await multiStepGenerationService.generateArticleAuto(options.keywords, {
         targetLength: options.length || 'medium',

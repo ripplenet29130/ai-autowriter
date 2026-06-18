@@ -22,8 +22,8 @@ import {
 } from '../shared/autoModeQuality';
 
 /**
- * 繝槭Ν繝√せ繝・ャ繝苓ｨ倅ｺ狗函謌舌し繝ｼ繝薙せ
- * 繝医Ξ繝ｳ繝牙・譫・竊・繧｢繧ｦ繝医Λ繧､繝ｳ逕滓・ 竊・繧ｻ繧ｯ繧ｷ繝ｧ繝ｳ蛻･譛ｬ譁・函謌・竊・險倅ｺ狗ｵ・∩遶九※
+ * マルチステップ記事生成サービス
+ * トレンド分析 → アウトライン生成 → セクション別本文生成 → 記事組み立て
  */
 export class MultiStepGenerationService {
     private compactInstructions(parts: Array<string | undefined | null | false>): string | undefined {
@@ -246,7 +246,7 @@ export class MultiStepGenerationService {
     }
 
     /**
-     * Step 1: 繝医Ξ繝ｳ繝牙・譫・
+     * Step 1: トレンド分析
      */
     async analyzeTrends(keywords: string[]): Promise<TrendAnalysisResult> {
         try {
@@ -272,7 +272,7 @@ export class MultiStepGenerationService {
     }
 
     /**
-     * Step 2: 繧ｿ繧､繝医Ν譯医ｒ逕滓・
+     * Step 2: タイトル案を生成
      */
     async generateTitles(
         trendData: TrendAnalysisResult,
@@ -289,7 +289,7 @@ export class MultiStepGenerationService {
     }
 
     /**
-     * Step 3: AI縺ｫ繧医ｋ繧｢繧ｦ繝医Λ繧､繝ｳ逕滓・
+     * Step 3: AIによるアウトライン生成
      */
     async generateOutline(
         keywords: string[],
@@ -327,7 +327,7 @@ export class MultiStepGenerationService {
                 outline.title = options.selectedTitle;
             }
 
-            // 繧ｭ繝ｼ繝ｯ繝ｼ繝芽ｨｭ螳壹ｒ菫晏ｭ倥＠縺ｦ縺翫￥
+            // キーワード設定を保存しておく
             outline.keywordPreferences = options?.keywordPreferences;
             outline = this.ensureFinalSummarySection(outline);
 
@@ -340,7 +340,7 @@ export class MultiStepGenerationService {
     }
 
     /**
-     * Step 4: 繧ｻ繧ｯ繧ｷ繝ｧ繝ｳ蛻･縺ｫ譛ｬ譁・ｒ逕滓・
+     * Step 4: セクション別に本文を生成
      */
     async generateSections(
         outline: ArticleOutline,
@@ -356,7 +356,7 @@ export class MultiStepGenerationService {
             const sectionContents = new Map<string, string>();
             const totalSections = outline.sections.length;
 
-            // 蜈ｨ菴捺ｧ区・繧偵ユ繧ｭ繧ｹ繝亥喧縺励※AI縺ｫ貂｡縺帙ｋ繧医≧縺ｫ縺吶ｋ
+            // 全体構成をテキスト化してAIに渡せるようにする
             const totalOutlineStr = outline.sections
                 .map(s => `${s.level === 1 ? 'H1: ' : s.level === 2 ? 'H2: ' : 'H3: '}${s.title}`)
                 .join('\n');
@@ -377,17 +377,17 @@ export class MultiStepGenerationService {
                     outline,
                     previousSections: outline.sections.slice(0, i),
                     tone: options?.tone || 'professional',
-                    // 繝上う繝悶Μ繝・ラ繝ｻ繧ｳ繝ｳ繝・く繧ｹ繝育畑縺ｮ霑ｽ蜉諠・ｱ
+                    // ハイブリッド・コンテキスト用の追加情報
                     totalOutline: totalOutlineStr,
                     previousContent: accumulatedContent,
                     customInstructions: options?.customInstructions
-                } as any); // 蝙句ｮ夂ｾｩ繧呈僑蠑ｵ縺吶ｋ縺九く繝｣繧ｹ繝・
+                } as any); // 型定義を拡張するためキャスト
 
                 sectionContents.set(section.id, content);
                 section.content = content;
                 section.isGenerated = true;
 
-                // 譁・ц邯ｭ謖∫畑縺ｫ莉雁屓縺ｮ蜀・ｮｹ繧定塘遨搾ｼ磯聞縺吶℃繧九→繝励Ο繝ｳ繝励ヨ繧貞悸霑ｫ縺吶ｋ縺ｮ縺ｧ逶ｴ霑大・縺ｮ縺ｿ縺ｫ邨槭ｋ縺ｪ縺ｩ縺ｮ隱ｿ謨ｴ繧ょ庄・・
+                // 文脈維持用に今回の内容を蓄積する
                 accumulatedContent += `\n\n${content}`;
 
                 // 螳御ｺ・ｒ騾夂衍
@@ -407,7 +407,7 @@ export class MultiStepGenerationService {
     }
 
     /**
-     * 蛟句挨繧ｻ繧ｯ繧ｷ繝ｧ繝ｳ縺ｮ譛ｬ譁・ｒ逕滓・
+     * 個別セクションの本文を生成
      */
     async generateSection(request: SectionGenerationRequest & { totalOutline?: string; previousContent?: string; customInstructions?: string }): Promise<string> {
         const { section, outline, previousSections, tone, totalOutline, previousContent, customInstructions } = request;
@@ -425,30 +425,30 @@ export class MultiStepGenerationService {
                 selectedTitle: outline.title,
                 keywords: effectiveKeywords,
                 tone,
-                targetWordCount: section.estimatedWordCount, // 謗ｨ螳壽枚蟄玲焚繧偵ち繝ｼ繧ｲ繝・ヨ縺ｫ縺吶ｋ
+                targetWordCount: section.estimatedWordCount, // 推定文字数をターゲットにする
                 totalOutline: totalOutline,
                 previousContent: previousContent,
                 includeIntroduction: false,
                 includeConclusion: false,
                 includeSources: false,
                 keywordPreferences: outline.keywordPreferences,
-                length: 'medium', // 繝輔か繝ｼ繝ｫ繝舌ャ繧ｯ逕ｨ
-                isLead: section.isLead, // 繝ｪ繝ｼ繝画枚繝輔Λ繧ｰ繧呈ｸ｡縺・
+                length: 'medium', // フォールバック用
+                isLead: section.isLead, // リード文フラグを渡す
                 customInstructions: customInstructions
             });
 
-            // 隕句・縺励Ξ繝吶Ν縺ｫ蠢懊§縺溘・繝ｬ繝輔ぅ繝・け繧ｹ・磯壼ｸｸ縺ｯH2・・
+            // 見出しレベルに応じたプレフィックス（通常はH2）
             const prefix = '## ';
 
-            // 譛ｬ譁・°繧牙・鬆ｭ縺ｮ驥崎､・＠縺溯ｦ句・縺励ユ繧ｭ繧ｹ繝医↑縺ｩ繧帝勁蜴ｻ・亥ｿｵ縺ｮ縺溘ａ・・
+            // 本文から冒頭の重複した見出しテキストなどを除去
             let cleanContent = result.content.trim();
-            // 繧ゅ＠AI縺後・# 隕句・縺励阪・蠖｢蠑上〒蜃ｺ蜉帙＠縺ｦ縺励∪縺｣縺溘ｉ髯､蜴ｻ
+            // AIが「# 見出し」の形式で出力した場合は除去
             if (cleanContent.startsWith('#')) {
                 cleanContent = cleanContent.replace(/^#+\s*.*?\n/, '').trim();
             }
             cleanContent = this.formatReadableParagraphs(cleanContent);
 
-            // 繝ｪ繝ｼ繝画枚縺ｮ蝣ｴ蜷医・隕句・縺励ｒ莉倅ｸ弱＠縺ｪ縺・
+            // リード文の場合は見出しを付与しない
             if (section.isLead) {
                 return cleanContent;
             }
@@ -509,7 +509,7 @@ export class MultiStepGenerationService {
     }
 
     /**
-     * 閾ｪ蜍輔Δ繝ｼ繝臥畑
+     * 自動モード用
      */
     async generateArticleAuto(
         keywords: string[],

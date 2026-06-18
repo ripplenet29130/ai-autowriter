@@ -3,6 +3,7 @@ import { DOMParser } from 'https://deno.land/x/deno_dom/deno-dom-wasm.ts';
 import { DEFAULT_TARGET_WORD_COUNT } from '../../../src/shared/generationPolicy.ts';
 import {
   countGeneratedChars,
+  formatArticleBodyForReadability,
   generateOutlineWithAutoModeStyle,
   insertSubheadingsIntoLongSections,
 } from '../../../src/shared/articleGenerationCore.ts';
@@ -12,6 +13,7 @@ import {
   compactAutoModeInstructions,
   evaluateAutoOutlineQuality,
 } from '../../../src/shared/autoModeQuality.ts';
+import { DEFAULT_FACT_CHECK_MAX_ITEMS, selectFactCheckItems } from '../../../src/shared/factCheckCore.ts';
 import { generateTitleSuggestionsWithSharedCore } from '../../../src/shared/titleGenerationCore.ts';
 import {
   applyFactCheckCorrections,
@@ -29,11 +31,6 @@ const parseBoolean = (value: unknown, fallback = false): boolean => {
   if (value == null || value === '') return fallback;
   const normalized = String(value).trim().toLowerCase();
   return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on';
-};
-
-const parseNumber = (value: unknown, fallback: number): number => {
-  const n = Number(value);
-  return Number.isFinite(n) ? n : fallback;
 };
 
 const SCHEDULE_EXECUTION_LOCK_TTL_SECONDS = 20 * 60;
@@ -2246,10 +2243,10 @@ async function executeSchedule(
     console.log('Skipping heading regeneration to avoid timeout', { elapsedSeconds: Math.round(elapsedForHeadingMs / 1000) });
   }
 
-  // === Step 4: 陷讎奇ｽｺ・ｦ郢ｧ・ｯ郢晢ｽｪ郢晢ｽｼ郢晢ｽｳ郢ｧ・｢郢昴・繝ｻ繝ｻ繝ｻI隰暦ｽｨ隰ｨ・ｲ郢晢ｽｻ髫募唱繝ｻ邵ｺ諤懊・騾墓ｻ薙・邵ｺ・ｧ陷閧ｴ・ｷ・ｷ陷茨ｽ･邵ｺ蜉ｱ笳・撻・ｴ陷ｷ蛹ｻ繝ｻ闖ｫ譎槫験繝ｻ繝ｻ===
+  // === Step 4: Clean up generated content before publishing ===
   fullContent = cleanupContentArtifacts(fullContent, articleTitle);
 
-  // 4.6 驛｢譎・ｽｼ譁撰ｼ憺Δ・ｧ繝ｻ・ｯ驛｢譎冗樟郢晢ｽ｡驛｢・ｧ繝ｻ・ｧ驛｢譏ｴ繝ｻ邵ｺ鬘梧･懆ｲ・ｽｯ繝ｻ・｡陟募ｨｯ繝ｻ髫ｴ螟ｲ・ｽ・｡髣比ｼ夲ｽｽ・ｶ髯具ｽｻ郢晢ｽｻ繝ｻ・ｲ郢晢ｽｻ
+  // 4.6 Run fact-check as a pre-publish safety step.
   let finalPostStatus = schedule.post_status || 'draft';
   let factCheckReport = null;
   let factCheckItemsChecked = 0;
@@ -2265,7 +2262,7 @@ async function executeSchedule(
     console.log(`Starting fact-check for article: ${articleTitle}`);
 
     try {
-      // 郢晁ｼ斐＜郢ｧ・ｯ郢晏現繝｡郢ｧ・ｧ郢昴・縺鷹坎・ｭ陞ｳ螢ｹ・定愾髢・ｾ證ｦ・ｼ繝ｻser_id 邵ｺ讙寂伯邵ｺ繝ｻ・ｰ・ｴ陷ｷ蛹ｻ・らｹｧ・ｰ郢晢ｽｭ郢晢ｽｼ郢晁・ﾎ晞坎・ｭ陞ｳ螢ｹ縲堤ｹ晁ｼ斐°郢晢ｽｼ郢晢ｽｫ郢晁・繝｣郢ｧ・ｯ繝ｻ繝ｻ
+      // Prefer account-scoped user settings, then fall back to account app_settings.
       const scheduleUserId = (schedule as any).user_id;
       const scheduleAccountId = (schedule as any).account_id;
       let factCheckSettings: any = null;
@@ -2296,7 +2293,6 @@ async function executeSchedule(
             'perplexity_api_key',
             'fact_check_enabled',
             'fact_check_model_name',
-            'fact_check_max_items',
             'fact_check_auto_fix_enabled',
           ]);
 
@@ -2318,7 +2314,7 @@ async function executeSchedule(
               enabled: true,
               perplexity_api_key: apiKey,
               model_name: map.get('fact_check_model_name') || 'sonar',
-              max_items_to_check: parseNumber(map.get('fact_check_max_items'), 10),
+              max_items_to_check: DEFAULT_FACT_CHECK_MAX_ITEMS,
               auto_fix_enabled: parseBoolean(map.get('fact_check_auto_fix_enabled'), false),
             } as any;
           }
@@ -2327,15 +2323,15 @@ async function executeSchedule(
 
       if (factCheckSettings?.enabled && factCheckSettings?.perplexity_api_key) {
         factCheckExecuted = true;
-        // 鬮ｫ・ｪ陋溘・・ｽ・ｺ闕ｵ謨厄ｽｰ驛｢・ｧ陝ｲ・ｨ郢晢ｽｵ驛｢・ｧ繝ｻ・｡驛｢・ｧ繝ｻ・ｯ驛｢譎乗ｲｺ郢晢ｽ･髯懶ｽ｣繝ｻ・ｱ驛｢・ｧ陷ｻ蝓滂ｽｭ讌｢諤弱・・ｺ
+        // Extract likely factual claims from the generated article.
         const factsToCheck = await extractFactsFromContent(fullContent, (schedule as any).fact_check_note);
-        const maxItems = factCheckSettings.max_items_to_check || 50;
-        const itemsToCheck = factsToCheck.slice(0, maxItems);
+        const maxItems = DEFAULT_FACT_CHECK_MAX_ITEMS;
+        const itemsToCheck = selectFactCheckItems(factsToCheck, maxItems);
         factCheckItemsChecked = itemsToCheck.length;
 
         console.log(`Found ${factsToCheck.length} facts, checking top ${itemsToCheck.length} in batches`);
 
-        // 郢晁・繝｣郢昶扱・､諛・ｽｨ・ｼ陞ｳ貅ｯ・｡魃会ｽｼ繝ｻ闔会ｽｶ邵ｺ螢ｹ笆ｽ繝ｻ繝ｻ
+        // Verify claims in batches.
         let factCheckResults = await verifyFactsBatch(
           itemsToCheck,
           factCheckSettings.perplexity_api_key,
@@ -2344,7 +2340,7 @@ async function executeSchedule(
           5
         );
 
-        // 鬩･讎奇ｽ､・ｧ邵ｺ・ｪ髫ｱ・､郢ｧ鄙ｫ・堤ｹｧ・ｫ郢ｧ・ｦ郢晢ｽｳ郢昴・
+        // Count critical and minor issues before optional auto-fix.
         const criticalIssues = factCheckResults.filter(r =>
           r.verdict === 'incorrect' && r.confidence >= 70
         ).length;
@@ -2392,7 +2388,7 @@ async function executeSchedule(
               }
             }
             const recheckFacts = await extractFactsFromContent(fullContent, (schedule as any).fact_check_note);
-            const recheckItems = recheckFacts.slice(0, maxItems);
+            const recheckItems = selectFactCheckItems(recheckFacts, maxItems);
             factCheckResults = await verifyFactsBatch(
               recheckItems,
               factCheckSettings.perplexity_api_key,
@@ -2416,7 +2412,7 @@ async function executeSchedule(
           }
         }
 
-        // 隴夲ｽ｡闔会ｽｶ陋ｻ繝ｻ・ｲ繝ｻ 鬩･讎奇ｽ､・ｧ邵ｺ・ｪ髫ｱ・､郢ｧ鄙ｫ窶ｲ邵ｺ繧・ｽ檎ｸｺ・ｰ陟托ｽｷ陋ｻ・ｶ騾ｧ繝ｻ竊楢叉蛹ｺ蠍檎ｸｺ繝ｻ
+        // Recalculate issue counts after optional auto-fix.
         const criticalIssuesAfterFix = factCheckResults.filter(r =>
           r.verdict === 'incorrect' && r.confidence >= 70
         ).length;
@@ -2433,7 +2429,7 @@ async function executeSchedule(
           factCheckAlerts.push(`重大なファクトチェック指摘が残っています（${criticalIssuesAfterFix}件）。下書きに変更しました。`);
         }
 
-        // 驍ｨ蜈域｣｡郢ｧ蜑・ｽｿ譎擾ｽｭ繝ｻ
+        // Save the fact-check report for execution history and alerts.
         const { data: savedReport } = await supabase.from('fact_check_results').insert({
           account_id: scheduleAccountId,
           schedule_id: schedule.id,
@@ -2452,19 +2448,19 @@ async function executeSchedule(
       console.error('Fact-check failed:', factCheckError);
       const errorText = factCheckError instanceof Error ? factCheckError.message : String(factCheckError || '');
       factCheckAlerts.push(`ファクトチェックに失敗しました: ${errorText}`);
-      // 驛｢譎・ｽｼ譁撰ｼ憺Δ・ｧ繝ｻ・ｯ驛｢譎冗樟郢晢ｽ｡驛｢・ｧ繝ｻ・ｧ驛｢譏ｴ繝ｻ邵ｺ驢搾ｽｹ・ｧ繝ｻ・ｨ驛｢譎｢・ｽ・ｩ驛｢譎｢・ｽ・ｼ驍ｵ・ｺ繝ｻ・ｯ髯ｷ闌ｨ・ｽ・ｨ髣厄ｽｴ髦ｮ蜷ｶ繝ｻ髯ｷ繝ｻ・ｽ・ｦ鬨ｾ繝ｻ繝ｻ繝ｻ螳夲ｽｱ繝ｻ・ｽ・｢驛｢・ｧ遶丞｣ｺ繝ｻ驍ｵ・ｺ郢晢ｽｻ
+      // Keep the generated article and notify through the configured alert flow.
     }
   }
 
-  // 4.7 [[]]鬮ｫ・ｪ闖ｫ・ｶ繝ｻ・ｳ髴域鱒繝ｻ驛｢・ｧ繝ｻ・ｯ驛｢譎｢・ｽ・ｪ驛｢譎｢・ｽ・ｼ驛｢譎｢・ｽ・ｳ驛｢・ｧ繝ｻ・｢驛｢譏ｴ繝ｻ郢晢ｽｻ
+  // 4.7 Remove manual fact-check markers before publishing.
   fullContent = fullContent.replace(/\[\[(.+?)\]\]/g, '$1');
   const contentBeforeNormalization = fullContent;
-  fullContent = normalizeGeneratedContentForPublishing(fullContent, articleTitle);
+  fullContent = formatArticleBodyForReadability(normalizeGeneratedContentForPublishing(fullContent, articleTitle));
   if (contentBeforeNormalization !== fullContent) {
     console.log('Normalized generated content structure before publishing');
   }
 
-  // 闖ｫ譎槫験: 鬨ｾ豈費ｽｸ・ｭ陷・ｽｦ騾・・縲帝囎蜿･繝ｻ邵ｺ蜉ｱ窶ｲ陞滂ｽｧ邵ｺ髦ｪ・･隹ｺ・ｰ髣懶ｽｽ邵ｺ蜉ｱ笳・撻・ｴ陷ｷ蛹ｻ繝ｻ邵ｲ竏ｫ蜃ｽ隰悟鴻蟲ｩ陟募ｾ後・髫募唱繝ｻ邵ｺ邇ｲ・ｧ遏ｩﾂ・ｰ邵ｺ・ｸ郢晁ｼ斐°郢晢ｽｼ郢晢ｽｫ郢晁・繝｣郢ｧ・ｯ邵ｺ蜷ｶ・・
+  // Final cleanup: remove empty lines between list items after fact-check edits.
   const baselineNormalizedContent = normalizeGeneratedContentForPublishing(baseGeneratedContent, articleTitle);
   const baselineHeadingCount = countNonSummaryHeadings(baselineNormalizedContent);
   const finalHeadingCount = countNonSummaryHeadings(fullContent);
@@ -2479,7 +2475,7 @@ async function executeSchedule(
   }
 
   const finalCharsBeforeCompaction = countGeneratedChars(fullContent);
-  fullContent = compactArticleToTargetLength(fullContent, targetWordCount);
+  fullContent = formatArticleBodyForReadability(compactArticleToTargetLength(fullContent, targetWordCount));
   const finalCharsAfterCompaction = countGeneratedChars(fullContent);
   if (finalCharsAfterCompaction < finalCharsBeforeCompaction) {
     console.log(`Compacted article length: ${finalCharsBeforeCompaction} -> ${finalCharsAfterCompaction}`);
@@ -2487,7 +2483,7 @@ async function executeSchedule(
 
   validateGeneratedArticleCompleteness(fullContent, outline, targetWordCount);
 
-  // 5. WordPress隰壽・・ｨ・ｿ繝ｻ莠･・､・ｱ隰ｨ邇ｲ蜃ｾ郢ｧ繧奇ｽｨ蛟・ｽｺ荵昴○郢晉ｿｫ繝｣郢晏干縺咏ｹ晢ｽｧ郢昴・繝ｨ郢ｧ蜑・ｽｿ譎擾ｽｭ蛛・ｽｼ繝ｻ
+  // 5. Create the WordPress post after cleanup and fact-check.
   let postId: string | null = null;
   let publishErrorMessage: string | null = null;
   let publishedAtIso: string | null = null;
@@ -2529,11 +2525,11 @@ async function executeSchedule(
     publishedAt: publishedAtIso,
   });
 
-  // 5.5 Chatwork鬨ｾ螟り｡阪・蝓溷・驕橸ｽｿ隰御ｻ咏ｲ･隴弱ｅ繝ｻ邵ｺ・ｿ繝ｻ繝ｻ
+  // 5.5 Send the standard ChatWork publication notification.
   if (postId && schedule.chatwork_room_id && chatworkApiToken) {
     console.log(`Sending Chatwork notification to rooms: ${schedule.chatwork_room_id}`);
     try {
-      const postUrl = `${wpConfig.url}/?p=${postId}`; // 驍・ｽ｡隴丞｡ｫRL
+      const postUrl = `${wpConfig.url}/?p=${postId}`; // Public URL
       await sendChatworkNotifications(
         chatworkApiToken,
         schedule.chatwork_room_id,
@@ -2545,7 +2541,7 @@ async function executeSchedule(
       );
     } catch (cwError) {
       console.error('Chatwork notification failed:', cwError);
-      // 鬨ｾ螟り｡崎棔・ｱ隰ｨ蜉ｱ繝ｻ陷茨ｽｨ闖ｴ轣假ｽ､・ｱ隰ｨ蜉ｱ竊鍋ｸｺ蜉ｱ竊醍ｸｺ繝ｻ
+      // Build title and message.
     }
   }
 
@@ -3612,6 +3608,7 @@ async function generateSchedulerArticleSinglePass(params: {
     '- Separate EVERY paragraph with a blank line (one empty line between paragraphs).',
     '- Separate headings from surrounding paragraphs with a blank line.',
     '- Avoid unfinished sentences and placeholder text.',
+    '- Never output only headings or an outline. Every heading must be followed by body text before the next heading.',
     '',
     'Outline (indented entries = H3 sub-sections):',
     outlineText,
@@ -3652,11 +3649,42 @@ async function generateSchedulerArticleSinglePass(params: {
     }
   }
 
-  const fullContent = String(rawText || '').trim();
+  let fullContent = formatArticleBodyForReadability(String(rawText || '').trim());
   if (!fullContent) {
     throw new Error('Single-pass article generation returned empty content');
   }
-  validateGeneratedArticleCompleteness(fullContent, params.outline, params.targetWordCount);
+  try {
+    validateGeneratedArticleCompleteness(fullContent, params.outline, params.targetWordCount);
+  } catch (validationError) {
+    const message = validationError instanceof Error ? validationError.message : String(validationError || '');
+    const shouldRetry =
+      message.includes('headings without body text') ||
+      message.includes('missing headings') ||
+      message.includes('too short');
+
+    if (!shouldRetry) {
+      throw validationError;
+    }
+
+    const retryPrompt = [
+      prompt,
+      '',
+      'Retry instructions:',
+      '- The previous output failed quality validation because one or more headings had no body text.',
+      '- Do not return an outline. Write the finished article body.',
+      '- After every "##" or "###" heading, write at least two complete Japanese sentences before the next heading.',
+      '- If the length is tight, make each section shorter, but never leave a heading blank.',
+    ].join('\n');
+    const retryMaxTokens = Math.min(16000, Math.ceil(maxTokens * 1.5));
+    console.warn(`[singlepass] Article validation failed; retrying with stricter body instructions: ${message}`);
+
+    const retryText = await callAI(retryPrompt, params.aiConfig, retryMaxTokens);
+    fullContent = formatArticleBodyForReadability(String(retryText || '').trim());
+    if (!fullContent) {
+      throw validationError;
+    }
+    validateGeneratedArticleCompleteness(fullContent, params.outline, params.targetWordCount);
+  }
 
   return {
     sectionsWithContent: [],

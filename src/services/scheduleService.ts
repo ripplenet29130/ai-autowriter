@@ -190,6 +190,52 @@ class ScheduleService {
         return null;
     }
 
+    private async ensureSingleSchedulePerWordPress(
+        wpConfigId: string,
+        accountId: string,
+        excludeScheduleId?: string
+    ): Promise<void> {
+        if (!supabase) {
+            throw new Error('Supabase is not initialized');
+        }
+
+        let query = supabase
+            .from('schedule_settings')
+            .select('id')
+            .eq('wp_config_id', wpConfigId)
+            .eq('account_id', accountId)
+            .limit(1);
+
+        if (excludeScheduleId) {
+            query = query.neq('id', excludeScheduleId);
+        }
+
+        const { data, error } = await query.maybeSingle();
+
+        if (error) {
+            throw new Error(`既存スケジュールの確認に失敗しました: ${this.getErrorText(error)}`);
+        }
+
+        if (data?.id) {
+            throw new Error('このWordPress設定には既に予約投稿スケジュールがあります。既存のスケジュールを編集してください。');
+        }
+    }
+
+    private isSchedulePerWordPressConstraintError(error: any): boolean {
+        const text = this.getErrorText(error).toLowerCase();
+        return error?.code === '23505'
+            && (
+                text.includes('idx_schedule_settings_account_wp_config_unique')
+                || text.includes('schedule_settings_account_wp_config_unique')
+                || text.includes('idx_schedule_settings_wp_config_unique')
+                || text.includes('schedule_settings_wp_config_unique')
+                || text.includes('idx_schedule_settings_account_wordpress_config_unique')
+                || text.includes('schedule_settings_account_wordpress_config_unique')
+                || text.includes('idx_schedule_settings_wordpress_config_unique')
+                || text.includes('schedule_settings_wordpress_config_unique')
+            );
+    }
+
     async createSchedule(schedule: Omit<ScheduleSetting, 'id' | 'created_at' | 'updated_at'>): Promise<ScheduleSetting> {
         if (!supabase) {
             throw new Error('Supabase is not initialized');
@@ -197,6 +243,7 @@ class ScheduleService {
 
         await this.ensureWpConfigReference(schedule.wp_config_id);
         const accountId = getRequiredAccountId();
+        await this.ensureSingleSchedulePerWordPress(schedule.wp_config_id, accountId);
 
         let currentUserId: string | null = null;
         try {
@@ -282,6 +329,10 @@ class ScheduleService {
                 }
             }
 
+            if (this.isSchedulePerWordPressConstraintError(error)) {
+                throw new Error('このWordPress設定には既に予約投稿スケジュールがあります。既存のスケジュールを編集してください。');
+            }
+
             console.error('Error creating schedule:', error);
             throw new Error(`スケジュールの作成に失敗しました: ${this.getErrorText(error)}`);
         }
@@ -339,6 +390,9 @@ class ScheduleService {
             await this.ensureWpConfigReference(updates.wp_config_id);
         }
         const accountId = getRequiredAccountId();
+        if (typeof updates.wp_config_id === 'string' && updates.wp_config_id.trim().length > 0) {
+            await this.ensureSingleSchedulePerWordPress(updates.wp_config_id, accountId, id);
+        }
 
         let currentUserId: string | null = null;
         try {
@@ -409,6 +463,10 @@ class ScheduleService {
                     updatePayload = nextPayload;
                     continue;
                 }
+            }
+
+            if (this.isSchedulePerWordPressConstraintError(error)) {
+                throw new Error('このWordPress設定には既に予約投稿スケジュールがあります。既存のスケジュールを編集してください。');
             }
 
             console.error('Error updating schedule:', error);
