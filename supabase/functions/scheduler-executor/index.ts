@@ -15,6 +15,7 @@ import {
 } from '../../../src/shared/autoModeQuality.ts';
 import { DEFAULT_FACT_CHECK_MAX_ITEMS, selectFactCheckItems } from '../../../src/shared/factCheckCore.ts';
 import { generateTitleSuggestionsWithSharedCore } from '../../../src/shared/titleGenerationCore.ts';
+import { normalizeAiModel, supportsTemperature } from '../../../src/shared/aiModelCatalog.ts';
 import {
   applyFactCheckCorrections,
   extractFactsFromContent,
@@ -182,21 +183,9 @@ interface AIConfig {
 
 type WritingTone = 'professional' | 'casual';
 
-const INVALID_GEMINI_MODELS = new Set([
-  'gemini-1.0-pro',
-  'gemini-1.5-pro-latest',
-  'gemini-2.0-flash',
-  'gemini-2.0-flash-001',
-  'gemini-3.0-pro',
-  'gemini-3.0-flash',
-]);
-
 function normalizeAiConfig(config: AIConfig): AIConfig {
   const provider = String(config.provider || '').toLowerCase();
-  if (provider !== 'gemini') return config;
-  const model = String(config.model || '').replace(/^models\//, '');
-  if (model && !INVALID_GEMINI_MODELS.has(model)) return { ...config, model };
-  return { ...config, model: 'gemini-2.5-flash' };
+  return { ...config, model: normalizeAiModel(provider, config.model) };
 }
 
 function resolveWritingTone(value: unknown): WritingTone {
@@ -1318,6 +1307,9 @@ function resolveAiModelRate(provider: string, model: string): ModelRate {
 
   // USD per 1M tokens. Values are rough estimation for budgeting.
   if (p === 'openai') {
+    if (m.includes('gpt-5.5')) return { input: 5.00, output: 30.00 };
+    if (m.includes('gpt-5.4-mini')) return { input: 0.75, output: 4.50 };
+    if (m.includes('gpt-5.4')) return { input: 2.50, output: 15.00 };
     if (m.includes('gpt-5') && m.includes('mini')) return { input: 0.30, output: 2.50 };
     if (m.includes('gpt-5')) return { input: 1.25, output: 10.00 };
     if (m.includes('gpt-4o-mini')) return { input: 0.15, output: 0.60 };
@@ -1325,11 +1317,16 @@ function resolveAiModelRate(provider: string, model: string): ModelRate {
     return { input: 0.30, output: 2.50 };
   }
   if (p === 'gemini') {
+    if (m.includes('3.5-flash')) return { input: 1.50, output: 9.00 };
+    if (m.includes('3.1-pro')) return { input: 2.00, output: 12.00 };
+    if (m.includes('3.1-flash-lite')) return { input: 0.25, output: 1.50 };
     if (m.includes('2.5-pro')) return { input: 1.25, output: 10.00 };
     if (m.includes('2.5-flash')) return { input: 0.30, output: 2.50 };
     return { input: 0.30, output: 2.50 };
   }
   if (p === 'claude') {
+    if (m.includes('opus-4-8')) return { input: 5.00, output: 25.00 };
+    if (m.includes('haiku-4-5')) return { input: 1.00, output: 5.00 };
     if (m.includes('opus')) return { input: 15.00, output: 75.00 };
     if (m.includes('haiku')) return { input: 0.80, output: 4.00 };
     return { input: 3.00, output: 15.00 };
@@ -1429,8 +1426,8 @@ async function callAI(
       body: JSON.stringify({
         model,
         messages: [{ role: 'user', content: prompt }],
-        temperature,
-        max_tokens: resolvedMaxTokens,
+        max_completion_tokens: resolvedMaxTokens,
+        ...(supportsTemperature('openai', model) ? { temperature } : {}),
       }),
     });
 
@@ -1466,8 +1463,8 @@ async function callAI(
       body: JSON.stringify({
         model,
         max_tokens: resolvedMaxTokens,
-        temperature,
         messages: [{ role: 'user', content: prompt }],
+        ...(supportsTemperature('claude', model) ? { temperature } : {}),
       }),
     });
 
@@ -3535,7 +3532,7 @@ function compactArticleToTargetLength(content: string, targetWordCount: number):
   const blocks = text.split(/\n{2,}/).map((block) => block.trim()).filter(Boolean);
   const compacted: string[] = [];
   for (const block of blocks) {
-    const isHeading = /^#{1,6}\s+/.test(block) || /^<h[1-6][^>]*>/i.test(block);
+    const isHeading = isHeadingLine(block);
     if (isHeading) {
       compacted.push(block);
       continue;
@@ -3554,18 +3551,54 @@ function compactArticleToTargetLength(content: string, targetWordCount: number):
   text = compacted.join('\n\n').trim();
   if (countGeneratedChars(text) <= maxChars) return text;
 
-  const shortened: string[] = [];
-  let current = 0;
+  const sections: Array<{ blocks: string[]; isSummary: boolean; hasHeading: boolean }> = [];
   for (const block of compacted) {
-    const length = countGeneratedChars(block);
-    if (!/^#{1,6}\s+/.test(block) && current + length > maxChars) {
+    if (isHeadingLine(block)) {
+      sections.push({
+        blocks: [block],
+        isSummary: isSummaryHeadingText(extractHeadingText(block)),
+        hasHeading: true,
+      });
       continue;
     }
-    shortened.push(block);
-    current += length;
+
+    const currentSection = sections[sections.length - 1];
+    if (currentSection) {
+      currentSection.blocks.push(block);
+    } else {
+      sections.push({ blocks: [block], isSummary: false, hasHeading: false });
+    }
   }
 
-  return shortened.join('\n\n').trim() || text;
+  const summaryCharBudget = sections
+    .filter((section) => section.isSummary)
+    .reduce((sum, section) => sum + countGeneratedChars(section.blocks.join('\n\n')), 0);
+  const nonSummaryMaxChars = Math.max(0, maxChars - summaryCharBudget);
+  const shortenedSections: string[][] = [];
+  let nonSummaryChars = 0;
+
+  for (const section of sections) {
+    const sectionText = section.blocks.join('\n\n');
+    const sectionChars = countGeneratedChars(sectionText);
+
+    if (section.isSummary) {
+      shortenedSections.push(section.blocks);
+      continue;
+    }
+
+    if (section.hasHeading && section.blocks.length <= 1) {
+      continue;
+    }
+
+    if (nonSummaryChars + sectionChars > nonSummaryMaxChars) {
+      continue;
+    }
+
+    shortenedSections.push(section.blocks);
+    nonSummaryChars += sectionChars;
+  }
+
+  return shortenedSections.flat().join('\n\n').trim() || text;
 }
 
 async function generateSchedulerArticleSinglePass(params: {
@@ -3584,8 +3617,8 @@ async function generateSchedulerArticleSinglePass(params: {
     .slice(0, 6)
     .join(', ');
   const toneInstruction = params.tone === 'casual'
-    ? 'Tone: natural, approachable Japanese. Use desu/masu consistently, but do not sound childish.'
-    : 'Tone: natural professional Japanese for business readers. Write like answering a reader consultation. Avoid stiff manual-like prose, sales copy, and overusing overly polite phrases such as 「いたします」「させていただきます」「となります」.';
+    ? 'Tone: natural, approachable Japanese. Use desu/masu consistently, but do not sound childish. Keep sentences short and easy to follow.'
+    : 'Tone: natural professional Japanese for business readers. Write like an experienced practitioner answering a reader consultation. Avoid stiff report-like prose, manual-like prose, sales copy, and overusing overly polite phrases such as 「いたします」「させていただきます」「となります」. Keep sentences short, use concrete verbs, and make the next judgment/action clear for the reader.';
   const hardMaxChars = Math.round(params.targetWordCount * 1.2);
   const hardMinChars = Math.round(params.targetWordCount * 0.85);
   const prompt = [
@@ -3605,6 +3638,8 @@ async function generateSchedulerArticleSinglePass(params: {
     '- Write 2 to 3 short lead paragraphs BEFORE the first "##" heading.',
     '- H2 sections: 1-2 paragraphs of body text (2-4 sentences each).',
     '- H3 sections: 1-2 paragraphs of body text (2-4 sentences each). Keep each H3 concise to stay within the character limit.',
+    '- Prefer clear, short Japanese sentences. Split long sentences instead of stacking abstract nouns.',
+    '- Explain technical terms briefly when they may be unfamiliar to a general reader.',
     '- Separate EVERY paragraph with a blank line (one empty line between paragraphs).',
     '- Separate headings from surrounding paragraphs with a blank line.',
     '- Avoid unfinished sentences and placeholder text.',
@@ -3762,7 +3797,7 @@ async function sendChatworkNotifications(
         method: 'POST',
         headers: {
           'X-ChatWorkToken': apiToken,
-          'Content-Type': 'application/x-www-form-urlencoded'
+          'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8'
         },
         body: `body=${encodeURIComponent(body)}`
       });
@@ -4220,27 +4255,27 @@ async function notifyScheduleExecutionFailure(
 
   const reason = formatScheduleFailureReason(error);
   const keyword = getFirstScheduleKeyword(schedule);
-  const template = `[info][title]髢ｾ・ｪ陷榊｢灘・驕橸ｽｿ郢ｧ雋樞酪雎・ｽ｢邵ｺ蜉ｱ竏ｪ邵ｺ蜉ｱ笳・/title]
-郢ｧ・ｹ郢ｧ・ｱ郢ｧ・ｸ郢晢ｽ･郢晢ｽｼ郢晢ｽｫID: ${schedule.id}
-郢ｧ・ｵ郢ｧ・､郢昴・ ${wpConfig.name}
+  const template = `[info][title]予約投稿の実行に失敗しました[/title]
+スケジュールID: ${schedule.id}
+サイト: ${wpConfig.name}
 URL: ${wpConfig.url}
-郢ｧ・ｭ郢晢ｽｼ郢晢ｽｯ郢晢ｽｼ郢昴・ {keyword}
-霑･・ｶ隲ｷ繝ｻ 隰壽・・ｨ・ｿ陋帶㊧・ｭ・｢
+キーワード: {keyword}
+状態: 失敗
 
-騾・・鄂ｰ:
+理由:
 ${reason}
 
-髫ｪ蛟・ｽｺ蜿･蛻髮会ｽｪ郢ｧ雋橸ｽｮ蛹ｻ・狗ｸｺ貅假ｽ∫ｸｲ莉捐rdPress邵ｺ・ｸ邵ｺ・ｮ隰壽・・ｨ・ｿ邵ｺ・ｯ髯ｦ蠕娯夢邵ｺ・ｦ邵ｺ繝ｻ竏ｪ邵ｺ蟶呻ｽ鍋ｸｲ繝ｻAI髫ｪ・ｭ陞ｳ螢ｹﾂ竏壹・郢晢ｽｭ郢晢ｽｳ郢晏干繝ｨ邵ｲ竏壹￥郢晢ｽｼ郢晢ｽｯ郢晢ｽｼ郢晏ｳｨﾂ竏ｬ・ｦ蜿･繝ｻ邵ｺ邇ｲ謫・脂・ｶ郢ｧ蝣､・｢・ｺ髫ｱ髦ｪ・邵ｺ・ｦ邵ｺ荳岩味邵ｺ霈費ｼ樒ｸｲ繝ｻ[/info]`;
+記事生成または品質チェックの段階で停止しました。WordPressへの投稿前に止まっているため、AI生成内容、見出し構成、文字数制限、または品質チェック条件を確認してください。[/info]`;
 
   try {
     await sendChatworkNotifications(
       chatworkApiToken,
       roomIds,
       template,
-      '髢ｾ・ｪ陷榊｢灘・驕橸ｽｿ陋帶㊧・ｭ・｢',
+      '予約投稿の実行に失敗しました',
       wpConfig.url,
       keyword,
-      '隰壽・・ｨ・ｿ陋帶㊧・ｭ・｢'
+      '失敗'
     );
   } catch (notifyError) {
     console.error('Schedule failure notification failed:', notifyError);
@@ -4266,8 +4301,8 @@ function summarizeFactCheckContentChanges(
 
     summaries.push(
       `${summaries.length + 1}. L${i + 1}\n` +
-      `闖ｫ・ｮ雎・ｽ｣陷代・ ${beforeLine || '(驕ｨ・ｺ髯ｦ繝ｻ'}\n` +
-      `闖ｫ・ｮ雎・ｽ｣陟輔・ ${afterLine || '(驕ｨ・ｺ髯ｦ繝ｻ'}`
+      `修正前: ${beforeLine || '(空行)'}\n` +
+      `修正後: ${afterLine || '(空行)'}`
     );
   }
 

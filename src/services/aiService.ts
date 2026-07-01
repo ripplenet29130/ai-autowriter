@@ -9,6 +9,7 @@ import {
 } from "../shared/generationPolicy";
 import { buildSummaryPrompt, buildSupplementPrompt } from "../shared/generationPrompts";
 import { buildHighQualitySectionPrompt } from "../shared/sectionGenerationPrompt";
+import { normalizeAiModel, supportsTemperature } from "../shared/aiModelCatalog";
 import { getCurrentAccountId } from "./accountScope";
 
 /**
@@ -69,19 +70,12 @@ export class AIService {
     }
   }
 
-  // モデル名のバリデーション（無効なモデル名のフォールバック）
+  // 廃止済み・誤形式のモデル名を現行の安全な既定値へ置換
   private validateModelName(provider: string, model: string): string {
-    if (provider !== 'gemini') return model;
-    const normalizedModel = String(model || '').replace(/^models\//, '');
-
-    // 無効なGeminiモデル名を検知して置換
-    // gemini-1.5系などは非推奨。2.0以上を推奨。
-    const invalidModels = ['gemini-1.0-pro', 'gemini-1.5-pro-latest', 'gemini-2.0-flash', 'gemini-2.0-flash-001', 'gemini-3.0-pro', 'gemini-3.0-flash'];
-    if (!normalizedModel || invalidModels.includes(normalizedModel)) {
-      console.warn(`Unsupported Gemini model detected (${model}). Fallback to gemini-2.5-flash.`);
-      return 'gemini-2.5-flash';
+    const normalizedModel = normalizeAiModel(provider, model);
+    if (normalizedModel !== model) {
+      console.warn(`Unsupported or outdated AI model detected (${model}). Fallback to ${normalizedModel}.`);
     }
-
     return normalizedModel;
   }
 
@@ -680,8 +674,8 @@ JSON形式の配列（文字列のみの配列）で出力してください。
           body: JSON.stringify({
             model: model,
             messages: payload.messages,
-            temperature: temperature || 0.7,
-            max_tokens: maxTokens || 16384
+            max_completion_tokens: maxTokens || 16384,
+            ...(supportsTemperature('openai', model) ? { temperature: temperature ?? 0.7 } : {}),
           })
         });
 
@@ -704,8 +698,8 @@ JSON形式の配列（文字列のみの配列）で出力してください。
           body: JSON.stringify({
             model: model,
             messages: payload.messages,
-            temperature: temperature || 0.7,
-            max_tokens: maxTokens || 16384
+            max_tokens: maxTokens || 16384,
+            ...(supportsTemperature('claude', model) ? { temperature: temperature ?? 0.7 } : {}),
           })
         });
 
@@ -817,9 +811,9 @@ JSON形式の配列（文字列のみの配列）で出力してください。
     const toneText = (() => {
       switch (prompt.tone) {
         case "professional":
-          return "専門性は保ちつつ、読者からの相談に答えるような自然で読みやすい文体で書いてください。";
+          return "専門性は保ちつつ、読者からの相談に答えるような自然で読みやすい文体で書いてください。堅い報告書調ではなく、実務者がやさしく説明する温度感にしてください。";
         case "casual":
-          return "親しみやすく、くだけすぎない自然な文体で書いてください。";
+          return "親しみやすく、くだけすぎない自然な文体で書いてください。話し言葉に寄せすぎず、読者がすっと理解できる温度感にしてください。";
         default:
           return "自然で読みやすい日本語で書いてください。";
       }
@@ -883,6 +877,8 @@ ${toneText}
 - 説明書調や営業文ではなく、読者の疑問に落ち着いて答える文章にする
 - 「〜いたします」「〜させていただきます」「〜となります」を多用しない
 - 必要に応じて「〜できます」「〜です」「〜を確認しましょう」のような自然な表現を使う
+- 1文を長くしすぎず、長い文は自然な位置で分ける
+- 抽象的な名詞を続けず、「何をすればよいか」「なぜ必要か」が伝わる具体的な動詞で書く
 
 【目標文字数】
 ${prompt.targetWordCount ? `約${prompt.targetWordCount}文字（±10%）` : lengthText}

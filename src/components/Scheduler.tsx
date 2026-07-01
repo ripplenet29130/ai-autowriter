@@ -7,6 +7,7 @@ import { ScheduleSetting } from '../types';
 import { useAppStore } from '../store/useAppStore';
 import { PromptSetManager } from './AIGenerator/PromptSetManager';
 import { formatSharedTone, getSharedToneDescription, normalizeSharedTone, sharedToneOptions } from '../shared/toneOptions';
+import { getAiModelOptions, getAiModelTierLabel, normalizeAiModel } from '../shared/aiModelCatalog';
 import toast from 'react-hot-toast';
 import { Play } from 'lucide-react';
 
@@ -46,16 +47,7 @@ const DEFAULT_CHATWORK_TEMPLATE = `いつもお世話になっております。
 今後ともよろしくお願いいたします。`;
 
 const getProviderModelOptions = (provider: string): string[] => {
-  if (provider === 'gemini') {
-    return ['gemini-2.5-pro', 'gemini-2.5-flash'];
-  }
-  if (provider === 'openai') {
-    return ['gpt-5.2', 'gpt-5-mini', 'gpt-4.1', 'gpt-4o-mini'];
-  }
-  if (provider === 'claude') {
-    return ['claude-4-5-sonnet-20250929', 'claude-4-5-opus-20251124', 'claude-4-5-haiku-20251015', 'claude-3-5-sonnet-latest'];
-  }
-  return [];
+  return getAiModelOptions(provider).map((option) => option.value);
 };
 
 export const Scheduler: React.FC = () => {
@@ -153,16 +145,6 @@ export const Scheduler: React.FC = () => {
         provider === 'gemini' ? 'Google Gemini' : provider
   );
 
-  const getModelTierLabel = (model: string): string => {
-    if (['gemini-2.5-pro', 'claude-4-5-opus-20251124', 'gpt-5.2', 'gpt-5'].includes(model)) {
-      return '高品質・高単価';
-    }
-    if (['gemini-2.5-flash', 'claude-4-5-sonnet-20250929', 'claude-3-5-sonnet-latest', 'gpt-4.1', 'gpt-4o'].includes(model)) {
-      return 'バランス';
-    }
-    return '低価格・高速';
-  };
-
   // Load schedules and keyword sets on mount
   useEffect(() => {
     loadSchedules();
@@ -189,7 +171,7 @@ export const Scheduler: React.FC = () => {
     if (!base) return;
 
     if (!selectedAiProvider) setSelectedAiProvider(base.provider);
-    if (!selectedAiModel) setSelectedAiModel(base.model);
+    if (!selectedAiModel) setSelectedAiModel(normalizeAiModel(base.provider, base.model));
 
     if (!formData.ai_config_id && base.id) {
       setFormData((prev) => ({ ...prev, ai_config_id: base.id || '' }));
@@ -223,8 +205,9 @@ export const Scheduler: React.FC = () => {
       if (selectedAiProvider !== base.provider) {
         setSelectedAiProvider(base.provider);
       }
-      if (selectedAiModel !== base.model) {
-        setSelectedAiModel(base.model);
+      const normalizedBaseModel = normalizeAiModel(base.provider, base.model);
+      if (selectedAiModel !== normalizedBaseModel) {
+        setSelectedAiModel(normalizedBaseModel);
       }
       return;
     }
@@ -396,11 +379,11 @@ export const Scheduler: React.FC = () => {
     const isUsingDefault = !hasAiOverride && Boolean(activeAiConfig?.id && schedule.ai_config_id === activeAiConfig.id);
     const overrideProvider = schedule.ai_provider_override || selectedConfig?.provider || activeAiConfig?.provider || '';
     const fallbackModels = getProviderModelOptions(overrideProvider);
-    const overrideModel = schedule.ai_model_override
+    const overrideModel = normalizeAiModel(overrideProvider, schedule.ai_model_override
       || selectedConfig?.model
       || activeAiConfig?.model
       || fallbackModels[0]
-      || '';
+      || '');
 
     const notifyMode = schedule.fact_check_notify_on_every_run
       ? 'every'
@@ -864,7 +847,7 @@ export const Scheduler: React.FC = () => {
                 {aiModelOptions.length === 0 && <option value="">モデルがありません</option>}
                 {aiModelOptions.map((item) => (
                   <option key={`${item.provider}::${item.model}`} value={item.model}>
-                    {`${item.model}（${getModelTierLabel(item.model)}）`}
+                    {`${item.model}（${getAiModelTierLabel(item.model)}）`}
                   </option>
                 ))}
               </select>

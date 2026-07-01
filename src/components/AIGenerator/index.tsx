@@ -14,6 +14,7 @@ import { FactCheckResultsDisplay } from '../FactCheckResultsDisplay';
 import { factCheckService } from '../../services/factCheckService';
 import { titleKeywordInferenceService } from '../../services/titleKeywordInferenceService';
 import { getSharedToneDescription, sharedToneOptions, type SharedTone } from '../../shared/toneOptions';
+import { getAiModelOptions, getAiModelTierLabel } from '../../shared/aiModelCatalog';
 import type { TitleKeywordInference } from '../../services/titleKeywordInferenceService';
 import type { FactCheckResult } from '../../types';
 import type { Article, ArticleStructureType } from '../../types';
@@ -120,26 +121,7 @@ export const AIGenerator: React.FC = () => {
         : [];
 
     const getProviderModelOptions = (provider: '' | 'openai' | 'claude' | 'gemini'): string[] => {
-        if (provider === 'openai') {
-            return ['gpt-5.2', 'gpt-5-mini', 'gpt-4.1', 'gpt-4o-mini'];
-        }
-        if (provider === 'claude') {
-            return ['claude-4-5-sonnet-20250929', 'claude-4-5-opus-20251124', 'claude-4-5-haiku-20251015', 'claude-3-5-sonnet-latest'];
-        }
-        if (provider === 'gemini') {
-            return ['gemini-2.5-pro', 'gemini-2.5-flash'];
-        }
-        return [];
-    };
-
-    const getModelTierLabel = (model: string): string => {
-        if (['gemini-2.5-pro', 'claude-4-5-opus-20251124', 'gpt-5.2', 'gpt-5'].includes(model)) {
-            return '高品質・高単価';
-        }
-        if (['gemini-2.5-flash', 'claude-4-5-sonnet-20250929', 'claude-3-5-sonnet-latest', 'gpt-4.1', 'gpt-4o'].includes(model)) {
-            return 'バランス';
-        }
-        return '低価格・高速';
+        return getAiModelOptions(provider).map((option) => option.value);
     };
 
     const providerModelOptions = getProviderModelOptions(selectedAIProvider);
@@ -664,7 +646,7 @@ export const AIGenerator: React.FC = () => {
                                 {providerModelOptions.length === 0 && <option value="">モデルがありません</option>}
                                 {providerModelOptions.map((model) => (
                                     <option key={model} value={model}>
-                                        {`${model}（${getModelTierLabel(model)}）`}
+                                        {`${model}（${getAiModelTierLabel(model)}）`}
                                     </option>
                                 ))}
                             </select>
@@ -834,23 +816,19 @@ export const AIGenerator: React.FC = () => {
                                 return selectedSet && selectedSet.keywords.length > 0 && (
                                     <div className="mt-3">
                                         <label className="block text-sm font-medium text-gray-700 mb-2">
-                                            使用するキーワードを選択
+                                            使用するキーワードを1つ選択
                                         </label>
                                         <div className="space-y-2 max-h-48 overflow-y-auto p-3 bg-gray-50 rounded-lg border border-gray-200">
                                             {(selectedSet.keywords || []).map((keyword, index) => (
                                                 <label key={index} className="flex items-center space-x-2 cursor-pointer hover:bg-gray-100 p-1 rounded">
                                                     <input
-                                                        type="checkbox"
-                                                        checked={keywords.includes(keyword)}
-                                                        onChange={(e) => {
-                                                            if (e.target.checked) {
-                                                                setKeywords([...keywords, keyword]);
-                                                            } else {
-                                                                setKeywords(keywords.filter(k => k !== keyword));
-                                                            }
-                                                        }}
+                                                        type="radio"
+                                                        name="keyword-set-keyword"
+                                                        value={keyword}
+                                                        checked={keywords[0] === keyword}
+                                                        onChange={() => setKeywords([keyword])}
                                                         disabled={isGenerating || isAutoGenerating}
-                                                        className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                                                        className="w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500"
                                                     />
                                                     <span className="text-sm text-gray-700">{keyword}</span>
                                                 </label>
@@ -858,13 +836,11 @@ export const AIGenerator: React.FC = () => {
                                         </div>
                                         {keywords.length > 0 && (
                                             <div className="mt-3 p-3 bg-blue-50 rounded-lg border border-blue-200">
-                                                <p className="text-xs font-medium text-blue-900 mb-1">選択中: {keywords.length}個</p>
+                                                <p className="text-xs font-medium text-blue-900 mb-1">選択中のキーワード</p>
                                                 <div className="flex flex-wrap gap-1">
-                                                    {keywords.map((kw, i) => (
-                                                        <span key={i} className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded text-xs">
-                                                            {kw}
-                                                        </span>
-                                                    ))}
+                                                    <span className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded text-xs">
+                                                        {keywords[0]}
+                                                    </span>
                                                 </div>
                                             </div>
                                         )}

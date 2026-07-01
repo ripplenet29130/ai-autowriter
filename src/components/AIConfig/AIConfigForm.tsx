@@ -2,6 +2,11 @@ import React, { useEffect, useState } from 'react';
 import { Zap, Save, TestTube, AlertCircle, CheckCircle, X } from 'lucide-react';
 import { AIConfig } from '../../types';
 import toast from 'react-hot-toast';
+import {
+  getAiModelOptions,
+  getDefaultAiModel,
+  normalizeAiModel,
+} from '../../shared/aiModelCatalog';
 
 interface AIConfigFormProps {
   initialConfig?: AIConfig | null;
@@ -9,19 +14,6 @@ interface AIConfigFormProps {
   onSubmit: (config: AIConfig) => void;
   onCancel: () => void;
 }
-
-const normalizeGeminiModel = (model: string | undefined): string => {
-  const normalizedModel = String(model || '').replace(/^models\//, '');
-  const unsupportedModels = new Set([
-    'gemini-1.0-pro',
-    'gemini-1.5-pro-latest',
-    'gemini-2.0-flash',
-    'gemini-2.0-flash-001',
-    'gemini-3.0-pro',
-    'gemini-3.0-flash',
-  ]);
-  return !normalizedModel || unsupportedModels.has(normalizedModel) ? 'gemini-2.5-flash' : normalizedModel;
-};
 
 export const AIConfigForm: React.FC<AIConfigFormProps> = ({
   initialConfig,
@@ -32,12 +24,7 @@ export const AIConfigForm: React.FC<AIConfigFormProps> = ({
   const [config, setConfig] = useState<AIConfig>({
     provider,
     apiKey: '',
-    model:
-      provider === 'openai'
-        ? 'gpt-5.2'
-        : provider === 'claude'
-          ? 'claude-4-5-sonnet-20250929'
-          : 'gemini-2.5-flash',
+    model: getDefaultAiModel(provider),
     temperature: 0.7,
     maxTokens: 4000,
     imageGenerationEnabled: false,
@@ -55,7 +42,7 @@ export const AIConfigForm: React.FC<AIConfigFormProps> = ({
         ...initialConfig,
         apiKey: '',
         provider,
-        model: provider === 'gemini' ? normalizeGeminiModel(initialConfig.model) : initialConfig.model,
+        model: normalizeAiModel(provider, initialConfig.model),
         imageGenerationEnabled: false,
         imageProvider: 'nanobanana',
         imagesPerArticle: 0,
@@ -64,12 +51,7 @@ export const AIConfigForm: React.FC<AIConfigFormProps> = ({
       setConfig((prev) => ({
         ...prev,
         provider,
-        model:
-          provider === 'openai'
-            ? 'gpt-5.2'
-            : provider === 'claude'
-              ? 'claude-4-5-sonnet-20250929'
-              : 'gemini-2.5-flash',
+        model: getDefaultAiModel(provider),
         imageGenerationEnabled: false,
         imageProvider: 'nanobanana',
         imagesPerArticle: 0,
@@ -86,7 +68,7 @@ export const AIConfigForm: React.FC<AIConfigFormProps> = ({
     onSubmit({
       ...config,
       provider,
-      model: provider === 'gemini' ? normalizeGeminiModel(config.model) : config.model,
+      model: normalizeAiModel(provider, config.model),
       imageGenerationEnabled: false,
       imagesPerArticle: 0,
       imageProvider: 'nanobanana',
@@ -117,7 +99,7 @@ export const AIConfigForm: React.FC<AIConfigFormProps> = ({
           body: JSON.stringify({
             model: config.model,
             messages: [{ role: 'user', content: testPrompt }],
-            max_tokens: 10,
+            max_completion_tokens: 10,
           }),
         });
 
@@ -153,7 +135,7 @@ export const AIConfigForm: React.FC<AIConfigFormProps> = ({
           toast.error(`Claude API接続エラー: ${error?.error?.message || 'Unknown error'}`);
         }
       } else {
-        const modelName = normalizeGeminiModel(config.model);
+        const modelName = normalizeAiModel('gemini', config.model);
         const response = await fetch(
           `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${testApiKey}`,
           {
@@ -184,39 +166,17 @@ export const AIConfigForm: React.FC<AIConfigFormProps> = ({
   };
 
   const getModelOptions = () => {
-    const tierLabel = (model: string): string => {
-      if (['gemini-2.5-pro', 'claude-4-5-opus-20251124', 'gpt-5.2', 'gpt-5'].includes(model)) {
-        return '高品質・高価格';
-      }
-      if (['gemini-2.5-flash', 'claude-4-5-sonnet-20250929', 'claude-3-5-sonnet-latest', 'gpt-4.1', 'gpt-4o'].includes(model)) {
-        return 'バランス';
-      }
-      return '低価格・高速';
-    };
-
-    switch (config.provider) {
-      case 'openai':
-        return [
-          { value: 'gpt-5.2', label: `GPT-5.2 (${tierLabel('gpt-5.2')})` },
-          { value: 'gpt-5-mini', label: `GPT-5 mini (${tierLabel('gpt-5-mini')})` },
-          { value: 'gpt-4.1', label: `GPT-4.1 (${tierLabel('gpt-4.1')})` },
-          { value: 'gpt-4o-mini', label: `GPT-4o mini (${tierLabel('gpt-4o-mini')})` },
-        ];
-      case 'claude':
-        return [
-          { value: 'claude-4-5-sonnet-20250929', label: `Claude 4.5 Sonnet (${tierLabel('claude-4-5-sonnet-20250929')})` },
-          { value: 'claude-4-5-opus-20251124', label: `Claude 4.5 Opus (${tierLabel('claude-4-5-opus-20251124')})` },
-          { value: 'claude-4-5-haiku-20251015', label: `Claude 4.5 Haiku (${tierLabel('claude-4-5-haiku-20251015')})` },
-          { value: 'claude-3-5-sonnet-latest', label: `Claude 3.5 Sonnet (${tierLabel('claude-3-5-sonnet-latest')})` },
-        ];
-      case 'gemini':
-        return [
-          { value: 'gemini-2.5-pro', label: `Google Gemini (gemini-2.5-pro) (${tierLabel('gemini-2.5-pro')})` },
-          { value: 'gemini-2.5-flash', label: `Google Gemini (gemini-2.5-flash) (${tierLabel('gemini-2.5-flash')})` },
-        ];
-      default:
-        return [];
+    const options = getAiModelOptions(config.provider).map((option) => ({
+      value: option.value,
+      label: `${option.label} (${option.tier})`,
+    }));
+    if (config.model && !options.some((option) => option.value === config.model)) {
+      return [
+        { value: config.model, label: `${config.model} (現在の設定・旧モデル)` },
+        ...options,
+      ];
     }
+    return options;
   };
 
   const getConnectionStatusIcon = () => {

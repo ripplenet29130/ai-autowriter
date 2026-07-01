@@ -4,25 +4,15 @@
 // This enables autocomplete, go to definition, etc.
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import {
+    normalizeAiModel,
+    supportsTemperature,
+} from "../../../src/shared/aiModelCatalog.ts";
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
-
-function normalizeGeminiModel(model?: string): string {
-    const normalizedModel = String(model || '').replace(/^models\//, '');
-    const unsupportedModels = new Set([
-        'gemini-1.0-pro',
-        'gemini-1.5-pro-latest',
-        'gemini-2.0-flash',
-        'gemini-2.0-flash-001',
-        'gemini-3.0-pro',
-        'gemini-3.0-flash',
-        'gemini-pro',
-    ]);
-    return !normalizedModel || unsupportedModels.has(normalizedModel) ? 'gemini-2.5-flash' : normalizedModel;
-}
 
 serve(async (req) => {
     // CORS handling
@@ -115,6 +105,7 @@ serve(async (req) => {
 
 async function callOpenAI(apiKey: string, model: string, temperature: number, max_tokens: number, messages: any[]) {
     if (!apiKey) throw new Error("OpenAI API Key is missing");
+    const modelName = normalizeAiModel('openai', model);
 
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
@@ -123,10 +114,10 @@ async function callOpenAI(apiKey: string, model: string, temperature: number, ma
             "Authorization": `Bearer ${apiKey}`,
         },
         body: JSON.stringify({
-            model: model || "gpt-3.5-turbo",
-            temperature: temperature ?? 0.7,
-            max_tokens: max_tokens ?? 16384,
+            model: modelName,
+            max_completion_tokens: max_tokens ?? 16384,
             messages: messages,
+            ...(supportsTemperature('openai', modelName) ? { temperature: temperature ?? 0.7 } : {}),
         }),
     });
 
@@ -139,6 +130,7 @@ async function callOpenAI(apiKey: string, model: string, temperature: number, ma
 
 async function callClaude(apiKey: string, model: string, temperature: number, max_tokens: number, messages: any[]) {
     if (!apiKey) throw new Error("Anthropic API Key is missing");
+    const modelName = normalizeAiModel('claude', model);
 
     const response = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
@@ -148,10 +140,10 @@ async function callClaude(apiKey: string, model: string, temperature: number, ma
             "anthropic-version": "2023-06-01",
         },
         body: JSON.stringify({
-            model: model || "claude-3-opus-20240229",
-            temperature: temperature ?? 0.7,
+            model: modelName,
             max_tokens: max_tokens ?? 16384,
             messages: messages,
+            ...(supportsTemperature('claude', modelName) ? { temperature: temperature ?? 0.7 } : {}),
         }),
     });
 
@@ -165,7 +157,7 @@ async function callClaude(apiKey: string, model: string, temperature: number, ma
 async function callGemini(apiKey: string, model: string, temperature: number, maxTokens: number, prompt: string) {
     if (!apiKey) throw new Error("Gemini API Key is missing");
 
-    const modelName = normalizeGeminiModel(model);
+    const modelName = normalizeAiModel('gemini', model);
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
 
     const response = await fetch(url, {
