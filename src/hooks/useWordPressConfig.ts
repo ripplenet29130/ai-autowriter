@@ -25,15 +25,19 @@ export function useWordPressConfig() {
 
         try {
             const service = new WordPressService(config);
-            const isValid = await service.testConnection();
+            const result = await service.testConnection();
 
-            if (isValid) {
+            if (result.success) {
                 toast.success(`${config.name}への接続に成功しました`);
                 wpLogger.info(`接続成功: ${config.name}`);
                 return true;
             } else {
-                toast.error(`${config.name}への接続に失敗しました`);
-                wpLogger.warn(`接続失敗: ${config.name}`);
+                toast.error(result.message, { duration: 10000 });
+                wpLogger.warn(`接続失敗: ${config.name}`, {
+                    status: result.status,
+                    code: result.code,
+                    details: result.details,
+                });
                 return false;
             }
         } catch (error) {

@@ -16,6 +16,14 @@ export interface WordPressConfig {
   scheduleSettings?: ScheduleSettings;
 }
 
+export interface WordPressConnectionTestResult {
+  success: boolean;
+  message: string;
+  status?: number;
+  code?: string;
+  details?: string;
+}
+
 export class WordPressService {
   private config: WordPressConfig | null = null;
   private normalizeWordPressUrl(url: string): string {
@@ -71,22 +79,58 @@ export class WordPressService {
     };
   }
 
-  async testConnection(): Promise<boolean> {
+  async testConnection(): Promise<WordPressConnectionTestResult> {
     if (!this.config) {
       await this.loadActiveConfig();
     }
     if (!this.config) {
-      return false;
+      return {
+        success: false,
+        message: 'WordPress設定が見つかりません。'
+      };
     }
+
+    if (!supabase) {
+      return {
+        success: false,
+        code: 'supabase_not_initialized',
+        message: '接続診断サービスを利用できません。アプリの接続設定を確認してください。'
+      };
+    }
+
     try {
-      const response = await axios.get(`${this.config.url}/wp-json/wp/v2/posts`, {
-        headers: this.getAuthHeaders(),
-        params: { per_page: 1 }
-      });
-      return response.status === 200;
+      const { data, error } = await supabase.functions.invoke<WordPressConnectionTestResult>(
+        'wordpress-connection-test',
+        {
+          body: { wordpress_config_id: this.config.id }
+        }
+      );
+
+      if (error) {
+        return {
+          success: false,
+          code: 'diagnostic_service_error',
+          message: `接続診断サービスでエラーが発生しました: ${error.message}`
+        };
+      }
+
+      if (!data || typeof data.success !== 'boolean') {
+        return {
+          success: false,
+          code: 'invalid_diagnostic_response',
+          message: '接続診断サービスから正しい応答を取得できませんでした。'
+        };
+      }
+
+      return data;
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
       console.error('WordPress接続テストエラー:', error);
-      return false;
+      return {
+        success: false,
+        code: 'diagnostic_request_failed',
+        message: `接続診断を実行できませんでした: ${message}`
+      };
     }
   }
 
