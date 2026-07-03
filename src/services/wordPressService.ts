@@ -29,6 +29,7 @@ export interface WordPressCategoryValidationResult {
   message: string;
   categoryId?: number;
   taxonomyField?: string;
+  postTypeRestBase?: string;
 }
 
 export class WordPressService {
@@ -141,7 +142,7 @@ export class WordPressService {
     }
   }
 
-  async validateCategory(
+  async validatePostTypeAndCategory(
     categoryIdentifier: string,
     postType = 'posts'
   ): Promise<WordPressCategoryValidationResult> {
@@ -156,19 +157,99 @@ export class WordPressService {
     }
 
     const trimmed = String(categoryIdentifier || '').trim();
-    if (!trimmed) {
+    const normalizedPostType = String(postType || 'posts').trim() || 'posts';
+    let postTypeRestBase = '';
+    let postTypeName = normalizedPostType;
+    let taxonomyKeys: string[] = [];
+    let taxonomies: Record<string, any> = {};
+
+    try {
+      const [typesResponse, taxonomiesResponse] = await Promise.all([
+        axios.get(`${this.config.url}/wp-json/wp/v2/types`, {
+          headers: this.getAuthHeaders()
+        }),
+        axios.get(`${this.config.url}/wp-json/wp/v2/taxonomies`, {
+          headers: this.getAuthHeaders()
+        })
+      ]);
+      taxonomies = taxonomiesResponse.data || {};
+      const normalizedIdentifier = normalizedPostType.toLowerCase();
+      const matchedType = Object.entries(typesResponse.data || {}).find(
+        ([key, value]: [string, any]) =>
+          key.toLowerCase() === normalizedIdentifier ||
+          String(value?.slug || '').toLowerCase() === normalizedIdentifier ||
+          String(value?.rest_base || '').toLowerCase() === normalizedIdentifier
+      );
+
+      if (!matchedType) {
+        return {
+          success: false,
+          message: `投稿タイプ「${normalizedPostType}」はWordPress REST APIに公開されていません。投稿タイプの show_in_rest を有効にしてください。`
+        };
+      }
+
+      const [matchedKey, matchedDefinition] = matchedType as [string, any];
+      postTypeRestBase = String(matchedDefinition?.rest_base || matchedKey).trim();
+      postTypeName = String(matchedDefinition?.name || normalizedPostType);
+      taxonomyKeys = Array.isArray(matchedDefinition?.taxonomies)
+        ? matchedDefinition.taxonomies.map(String)
+        : [];
+    } catch (error) {
+      const status = axios.isAxiosError(error) ? error.response?.status : undefined;
+      const statusText = status ? `（HTTP ${status}）` : '';
       return {
-        success: true,
-        message: 'カテゴリーは指定されていません。'
+        success: false,
+        message: `WordPressの投稿タイプを確認できませんでした${statusText}。URL、認証情報、REST APIの設定を確認してください。`
       };
     }
 
-    const normalizedPostType = String(postType || 'posts').trim() || 'posts';
-    const candidates = await this.getTaxonomyCandidatesForPostType(normalizedPostType);
+    if (!trimmed) {
+      return {
+        success: true,
+        message: `投稿タイプ「${postTypeName}」を確認しました。`,
+        postTypeRestBase
+      };
+    }
+
+    const candidates = taxonomyKeys
+      .map((taxonomyKey) => {
+        const taxonomy = taxonomies[taxonomyKey];
+        if (!taxonomy || taxonomy?.hierarchical === false) return null;
+        const restBase = String(taxonomy?.rest_base || taxonomyKey).trim();
+        return {
+          taxonomyKey,
+          field: restBase,
+          restBase
+        };
+      })
+      .filter((candidate): candidate is { taxonomyKey: string; field: string; restBase: string } => Boolean(candidate));
+
+    if (candidates.length === 0) {
+      return {
+        success: false,
+        message: `投稿タイプ「${postTypeName}」は確認できましたが、カテゴリー分類がREST APIに公開されていません。WordPress側で、この投稿タイプのカテゴリー分類の show_in_rest も有効にしてください。`,
+        postTypeRestBase
+      };
+    }
+
     const explicitMatch = trimmed.match(/^([A-Za-z0-9_-]+)\s*[:：]\s*(.+)$/);
     const targets = explicitMatch
-      ? [{ field: explicitMatch[1].trim(), restBase: explicitMatch[1].trim(), term: explicitMatch[2].trim() }]
+      ? candidates
+        .filter((candidate) => {
+          const explicitTaxonomy = explicitMatch[1].trim().toLowerCase();
+          return candidate.taxonomyKey.toLowerCase() === explicitTaxonomy ||
+            candidate.restBase.toLowerCase() === explicitTaxonomy;
+        })
+        .map((candidate) => ({ ...candidate, term: explicitMatch[2].trim() }))
       : candidates.map((candidate) => ({ ...candidate, term: trimmed }));
+
+    if (targets.length === 0) {
+      return {
+        success: false,
+        message: `指定したカテゴリー分類「${explicitMatch?.[1] || ''}」は投稿タイプ「${postTypeName}」に紐づいていません。`,
+        postTypeRestBase
+      };
+    }
 
     let successfulRequests = 0;
     let lastError: unknown = null;
@@ -187,7 +268,8 @@ export class WordPressService {
               success: true,
               message: `カテゴリー「${response.data.name || target.term}」を確認しました。`,
               categoryId: parsedId,
-              taxonomyField: target.field
+              taxonomyField: target.field,
+              postTypeRestBase
             };
           }
           continue;
@@ -209,7 +291,8 @@ export class WordPressService {
             success: true,
             message: `カテゴリー「${slugMatch.name || target.term}」を確認しました。`,
             categoryId: slugMatch.id,
-            taxonomyField: target.field
+            taxonomyField: target.field,
+            postTypeRestBase
           };
         }
 
@@ -231,7 +314,8 @@ export class WordPressService {
             success: true,
             message: `カテゴリー「${nameMatch.name || target.term}」を確認しました。`,
             categoryId: nameMatch.id,
-            taxonomyField: target.field
+            taxonomyField: target.field,
+            postTypeRestBase
           };
         }
       } catch (error) {
@@ -244,13 +328,15 @@ export class WordPressService {
       const statusText = status ? `（HTTP ${status}）` : '';
       return {
         success: false,
-        message: `WordPressからカテゴリーを確認できませんでした${statusText}。URL、認証情報、投稿タイプ、REST APIの公開設定を確認してください。`
+        message: `投稿タイプ「${postTypeName}」のカテゴリーを確認できませんでした${statusText}。カテゴリー分類のREST API設定を確認してください。`,
+        postTypeRestBase
       };
     }
 
     return {
       success: false,
-      message: `WordPressにカテゴリー「${trimmed}」が見つかりません。カテゴリー名またはスラッグを完全一致で入力してください。`
+      message: `投稿タイプ「${postTypeName}」にカテゴリー「${trimmed}」が見つかりません。カテゴリー名またはスラッグを完全一致で入力してください。`,
+      postTypeRestBase
     };
   }
 

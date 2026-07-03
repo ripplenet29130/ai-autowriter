@@ -359,7 +359,7 @@ export const Scheduler: React.FC = () => {
       toast.error('毎月の投稿日を1日以上選択してください');
       return;
     }
-    if (submitData.frequency === '毎週' && (!Number.isInteger(submitData.weekly_day) || submitData.weekly_day < 0 || submitData.weekly_day > 6)) {
+    if (submitData.frequency === '毎週' && (submitData.weekly_day == null || !Number.isInteger(submitData.weekly_day) || submitData.weekly_day < 0 || submitData.weekly_day > 6)) {
       toast.error('毎週の曜日を選択してください');
       return;
     }

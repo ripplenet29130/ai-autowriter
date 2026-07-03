@@ -173,7 +173,7 @@ export const ConfigForm: React.FC<ConfigFormProps> = ({
                         className="input-field"
                     />
                     <p className="text-xs text-gray-500 mt-1">
-                        通常投稿時に使うカテゴリースラッグです。例: news, blog
+                        投稿タイプに紐づくカテゴリースラッグです。保存時にWordPress上の完全一致を確認します。
                     </p>
                 </div>
 
@@ -189,7 +189,7 @@ export const ConfigForm: React.FC<ConfigFormProps> = ({
                         className="input-field"
                     />
                     <p className="text-xs text-gray-500 mt-1">
-                        通常投稿は `posts` です。カスタム投稿タイプも指定できます。
+                        通常投稿は `posts` です。保存時にREST APIで利用できる投稿タイプか確認します。
                     </p>
                 </div>
 
@@ -218,7 +218,7 @@ export const ConfigForm: React.FC<ConfigFormProps> = ({
                         disabled={isSubmitting}
                         className={`btn-primary flex-1 ${isSubmitting ? 'opacity-50 cursor-not-allowed' : ''}`}
                     >
-                        {isSubmitting ? 'カテゴリー確認中...' : initialData ? '更新' : '保存'}
+                        {isSubmitting ? '投稿先を確認中...' : initialData ? '更新' : '保存'}
                     </button>
                     <button
                         type="button"

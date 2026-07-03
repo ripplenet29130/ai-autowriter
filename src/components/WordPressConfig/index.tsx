@@ -40,31 +40,35 @@ export const WordPressConfigComponent: React.FC = () => {
     setIsSubmitting(true);
     try {
       const category = String(configData.category || configData.defaultCategory || '').trim();
-      if (category) {
-        const validationService = new WordPressService({
-          ...configData,
-          id: editingConfig?.id || 'category-validation',
-          defaultCategory: category,
-        });
-        const validationResult = await validationService.validateCategory(
-          category,
-          configData.postType || 'posts'
-        );
-        if (!validationResult.success) {
-          throw new Error(validationResult.message);
-        }
-        toast.success(validationResult.message);
+      const validationService = new WordPressService({
+        ...configData,
+        id: editingConfig?.id || 'wordpress-validation',
+        defaultCategory: category,
+      });
+      const validationResult = await validationService.validatePostTypeAndCategory(
+        category,
+        configData.postType || 'posts'
+      );
+      if (!validationResult.success) {
+        throw new Error(validationResult.message);
       }
+      const validatedConfigData = {
+        ...configData,
+        category,
+        defaultCategory: category,
+        postType: validationResult.postTypeRestBase || configData.postType || 'posts',
+      };
+      toast.success(validationResult.message);
 
       if (editingConfig) {
-        await updateConfig(editingConfig.id, configData);
+        await updateConfig(editingConfig.id, validatedConfigData);
         toast.success('WordPress設定を更新しました');
       } else {
         if (isAtLimit) {
           toast.error(`WordPress登録上限に達しています。現在の上限は${wordpressLimit}件です。`);
           return;
         }
-        await addConfig(configData);
+        await addConfig(validatedConfigData);
       }
       setShowForm(false);
       setEditingConfig(null);

@@ -3433,27 +3433,11 @@ async function publishToWordPress(
     ? await resolveTermAssignmentForPostType(config, postType, config.category)
     : null;
 
-  // 驛｢・ｧ繝ｻ・ｫ驛｢譏ｴ繝ｻ邵ｺ荵滂ｽｹ譎｢・ｽ・ｪID驍ｵ・ｺ繝ｻ・ｮ髯ｷ・ｿ鬮｢ﾂ繝ｻ・ｾ隴会ｽｦ繝ｻ・ｼ陜捺ｺｽ繝ｻ髯区ｻゑｽｽ・､ID驍ｵ・ｲ遶丞｣ｹ笳矩Δ譎｢・ｽ・ｩ驛｢譏ｴ繝ｻ邵ｺ蝣､・ｸ・ｲ遶乗辨蛟ｹ髯ｷ鮃ｹ莠らｫ頑･｢豎槭・・ｾ髯滂ｽ｢隲幢ｽｶ繝ｻ・ｼ郢晢ｽｻ
-  let categoryIds: number[] = [];
-  if (config.category) {
-    const trimmed = config.category.trim();
-
-    // 驍ｵ・ｺ繝ｻ・ｾ驍ｵ・ｺ陞｢・ｽ霎溷､雁ｱ舌・・､ID驍ｵ・ｺ繝ｻ・ｨ驍ｵ・ｺ陷会ｽｱ遯ｶ・ｻ驛｢譏懶ｽｻ・｣郢晢ｽｻ驛｢・ｧ繝ｻ・ｹ驛｢・ｧ陞ｳ螟ｲ・ｽ・ｩ繝ｻ・ｦ驍ｵ・ｺ繝ｻ・ｿ驛｢・ｧ郢晢ｽｻ
-    const parsed = parseInt(trimmed, 10);
-    if (!isNaN(parsed)) {
-      categoryIds = [parsed];
-      console.log(`Using category ID: ${parsed}`);
-    } else {
-      // 驛｢・ｧ繝ｻ・ｹ驛｢譎｢・ｽ・ｩ驛｢譏ｴ繝ｻ邵ｺ蝣､・ｸ・ｺ繝ｻ・ｾ驍ｵ・ｺ雋・･繝ｻ髯ｷ・ｷ隶朱｡披・驍ｵ・ｺ繝ｻ・ｨ驍ｵ・ｺ陷会ｽｱ遯ｶ・ｻ髫ｶﾂ隲帙・・ｽ・ｴ繝ｻ・｢
-      console.log(`Looking up category by slug/name: ${trimmed}`);
-      const categoryId = await getCategoryIdBySlugOrName(config, trimmed);
-      if (categoryId) {
-        categoryIds = [categoryId];
-        console.log(`Found category ID: ${categoryId} for "${trimmed}"`);
-      } else {
-        console.warn(`Category "${trimmed}" not found. WordPress will use default category.`);
-      }
-    }
+  if (config.category && !termAssignment) {
+    throw new Error(
+      `Configured category "${config.category}" was not found for post type "${postType}". ` +
+      'Check that the taxonomy is exposed through the WordPress REST API.'
+    );
   }
 
   const postPayload: Record<string, any> = {
@@ -3464,8 +3448,6 @@ async function publishToWordPress(
   if (termAssignment) {
     postPayload[termAssignment.field] = termAssignment.ids;
     console.log(`Using taxonomy field "${termAssignment.field}" for "${config.category}": ${termAssignment.ids.join(', ')}`);
-  } else {
-    postPayload.categories = categoryIds;
   }
   const requestBody = JSON.stringify(postPayload);
 
@@ -3495,26 +3477,9 @@ async function publishToWordPress(
     return primary.postId;
   }
 
-  const primaryErrorText = String(primary.text || '');
-  const shouldFallbackToPosts = postType !== 'posts' && (
-    primary.status === 404 ||
-    /rest_no_route|invalid[_ ]post[_ ]type|post[_ ]type/i.test(primaryErrorText)
-  );
-
-  if (!shouldFallbackToPosts) {
-    throw new Error(`WordPress API error: ${primary.status} - ${primaryErrorText}`);
-  }
-
-  const fallbackUrl = `${config.url}/wp-json/wp/v2/posts`;
-  console.warn(`Primary post_type "${postType}" failed. Falling back to default posts endpoint: ${fallbackUrl}`);
-  const fallback = await postWithEndpoint(fallbackUrl);
-  if (fallback.ok) {
-    return fallback.postId;
-  }
-
   throw new Error(
-    `WordPress API error on both endpoints. primary(${wpApiUrl}): ${primary.status} - ${primaryErrorText}; ` +
-    `fallback(${fallbackUrl}): ${fallback.status} - ${fallback.text}`
+    `WordPress post type "${postType}" rejected the post (${primary.status}): ${primary.text}. ` +
+    'The post was not redirected to the default posts endpoint.'
   );
 }
 
