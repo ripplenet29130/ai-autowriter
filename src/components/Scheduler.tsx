@@ -46,6 +46,20 @@ const DEFAULT_CHATWORK_TEMPLATE = `いつもお世話になっております。
 
 今後ともよろしくお願いいたします。`;
 
+const WEEKDAY_OPTIONS = [
+  { value: 1, label: '月曜日', shortLabel: '月' },
+  { value: 2, label: '火曜日', shortLabel: '火' },
+  { value: 3, label: '水曜日', shortLabel: '水' },
+  { value: 4, label: '木曜日', shortLabel: '木' },
+  { value: 5, label: '金曜日', shortLabel: '金' },
+  { value: 6, label: '土曜日', shortLabel: '土' },
+  { value: 0, label: '日曜日', shortLabel: '日' },
+] as const;
+
+const getWeekdayLabel = (day?: number | null): string => (
+  WEEKDAY_OPTIONS.find((option) => option.value === day)?.label || ''
+);
+
 const getProviderModelOptions = (provider: string): string[] => {
   return getAiModelOptions(provider).map((option) => option.value);
 };
@@ -78,7 +92,8 @@ export const Scheduler: React.FC = () => {
     title_set_id: '',
     post_time: '09:00',
     frequency: '毎日',
-    monthly_days: [1] as number[],
+    weekly_day: null as number | null,
+    monthly_days: [] as number[],
     post_status: 'publish' as 'publish' | 'draft',
     start_date: '',
     end_date: '',
@@ -302,6 +317,7 @@ export const Scheduler: React.FC = () => {
 
     const submitData = {
       ...formData,
+      weekly_day: formData.frequency === '毎週' ? formData.weekly_day : null,
       monthly_days: formData.frequency === '毎月'
         ? [...new Set(formData.monthly_days)].sort((a, b) => a - b)
         : null,
@@ -341,6 +357,10 @@ export const Scheduler: React.FC = () => {
     }
     if (submitData.frequency === '毎月' && (!submitData.monthly_days || submitData.monthly_days.length === 0)) {
       toast.error('毎月の投稿日を1日以上選択してください');
+      return;
+    }
+    if (submitData.frequency === '毎週' && (!Number.isInteger(submitData.weekly_day) || submitData.weekly_day < 0 || submitData.weekly_day > 6)) {
+      toast.error('毎週の曜日を選択してください');
       return;
     }
 
@@ -413,9 +433,12 @@ export const Scheduler: React.FC = () => {
       title_set_id: (schedule as any).title_set_id || '',
       post_time: schedule.post_time,
       frequency: schedule.frequency,
+      weekly_day: Number.isInteger(schedule.weekly_day)
+        ? Number(schedule.weekly_day)
+        : null,
       monthly_days: Array.isArray(schedule.monthly_days) && schedule.monthly_days.length > 0
         ? schedule.monthly_days
-        : [schedule.start_date ? Number(schedule.start_date.slice(8, 10)) : 1],
+        : [],
       post_status: schedule.post_status,
       start_date: schedule.start_date || '',
       end_date: schedule.end_date || '',
@@ -514,7 +537,8 @@ export const Scheduler: React.FC = () => {
       title_set_id: '',
       post_time: '09:00',
       frequency: '毎日',
-      monthly_days: [1],
+      weekly_day: null,
+      monthly_days: [],
       post_status: 'publish',
       start_date: '',
       end_date: '',
@@ -685,12 +709,31 @@ export const Scheduler: React.FC = () => {
     if (normalizedFrequency === 'daily') {
       if (next <= now) next = addDays(next, 1);
       if (startAt && next < startAt) next = new Date(startAt);
-    } else if (normalizedFrequency === 'weekly' || normalizedFrequency === 'biweekly') {
-      const intervalDays = normalizedFrequency === 'weekly' ? 7 : 14;
+    } else if (normalizedFrequency === 'weekly') {
+      const weeklyDay = schedule.weekly_day;
+      if (Number.isInteger(weeklyDay) && Number(weeklyDay) >= 0 && Number(weeklyDay) <= 6) {
+        let candidate: Date | null = null;
+        for (let dayOffset = 0; dayOffset < 3660 && !candidate; dayOffset += 1) {
+          const possible = addDays(buildDateAtTime(now), dayOffset);
+          if (possible.getDay() !== weeklyDay) continue;
+          if (possible <= now || (startAt && possible < startAt)) continue;
+          candidate = possible;
+        }
+        if (!candidate) return null;
+        next = candidate;
+      } else {
+        next = startAt ? new Date(startAt) : buildDateAtTime(now);
+        if (next <= now) {
+          for (let i = 0; i < 1000 && next <= now; i += 1) {
+            next = addDays(next, 7);
+          }
+        }
+      }
+    } else if (normalizedFrequency === 'biweekly') {
       next = startAt ? new Date(startAt) : buildDateAtTime(now);
       if (next <= now) {
         for (let i = 0; i < 1000 && next <= now; i += 1) {
-          next = addDays(next, intervalDays);
+          next = addDays(next, 14);
         }
       }
     } else if (normalizedFrequency === 'monthly') {
@@ -1248,20 +1291,38 @@ export const Scheduler: React.FC = () => {
                 </div>
               )}
 
-              {/* 投稿状態 */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  投稿状態 <span className="text-red-500">*</span>
-                </label>
-                <select
-                  value={formData.post_status}
-                  onChange={(e) => setFormData({ ...formData, post_status: e.target.value as 'publish' | 'draft' })}
-                  className="input-field"
-                >
-                  <option value="publish">公開</option>
-                  <option value="draft">下書き</option>
-                </select>
-              </div>
+              {formData.frequency === '毎週' && (
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    毎週の曜日 <span className="text-red-500">*</span>
+                  </label>
+                  <div className="grid grid-cols-7 gap-2" role="group" aria-label="毎週の曜日">
+                    {WEEKDAY_OPTIONS.map((option) => {
+                      const selected = formData.weekly_day === option.value;
+                      return (
+                        <button
+                          key={option.value}
+                          type="button"
+                          aria-pressed={selected}
+                          title={option.label}
+                          onClick={() => setFormData((current) => ({
+                            ...current,
+                            weekly_day: option.value,
+                          }))}
+                          className={`rounded-md border px-2 py-2 text-sm font-medium transition-colors ${
+                            selected
+                              ? 'border-blue-600 bg-blue-600 text-white'
+                              : 'border-gray-300 bg-white text-gray-700 hover:border-blue-400'
+                          }`}
+                        >
+                          {option.shortLabel}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="text-xs text-gray-500 mt-2">毎週投稿する曜日を1つ選択します。</p>
+                </div>
+              )}
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1292,17 +1353,34 @@ export const Scheduler: React.FC = () => {
               </div>
             </div>
 
-            {/* スケジュール有効化 */}
-            <label className="flex items-center space-x-2 text-sm font-medium text-gray-700">
-              <input
-                type="checkbox"
-                id="status"
-                checked={formData.status}
-                onChange={(e) => setFormData({ ...formData, status: e.target.checked })}
-                className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-              />
-              <span>このスケジュールを有効化</span>
-            </label>
+            <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+              {/* 投稿状態 */}
+              <div className="w-full md:max-w-sm">
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  投稿状態 <span className="text-red-500">*</span>
+                </label>
+                <select
+                  value={formData.post_status}
+                  onChange={(e) => setFormData({ ...formData, post_status: e.target.value as 'publish' | 'draft' })}
+                  className="input-field"
+                >
+                  <option value="publish">公開</option>
+                  <option value="draft">下書き</option>
+                </select>
+              </div>
+
+              {/* スケジュール有効化 */}
+              <label className="flex items-center gap-2 text-sm font-medium text-gray-700 md:ml-auto md:justify-end md:pb-2">
+                <input
+                  type="checkbox"
+                  id="status"
+                  checked={formData.status}
+                  onChange={(e) => setFormData({ ...formData, status: e.target.checked })}
+                  className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                />
+                <span>スケジュールを有効化</span>
+              </label>
+            </div>
         </section>
 
           {/* ボタン */}
@@ -1551,6 +1629,9 @@ export const Scheduler: React.FC = () => {
                             </span>
                             <span className="text-xs font-semibold text-gray-500">
                               /{schedule.frequency}
+                              {schedule.frequency === '毎週' && getWeekdayLabel(schedule.weekly_day)
+                                ? `（${getWeekdayLabel(schedule.weekly_day)}）`
+                                : ''}
                               {schedule.frequency === '毎月' && schedule.monthly_days?.length
                                 ? `（${schedule.monthly_days.join('日・')}日）`
                                 : ''}

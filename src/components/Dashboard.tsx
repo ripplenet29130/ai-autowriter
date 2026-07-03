@@ -20,6 +20,14 @@ type ScheduleWithNext = ScheduleSetting & {
   lastExecutionAt: string | null;
 };
 
+const WEEKDAY_LABELS = ['日曜日', '月曜日', '火曜日', '水曜日', '木曜日', '金曜日', '土曜日'] as const;
+
+const getWeekdayLabel = (day?: number | null): string => (
+  Number.isInteger(day) && Number(day) >= 0 && Number(day) <= 6
+    ? WEEKDAY_LABELS[Number(day)]
+    : ''
+);
+
 const getNextExecutionDate = (schedule: ScheduleSetting): Date | null => {
   if (!schedule.status || !schedule.post_time) return null;
 
@@ -63,12 +71,31 @@ const getNextExecutionDate = (schedule: ScheduleSetting): Date | null => {
   if (normalizedFrequency === 'daily') {
     if (next <= now) next = addDays(next, 1);
     if (startAt && next < startAt) next = new Date(startAt);
-  } else if (normalizedFrequency === 'weekly' || normalizedFrequency === 'biweekly') {
-    const intervalDays = normalizedFrequency === 'weekly' ? 7 : 14;
+  } else if (normalizedFrequency === 'weekly') {
+    const weeklyDay = schedule.weekly_day;
+    if (Number.isInteger(weeklyDay) && Number(weeklyDay) >= 0 && Number(weeklyDay) <= 6) {
+      let candidate: Date | null = null;
+      for (let dayOffset = 0; dayOffset < 3660 && !candidate; dayOffset += 1) {
+        const possible = addDays(buildDateAtTime(now), dayOffset);
+        if (possible.getDay() !== weeklyDay) continue;
+        if (possible <= now || (startAt && possible < startAt)) continue;
+        candidate = possible;
+      }
+      if (!candidate) return null;
+      next = candidate;
+    } else {
+      next = startAt ? new Date(startAt) : buildDateAtTime(now);
+      if (next <= now) {
+        for (let i = 0; i < 1000 && next <= now; i += 1) {
+          next = addDays(next, 7);
+        }
+      }
+    }
+  } else if (normalizedFrequency === 'biweekly') {
     next = startAt ? new Date(startAt) : buildDateAtTime(now);
     if (next <= now) {
       for (let i = 0; i < 1000 && next <= now; i += 1) {
-        next = addDays(next, intervalDays);
+        next = addDays(next, 14);
       }
     }
   } else if (normalizedFrequency === 'monthly') {
@@ -135,11 +162,19 @@ const getScheduledExecutionForDate = (schedule: ScheduleSetting, targetDate: Dat
 
   if (normalizedFrequency === 'daily') return executionAt;
 
-  if (normalizedFrequency === 'weekly' || normalizedFrequency === 'biweekly') {
+  if (normalizedFrequency === 'weekly') {
+    if (Number.isInteger(schedule.weekly_day) && Number(schedule.weekly_day) >= 0 && Number(schedule.weekly_day) <= 6) {
+      return targetDate.getDay() === schedule.weekly_day ? executionAt : null;
+    }
     if (!startAt) return executionAt;
-    const intervalDays = normalizedFrequency === 'weekly' ? 7 : 14;
     const elapsedDays = Math.floor((dayStart.getTime() - new Date(startAt).setHours(0, 0, 0, 0)) / 86400000);
-    return elapsedDays >= 0 && elapsedDays % intervalDays === 0 ? executionAt : null;
+    return elapsedDays >= 0 && elapsedDays % 7 === 0 ? executionAt : null;
+  }
+
+  if (normalizedFrequency === 'biweekly') {
+    if (!startAt) return executionAt;
+    const elapsedDays = Math.floor((dayStart.getTime() - new Date(startAt).setHours(0, 0, 0, 0)) / 86400000);
+    return elapsedDays >= 0 && elapsedDays % 14 === 0 ? executionAt : null;
   }
 
   if (normalizedFrequency === 'monthly') {
@@ -394,6 +429,9 @@ export const Dashboard: React.FC = () => {
                           <span className="text-2xl font-bold text-gray-900 leading-none">{schedule.post_time}</span>
                           <span className="text-sm font-semibold text-gray-500">
                             /{schedule.frequency}
+                            {schedule.frequency === '毎週' && getWeekdayLabel(schedule.weekly_day)
+                              ? `（${getWeekdayLabel(schedule.weekly_day)}）`
+                              : ''}
                             {schedule.frequency === '毎月' && schedule.monthly_days?.length
                               ? `（${schedule.monthly_days.join('日・')}日）`
                               : ''}

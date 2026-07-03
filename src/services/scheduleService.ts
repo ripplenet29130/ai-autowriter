@@ -265,6 +265,7 @@ class ScheduleService {
             wp_config_id: schedule.wp_config_id,
             post_time: schedule.post_time,
             frequency: schedule.frequency,
+            weekly_day: schedule.weekly_day ?? null,
             monthly_days: schedule.monthly_days ?? null,
             status: schedule.status,
             keyword: schedule.keyword,
@@ -308,6 +309,11 @@ class ScheduleService {
 
             const missingColumn = this.extractMissingColumn(error);
             if (missingColumn && Object.prototype.hasOwnProperty.call(insertPayload, missingColumn)) {
+                if (missingColumn === 'weekly_day') {
+                    throw new Error(
+                        '毎週の曜日を保存できませんでした。DBマイグレーションを適用してください。'
+                    );
+                }
                 if (missingColumn === 'monthly_days') {
                     throw new Error(
                         '毎月の投稿日を保存できませんでした。DBマイグレーションを適用してください。'
@@ -449,6 +455,11 @@ class ScheduleService {
 
             const missingColumn = this.extractMissingColumn(error);
             if (missingColumn && Object.prototype.hasOwnProperty.call(updatePayload, missingColumn)) {
+                if (missingColumn === 'weekly_day') {
+                    throw new Error(
+                        '毎週の曜日を保存できませんでした。DBマイグレーションを適用してください。'
+                    );
+                }
                 if (missingColumn === 'monthly_days') {
                     throw new Error(
                         '毎月の投稿日を保存できませんでした。DBマイグレーションを適用してください。'

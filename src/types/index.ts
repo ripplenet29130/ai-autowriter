@@ -146,6 +146,7 @@ export interface ScheduleSetting {
   wp_config_id: string;
   post_time: string;
   frequency: string;
+  weekly_day?: number | null;
   monthly_days?: number[] | null;
   status: boolean;
   keyword: string;

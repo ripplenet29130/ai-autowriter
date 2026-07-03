@@ -104,6 +104,7 @@ interface Schedule {
   wp_config_id: string;
   post_time: string;
   frequency: string;
+  weekly_day?: number | null;
   monthly_days?: number[] | null;
   status: boolean;
   keyword: string;
@@ -515,6 +516,7 @@ Deno.serve(async (req: Request) => {
           timeToUse,
           currentTimeJST,
           scheduleSetting.frequency,
+          scheduleSetting.weekly_day,
           scheduleSetting.monthly_days,
           scheduleSetting.id,
           supabase
@@ -562,6 +564,7 @@ Deno.serve(async (req: Request) => {
                 timeToUse,
                 currentTimeJST,
                 scheduleSetting.frequency,
+                scheduleSetting.weekly_day,
                 scheduleSetting.monthly_days,
                 scheduleSetting.id,
                 supabase
@@ -1149,6 +1152,7 @@ async function shouldExecuteNow(
   scheduleTime: string,
   currentTime: string,
   frequency: string,
+  weeklyDay: number | null | undefined,
   monthlyDays: number[] | null | undefined,
   scheduleId: string,
   supabase: any
@@ -1175,6 +1179,17 @@ async function shouldExecuteNow(
   const normalizedFreq = freqMap[frequency] || frequency;
   const now = new Date();
   const jstDateFormatter = new Intl.DateTimeFormat('ja-JP', { timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit' });
+  const currentWeekdayText = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Tokyo',
+    weekday: 'short',
+  }).format(now);
+  const currentWeekday = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(currentWeekdayText);
+  const normalizedWeeklyDay = Number.isInteger(weeklyDay) && Number(weeklyDay) >= 0 && Number(weeklyDay) <= 6
+    ? Number(weeklyDay)
+    : null;
+  if (normalizedFreq === 'weekly' && normalizedWeeklyDay !== null && currentWeekday !== normalizedWeeklyDay) {
+    return false;
+  }
   const currentDay = Number(new Intl.DateTimeFormat('en-US', {
     timeZone: 'Asia/Tokyo',
     day: 'numeric',
@@ -1209,8 +1224,13 @@ async function shouldExecuteNow(
     if (lastExecutedDate !== currentDate) {
       return true;
     }
-  } else if (normalizedFreq === 'weekly' && hoursSinceLastExecution >= 24 * 6) {
-    return true;
+  } else if (normalizedFreq === 'weekly') {
+    if (normalizedWeeklyDay !== null) {
+      return lastExecutedDate !== currentDate;
+    }
+    if (hoursSinceLastExecution >= 24 * 6) {
+      return true;
+    }
   } else if (normalizedFreq === 'biweekly' && hoursSinceLastExecution >= 24 * 12) {
     return true;
   } else if (normalizedFreq === 'monthly') {
