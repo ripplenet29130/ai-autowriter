@@ -6,6 +6,7 @@ import { useAuthStore } from '../../store/useAuthStore';
 import { ConfigList } from './ConfigList';
 import { ConfigForm } from './ConfigForm';
 import { WordPressConfig } from '../../types';
+import { WordPressService } from '../../services/wordPressService';
 
 export const WordPressConfigComponent: React.FC = () => {
   const { account } = useAuthStore();
@@ -38,6 +39,23 @@ export const WordPressConfigComponent: React.FC = () => {
   const handleSubmit = async (configData: Omit<WordPressConfig, 'id'>) => {
     setIsSubmitting(true);
     try {
+      const category = String(configData.category || configData.defaultCategory || '').trim();
+      if (category) {
+        const validationService = new WordPressService({
+          ...configData,
+          id: editingConfig?.id || 'category-validation',
+          defaultCategory: category,
+        });
+        const validationResult = await validationService.validateCategory(
+          category,
+          configData.postType || 'posts'
+        );
+        if (!validationResult.success) {
+          throw new Error(validationResult.message);
+        }
+        toast.success(validationResult.message);
+      }
+
       if (editingConfig) {
         await updateConfig(editingConfig.id, configData);
         toast.success('WordPress設定を更新しました');
@@ -114,6 +132,7 @@ export const WordPressConfigComponent: React.FC = () => {
           onSubmit={handleSubmit}
           onCancel={handleCancel}
           initialData={editingConfig || undefined}
+          isSubmitting={isSubmitting}
         />
       )}
 

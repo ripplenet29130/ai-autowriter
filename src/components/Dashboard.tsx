@@ -72,10 +72,29 @@ const getNextExecutionDate = (schedule: ScheduleSetting): Date | null => {
       }
     }
   } else if (normalizedFrequency === 'monthly') {
-    next = startAt ? new Date(startAt) : buildDateAtTime(now);
-    if (next <= now) {
-      for (let i = 0; i < 240 && next <= now; i += 1) {
-        next = addMonths(next, 1);
+    const monthlyDays = [...new Set(schedule.monthly_days || [])]
+      .filter((day) => Number.isInteger(day) && day >= 1 && day <= 31)
+      .sort((a, b) => a - b);
+    if (monthlyDays.length > 0) {
+      let candidate: Date | null = null;
+      for (let monthOffset = 0; monthOffset < 240 && !candidate; monthOffset += 1) {
+        const monthBase = new Date(now.getFullYear(), now.getMonth() + monthOffset, 1, hour, minute, 0, 0);
+        for (const day of monthlyDays) {
+          const possible = new Date(monthBase.getFullYear(), monthBase.getMonth(), day, hour, minute, 0, 0);
+          if (possible.getMonth() !== monthBase.getMonth()) continue;
+          if (possible <= now || (startAt && possible < startAt)) continue;
+          candidate = possible;
+          break;
+        }
+      }
+      if (!candidate) return null;
+      next = candidate;
+    } else {
+      next = startAt ? new Date(startAt) : buildDateAtTime(now);
+      if (next <= now) {
+        for (let i = 0; i < 240 && next <= now; i += 1) {
+          next = addMonths(next, 1);
+        }
       }
     }
   } else {
@@ -124,6 +143,11 @@ const getScheduledExecutionForDate = (schedule: ScheduleSetting, targetDate: Dat
   }
 
   if (normalizedFrequency === 'monthly') {
+    const monthlyDays = (schedule.monthly_days || [])
+      .filter((day) => Number.isInteger(day) && day >= 1 && day <= 31);
+    if (monthlyDays.length > 0) {
+      return monthlyDays.includes(targetDate.getDate()) ? executionAt : null;
+    }
     if (!startAt) return executionAt;
     return targetDate.getDate() === startAt.getDate() ? executionAt : null;
   }
@@ -368,7 +392,12 @@ export const Dashboard: React.FC = () => {
                       <div>
                         <div className="flex items-baseline gap-2">
                           <span className="text-2xl font-bold text-gray-900 leading-none">{schedule.post_time}</span>
-                          <span className="text-sm font-semibold text-gray-500">/{schedule.frequency}</span>
+                          <span className="text-sm font-semibold text-gray-500">
+                            /{schedule.frequency}
+                            {schedule.frequency === '毎月' && schedule.monthly_days?.length
+                              ? `（${schedule.monthly_days.join('日・')}日）`
+                              : ''}
+                          </span>
                         </div>
                         <div className="flex items-center gap-2 mt-1">
                           <span className="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide rounded border bg-green-50 text-green-700 border-green-200">

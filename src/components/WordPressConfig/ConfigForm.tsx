@@ -6,12 +6,14 @@ interface ConfigFormProps {
     onSubmit: (config: Omit<WordPressConfig, 'id'>) => void;
     onCancel: () => void;
     initialData?: WordPressConfig;
+    isSubmitting?: boolean;
 }
 
 export const ConfigForm: React.FC<ConfigFormProps> = ({
     onSubmit,
     onCancel,
     initialData,
+    isSubmitting = false,
 }) => {
     const [formData, setFormData] = useState({
         name: initialData?.name || '',
@@ -211,12 +213,17 @@ export const ConfigForm: React.FC<ConfigFormProps> = ({
                 </div>
 
                 <div className="flex space-x-3 pt-4 border-t border-gray-200">
-                    <button type="submit" className="btn-primary flex-1">
-                        {initialData ? '更新' : '保存'}
+                    <button
+                        type="submit"
+                        disabled={isSubmitting}
+                        className={`btn-primary flex-1 ${isSubmitting ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    >
+                        {isSubmitting ? 'カテゴリー確認中...' : initialData ? '更新' : '保存'}
                     </button>
                     <button
                         type="button"
                         onClick={onCancel}
+                        disabled={isSubmitting}
                         className="btn-secondary flex-1"
                     >
                         キャンセル

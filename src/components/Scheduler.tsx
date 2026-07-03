@@ -78,6 +78,7 @@ export const Scheduler: React.FC = () => {
     title_set_id: '',
     post_time: '09:00',
     frequency: '毎日',
+    monthly_days: [1] as number[],
     post_status: 'publish' as 'publish' | 'draft',
     start_date: '',
     end_date: '',
@@ -301,6 +302,9 @@ export const Scheduler: React.FC = () => {
 
     const submitData = {
       ...formData,
+      monthly_days: formData.frequency === '毎月'
+        ? [...new Set(formData.monthly_days)].sort((a, b) => a - b)
+        : null,
       ai_provider_override: useDefaultAiConfig ? '' : selectedAiProvider,
       ai_model_override: useDefaultAiConfig ? '' : selectedAiModel,
       target_word_count: Math.min(Math.max(formData.target_word_count || 2000, 500), 3000),
@@ -333,6 +337,10 @@ export const Scheduler: React.FC = () => {
     const minute = Number(submitData.post_time.split(':')[1]);
     if (!Number.isFinite(minute) || minute % 10 !== 0) {
       toast.error('投稿時刻は10分単位で選択してください');
+      return;
+    }
+    if (submitData.frequency === '毎月' && (!submitData.monthly_days || submitData.monthly_days.length === 0)) {
+      toast.error('毎月の投稿日を1日以上選択してください');
       return;
     }
 
@@ -405,6 +413,9 @@ export const Scheduler: React.FC = () => {
       title_set_id: (schedule as any).title_set_id || '',
       post_time: schedule.post_time,
       frequency: schedule.frequency,
+      monthly_days: Array.isArray(schedule.monthly_days) && schedule.monthly_days.length > 0
+        ? schedule.monthly_days
+        : [schedule.start_date ? Number(schedule.start_date.slice(8, 10)) : 1],
       post_status: schedule.post_status,
       start_date: schedule.start_date || '',
       end_date: schedule.end_date || '',
@@ -503,6 +514,7 @@ export const Scheduler: React.FC = () => {
       title_set_id: '',
       post_time: '09:00',
       frequency: '毎日',
+      monthly_days: [1],
       post_status: 'publish',
       start_date: '',
       end_date: '',
@@ -682,10 +694,29 @@ export const Scheduler: React.FC = () => {
         }
       }
     } else if (normalizedFrequency === 'monthly') {
-      next = startAt ? new Date(startAt) : buildDateAtTime(now);
-      if (next <= now) {
-        for (let i = 0; i < 240 && next <= now; i += 1) {
-          next = addMonths(next, 1);
+      const monthlyDays = [...new Set(schedule.monthly_days || [])]
+        .filter((day) => Number.isInteger(day) && day >= 1 && day <= 31)
+        .sort((a, b) => a - b);
+      if (monthlyDays.length > 0) {
+        let candidate: Date | null = null;
+        for (let monthOffset = 0; monthOffset < 240 && !candidate; monthOffset += 1) {
+          const monthBase = new Date(now.getFullYear(), now.getMonth() + monthOffset, 1, hour, minute, 0, 0);
+          for (const day of monthlyDays) {
+            const possible = new Date(monthBase.getFullYear(), monthBase.getMonth(), day, hour, minute, 0, 0);
+            if (possible.getMonth() !== monthBase.getMonth()) continue;
+            if (possible <= now || (startAt && possible < startAt)) continue;
+            candidate = possible;
+            break;
+          }
+        }
+        if (!candidate) return null;
+        next = candidate;
+      } else {
+        next = startAt ? new Date(startAt) : buildDateAtTime(now);
+        if (next <= now) {
+          for (let i = 0; i < 240 && next <= now; i += 1) {
+            next = addMonths(next, 1);
+          }
         }
       }
     } else {
@@ -1181,6 +1212,42 @@ export const Scheduler: React.FC = () => {
                 </select>
               </div>
 
+              {formData.frequency === '毎月' && (
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    毎月の投稿日 <span className="text-red-500">*</span>
+                  </label>
+                  <div className="grid grid-cols-7 sm:grid-cols-11 gap-2">
+                    {Array.from({ length: 31 }, (_, index) => index + 1).map((day) => {
+                      const selected = formData.monthly_days.includes(day);
+                      return (
+                        <button
+                          key={day}
+                          type="button"
+                          aria-pressed={selected}
+                          onClick={() => setFormData((current) => ({
+                            ...current,
+                            monthly_days: selected
+                              ? current.monthly_days.filter((value) => value !== day)
+                              : [...current.monthly_days, day].sort((a, b) => a - b),
+                          }))}
+                          className={`rounded-md border px-2 py-2 text-sm font-medium transition-colors ${
+                            selected
+                              ? 'border-blue-600 bg-blue-600 text-white'
+                              : 'border-gray-300 bg-white text-gray-700 hover:border-blue-400'
+                          }`}
+                        >
+                          {day}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="text-xs text-gray-500 mt-2">
+                    複数選択できます。例：1日と15日を選ぶと、毎月2回投稿します。
+                  </p>
+                </div>
+              )}
+
               {/* 投稿状態 */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -1484,6 +1551,9 @@ export const Scheduler: React.FC = () => {
                             </span>
                             <span className="text-xs font-semibold text-gray-500">
                               /{schedule.frequency}
+                              {schedule.frequency === '毎月' && schedule.monthly_days?.length
+                                ? `（${schedule.monthly_days.join('日・')}日）`
+                                : ''}
                             </span>
                           </div>
                           <div className="flex items-center gap-2 mt-1">

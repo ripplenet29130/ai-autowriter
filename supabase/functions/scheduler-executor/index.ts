@@ -104,6 +104,7 @@ interface Schedule {
   wp_config_id: string;
   post_time: string;
   frequency: string;
+  monthly_days?: number[] | null;
   status: boolean;
   keyword: string;
   post_status: 'draft' | 'publish';
@@ -510,7 +511,14 @@ Deno.serve(async (req: Request) => {
           continue;
         }
 
-        let shouldExecute = forceExecute || await shouldExecuteNow(timeToUse, currentTimeJST, scheduleSetting.frequency, scheduleSetting.id, supabase);
+        let shouldExecute = forceExecute || await shouldExecuteNow(
+          timeToUse,
+          currentTimeJST,
+          scheduleSetting.frequency,
+          scheduleSetting.monthly_days,
+          scheduleSetting.id,
+          supabase
+        );
         const bypassExecutionLock = forceExecute && allowDuplicateForce;
 
         // Force execution guard: avoid duplicate posts from repeated manual triggers.
@@ -554,6 +562,7 @@ Deno.serve(async (req: Request) => {
                 timeToUse,
                 currentTimeJST,
                 scheduleSetting.frequency,
+                scheduleSetting.monthly_days,
                 scheduleSetting.id,
                 supabase
               );
@@ -1140,6 +1149,7 @@ async function shouldExecuteNow(
   scheduleTime: string,
   currentTime: string,
   frequency: string,
+  monthlyDays: number[] | null | undefined,
   scheduleId: string,
   supabase: any
 ): Promise<boolean> {
@@ -1156,6 +1166,25 @@ async function shouldExecuteNow(
     return false;
   }
 
+  const freqMap: Record<string, string> = {
+    '毎日': 'daily',
+    '毎週': 'weekly',
+    '隔週': 'biweekly',
+    '毎月': 'monthly',
+  };
+  const normalizedFreq = freqMap[frequency] || frequency;
+  const now = new Date();
+  const jstDateFormatter = new Intl.DateTimeFormat('ja-JP', { timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit' });
+  const currentDay = Number(new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Tokyo',
+    day: 'numeric',
+  }).format(now));
+  const normalizedMonthlyDays = [...new Set(monthlyDays || [])]
+    .filter((day) => Number.isInteger(day) && day >= 1 && day <= 31);
+  if (normalizedFreq === 'monthly' && normalizedMonthlyDays.length > 0 && !normalizedMonthlyDays.includes(currentDay)) {
+    return false;
+  }
+
   const lastExecution = await getLastAutomaticExecutionForCadence(
     supabase,
     scheduleId,
@@ -1167,20 +1196,9 @@ async function shouldExecuteNow(
   }
 
   const lastExecutedAt = new Date(lastExecution.executed_at);
-  const now = new Date();
   const hoursSinceLastExecution = (now.getTime() - lastExecutedAt.getTime()) / (1000 * 60 * 60);
 
-  // 髫ｴ魃会ｽｽ・･髫ｴ蟷｢・ｽ・ｬ鬮ｫ・ｱ隶抵ｽｭ郢晢ｽｻ鬯ｯ繝ｻ・ｽ・ｻ髯溯ｶ｣・ｽ・ｦ驛｢・ｧ陞ｳ螢ｽ繝ｻ鬮ｫ・ｱ隶抵ｽｭ遶頑･｢譽秘包ｽｻ鬩ｪ・､
-  const freqMap: Record<string, string> = {
-    '毎日': 'daily',
-    '毎週': 'weekly',
-    '隔週': 'biweekly',
-    '毎月': 'monthly',
-  };
-  const normalizedFreq = freqMap[frequency] || frequency;
-
   // JST驍ｵ・ｺ繝ｻ・ｧ驍ｵ・ｺ繝ｻ・ｮ髫ｴ魃会ｽｽ・･髣疲・・ｿ・ｶ繝ｻ・ｯ驕呈汚・ｽ・ｼ郢晢ｽｻ騾｡繝ｻ
-  const jstDateFormatter = new Intl.DateTimeFormat('ja-JP', { timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit' });
   const lastExecutedDate = jstDateFormatter.format(lastExecutedAt);
   const currentDate = jstDateFormatter.format(now);
 
@@ -1195,8 +1213,13 @@ async function shouldExecuteNow(
     return true;
   } else if (normalizedFreq === 'biweekly' && hoursSinceLastExecution >= 24 * 12) {
     return true;
-  } else if (normalizedFreq === 'monthly' && hoursSinceLastExecution >= 24 * 27) {
-    return true;
+  } else if (normalizedFreq === 'monthly') {
+    if (normalizedMonthlyDays.length > 0) {
+      return lastExecutedDate !== currentDate;
+    }
+    if (hoursSinceLastExecution >= 24 * 27) {
+      return true;
+    }
   }
 
   return false;

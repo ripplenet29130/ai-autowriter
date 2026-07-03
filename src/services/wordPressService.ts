@@ -24,6 +24,13 @@ export interface WordPressConnectionTestResult {
   details?: string;
 }
 
+export interface WordPressCategoryValidationResult {
+  success: boolean;
+  message: string;
+  categoryId?: number;
+  taxonomyField?: string;
+}
+
 export class WordPressService {
   private config: WordPressConfig | null = null;
   private normalizeWordPressUrl(url: string): string {
@@ -132,6 +139,119 @@ export class WordPressService {
         message: `接続診断を実行できませんでした: ${message}`
       };
     }
+  }
+
+  async validateCategory(
+    categoryIdentifier: string,
+    postType = 'posts'
+  ): Promise<WordPressCategoryValidationResult> {
+    if (!this.config) {
+      await this.loadActiveConfig();
+    }
+    if (!this.config) {
+      return {
+        success: false,
+        message: 'WordPress設定が見つかりません。'
+      };
+    }
+
+    const trimmed = String(categoryIdentifier || '').trim();
+    if (!trimmed) {
+      return {
+        success: true,
+        message: 'カテゴリーは指定されていません。'
+      };
+    }
+
+    const normalizedPostType = String(postType || 'posts').trim() || 'posts';
+    const candidates = await this.getTaxonomyCandidatesForPostType(normalizedPostType);
+    const explicitMatch = trimmed.match(/^([A-Za-z0-9_-]+)\s*[:：]\s*(.+)$/);
+    const targets = explicitMatch
+      ? [{ field: explicitMatch[1].trim(), restBase: explicitMatch[1].trim(), term: explicitMatch[2].trim() }]
+      : candidates.map((candidate) => ({ ...candidate, term: trimmed }));
+
+    let successfulRequests = 0;
+    let lastError: unknown = null;
+
+    for (const target of targets) {
+      try {
+        const parsedId = /^\d+$/.test(target.term) ? Number(target.term) : null;
+        if (parsedId !== null) {
+          const response = await axios.get(
+            `${this.config.url}/wp-json/wp/v2/${target.restBase}/${parsedId}`,
+            { headers: this.getAuthHeaders() }
+          );
+          successfulRequests += 1;
+          if (response.data?.id === parsedId) {
+            return {
+              success: true,
+              message: `カテゴリー「${response.data.name || target.term}」を確認しました。`,
+              categoryId: parsedId,
+              taxonomyField: target.field
+            };
+          }
+          continue;
+        }
+
+        const slugResponse = await axios.get(
+          `${this.config.url}/wp-json/wp/v2/${target.restBase}`,
+          {
+            headers: this.getAuthHeaders(),
+            params: { slug: target.term }
+          }
+        );
+        successfulRequests += 1;
+        const slugMatch = (slugResponse.data || []).find((term: any) =>
+          String(term.slug || '').toLowerCase() === target.term.toLowerCase()
+        );
+        if (slugMatch) {
+          return {
+            success: true,
+            message: `カテゴリー「${slugMatch.name || target.term}」を確認しました。`,
+            categoryId: slugMatch.id,
+            taxonomyField: target.field
+          };
+        }
+
+        const nameResponse = await axios.get(
+          `${this.config.url}/wp-json/wp/v2/${target.restBase}`,
+          {
+            headers: this.getAuthHeaders(),
+            params: { search: target.term }
+          }
+        );
+        successfulRequests += 1;
+        const normalizedTerm = target.term.toLowerCase();
+        const nameMatch = (nameResponse.data || []).find((term: any) =>
+          String(term.name || '').toLowerCase() === normalizedTerm ||
+          String(term.slug || '').toLowerCase() === normalizedTerm
+        );
+        if (nameMatch) {
+          return {
+            success: true,
+            message: `カテゴリー「${nameMatch.name || target.term}」を確認しました。`,
+            categoryId: nameMatch.id,
+            taxonomyField: target.field
+          };
+        }
+      } catch (error) {
+        lastError = error;
+      }
+    }
+
+    if (successfulRequests === 0) {
+      const status = axios.isAxiosError(lastError) ? lastError.response?.status : undefined;
+      const statusText = status ? `（HTTP ${status}）` : '';
+      return {
+        success: false,
+        message: `WordPressからカテゴリーを確認できませんでした${statusText}。URL、認証情報、投稿タイプ、REST APIの公開設定を確認してください。`
+      };
+    }
+
+    return {
+      success: false,
+      message: `WordPressにカテゴリー「${trimmed}」が見つかりません。カテゴリー名またはスラッグを完全一致で入力してください。`
+    };
   }
 
   /**

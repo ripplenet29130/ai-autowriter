@@ -265,6 +265,7 @@ class ScheduleService {
             wp_config_id: schedule.wp_config_id,
             post_time: schedule.post_time,
             frequency: schedule.frequency,
+            monthly_days: schedule.monthly_days ?? null,
             status: schedule.status,
             keyword: schedule.keyword,
             related_keywords: schedule.related_keywords,
@@ -307,6 +308,11 @@ class ScheduleService {
 
             const missingColumn = this.extractMissingColumn(error);
             if (missingColumn && Object.prototype.hasOwnProperty.call(insertPayload, missingColumn)) {
+                if (missingColumn === 'monthly_days') {
+                    throw new Error(
+                        '毎月の投稿日を保存できませんでした。DBマイグレーションを適用してください。'
+                    );
+                }
                 if (missingColumn === 'fact_check_auto_fix_enabled' && requestedAutoFixEnabled) {
                     throw new Error(
                         '「ファクトチェック後に自動修正」をONに保存できませんでした。DBスキーマが古い可能性があります。schedule_settings.fact_check_auto_fix_enabled を追加してください。'
@@ -443,6 +449,11 @@ class ScheduleService {
 
             const missingColumn = this.extractMissingColumn(error);
             if (missingColumn && Object.prototype.hasOwnProperty.call(updatePayload, missingColumn)) {
+                if (missingColumn === 'monthly_days') {
+                    throw new Error(
+                        '毎月の投稿日を保存できませんでした。DBマイグレーションを適用してください。'
+                    );
+                }
                 if (missingColumn === 'fact_check_auto_fix_enabled' && requestedAutoFixEnabled) {
                     throw new Error(
                         '「ファクトチェック後に自動修正」をONに保存できませんでした。DBスキーマが古い可能性があります。schedule_settings.fact_check_auto_fix_enabled を追加してください。'
