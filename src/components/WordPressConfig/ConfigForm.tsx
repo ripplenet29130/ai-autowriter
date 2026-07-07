@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Globe, X } from 'lucide-react';
+import { Check, Clipboard, Globe, X } from 'lucide-react';
 import { WordPressConfig } from '../../types';
 
 interface ConfigFormProps {
@@ -27,6 +27,25 @@ export const ConfigForm: React.FC<ConfigFormProps> = ({
     });
 
     const [errors, setErrors] = useState<Record<string, string>>({});
+    const [copied, setCopied] = useState(false);
+
+    const wpRestApiCode = `// カスタム投稿タイプ news をREST APIで公開する設定
+add_filter('register_post_type_args', function($args, $post_type) {
+    if ($post_type === 'news') {
+        $args['show_in_rest'] = true;
+        $args['rest_base'] = 'news';
+    }
+    return $args;
+}, 10, 2);
+
+// お知らせカテゴリー news_category をREST APIで公開する設定
+add_filter('register_taxonomy_args', function($args, $taxonomy) {
+    if ($taxonomy === 'news_category') {
+        $args['show_in_rest'] = true;
+        $args['rest_base'] = 'news_category';
+    }
+    return $args;
+}, 10, 2);`;
 
     const validate = (): boolean => {
         const newErrors: Record<string, string> = {};
@@ -79,6 +98,12 @@ export const ConfigForm: React.FC<ConfigFormProps> = ({
         }
     };
 
+    const handleCopyRestApiCode = async () => {
+        await navigator.clipboard.writeText(wpRestApiCode);
+        setCopied(true);
+        window.setTimeout(() => setCopied(false), 2000);
+    };
+
     return (
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
             <div className="flex items-center justify-between mb-6">
@@ -97,6 +122,16 @@ export const ConfigForm: React.FC<ConfigFormProps> = ({
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-4">
+                <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
+                    <p className="font-semibold">投稿タイプ・カテゴリーの設定方法</p>
+                    <ul className="mt-2 list-disc space-y-1 pl-5">
+                        <li>通常の「投稿」に入れる場合は、投稿タイプに <code>posts</code> を入力します。</li>
+                        <li>「お知らせ」などのカスタム投稿に入れる場合は、WordPressでREST APIへ公開されている投稿タイプ名を入力します。例: <code>news</code></li>
+                        <li>カテゴリーは、選んだ投稿タイプに紐づいているカテゴリースラッグを入力します。例: お知らせカテゴリーの「コラム」は <code>column</code></li>
+                        <li>保存時に、投稿タイプとカテゴリーがWordPress上に実在するか自動で確認します。</li>
+                    </ul>
+                </div>
+
                 <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">
                         設定名 <span className="text-red-500">*</span>
@@ -210,6 +245,40 @@ export const ConfigForm: React.FC<ConfigFormProps> = ({
                     <p className="text-xs text-gray-500 mt-1">
                         このURLの本文表現を参考に、語尾や文体の傾向を新規記事へ反映します。内容そのものはコピーしません。
                     </p>
+                </div>
+
+                <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                    <div className="mb-3 flex items-start justify-between gap-3">
+                        <div>
+                            <p className="text-sm font-semibold text-gray-900">
+                                WordPress側に必要なREST API公開コード例
+                            </p>
+                            <p className="mt-1 text-xs text-gray-600">
+                                カスタム投稿タイプや独自カテゴリーを使う場合は、WordPressテーマの functions.php などに追加します。
+                                投稿タイプ名・タクソノミー名が異なる場合は <code>news</code> / <code>news_category</code> を置き換えてください。
+                            </p>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={handleCopyRestApiCode}
+                            className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs font-medium text-gray-700 hover:bg-gray-100"
+                        >
+                            {copied ? (
+                                <>
+                                    <Check className="h-4 w-4 text-green-600" />
+                                    コピー済み
+                                </>
+                            ) : (
+                                <>
+                                    <Clipboard className="h-4 w-4" />
+                                    コピー
+                                </>
+                            )}
+                        </button>
+                    </div>
+                    <pre className="max-h-72 overflow-auto rounded-lg bg-gray-900 p-4 text-xs leading-relaxed text-gray-100">
+                        <code>{wpRestApiCode}</code>
+                    </pre>
                 </div>
 
                 <div className="flex space-x-3 pt-4 border-t border-gray-200">

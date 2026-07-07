@@ -1211,21 +1211,69 @@ function formatReadableParagraphs(content: string): string {
   // ** (太字マーク) を除去 — 公開記事ではMarkdown強調をそのまま残さない
   text = text.replace(/\*\*(.+?)\*\*/g, '$1').replace(/\*\*/g, '');
 
-  const blocks = text.split(/\n{2,}/);
-  const formattedBlocks = blocks.map((block) => {
-    const trimmed = block.trim();
-    if (!trimmed) return '';
-    if (/^(```|#{1,6}\s|[-*]\s|\d+\.\s|>\s|\|)/m.test(trimmed)) {
-      return trimmed;
+  const structuredLinePattern = /^(```|#{1,6}\s|[-*]\s|\d+\.\s|>\s|\|)/;
+  const splitPlainParagraph = (value: string): string[] => {
+    const normalized = value.replace(/\s+/g, ' ').trim();
+    if (!normalized) return [];
+
+    const sentences = normalized
+      .match(/[^。！？!?]+[。！？!?]?/g)
+      ?.map((sentence) => sentence.trim())
+      .filter(Boolean) ?? [normalized];
+
+    if (sentences.length <= 1) return [normalized];
+
+    const paragraphs: string[] = [];
+    let buffer: string[] = [];
+    let charCount = 0;
+
+    for (const sentence of sentences) {
+      buffer.push(sentence);
+      charCount += sentence.length;
+
+      if (buffer.length >= 2 || charCount >= 140) {
+        paragraphs.push(buffer.join(''));
+        buffer = [];
+        charCount = 0;
+      }
     }
 
-    return trimmed
-      .replace(/。(?=\S)/g, '。\n\n')
-      .replace(/！(?=\S)/g, '！\n\n')
-      .replace(/？(?=\S)/g, '？\n\n')
-      .replace(/\n{3,}/g, '\n\n')
-      .trim();
-  }).filter(Boolean);
+    if (buffer.length > 0) paragraphs.push(buffer.join(''));
+    return paragraphs;
+  };
+
+  const formatMixedBlock = (block: string): string[] => {
+    const output: string[] = [];
+    let plainBuffer: string[] = [];
+
+    const flushPlainBuffer = () => {
+      const paragraphs = splitPlainParagraph(plainBuffer.join(' '));
+      output.push(...paragraphs);
+      plainBuffer = [];
+    };
+
+    for (const rawLine of block.split('\n')) {
+      const line = rawLine.trim();
+      if (!line) {
+        flushPlainBuffer();
+        continue;
+      }
+
+      if (structuredLinePattern.test(line)) {
+        flushPlainBuffer();
+        output.push(line);
+        continue;
+      }
+
+      plainBuffer.push(line);
+    }
+
+    flushPlainBuffer();
+    return output;
+  };
+
+  const blocks = text.split(/\n{2,}/);
+  const formattedBlocks = blocks.flatMap((block) => formatMixedBlock(block)).filter(Boolean);
 
   return formattedBlocks.join('\n\n').trim();
 }
