@@ -1,4 +1,4 @@
-import type { ArticleOutline, ArticleStructureType } from '../types/index.ts';
+import type { ArticleOutline, ArticleStructureType } from './articleTypes.ts';
 
 export function compactAutoModeInstructions(parts: Array<string | undefined | null | false>): string | undefined {
   const text = parts

@@ -6,7 +6,7 @@ import { buildSummaryPrompt, buildSupplementPrompt } from './generationPrompts.t
 import { buildSchedulerOutlinePrompt } from './multiStepPromptTemplates.ts';
 import { parseOutlineSections, parseOutlineTitle } from './outlineParser.ts';
 import { buildHighQualitySectionPrompt } from './sectionGenerationPrompt.ts';
-import type { ArticleStructureType } from '../types/index.ts';
+import type { ArticleStructureType } from './articleTypes.ts';
 
 type Tone = 'professional' | 'casual';
 

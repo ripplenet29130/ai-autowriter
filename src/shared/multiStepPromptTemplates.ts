@@ -1,4 +1,4 @@
-import type { ArticleStructureType } from '../types/index.ts';
+import type { ArticleStructureType } from './articleTypes.ts';
 import type { SearchConsolePromptQuery } from './articleGenerationCore.ts';
 
 export interface OutlinePromptInput {

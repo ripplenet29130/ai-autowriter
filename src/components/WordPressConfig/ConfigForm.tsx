@@ -105,6 +105,7 @@ add_filter('register_taxonomy_args', function($args, $taxonomy) {
     };
 
     return (
+        <div className="space-y-4">
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
             <div className="flex items-center justify-between mb-6">
                 <div className="flex items-center space-x-3">
@@ -247,40 +248,6 @@ add_filter('register_taxonomy_args', function($args, $taxonomy) {
                     </p>
                 </div>
 
-                <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
-                    <div className="mb-3 flex items-start justify-between gap-3">
-                        <div>
-                            <p className="text-sm font-semibold text-gray-900">
-                                WordPress側に必要なREST API公開コード例
-                            </p>
-                            <p className="mt-1 text-xs text-gray-600">
-                                カスタム投稿タイプや独自カテゴリーを使う場合は、WordPressテーマの functions.php などに追加します。
-                                投稿タイプ名・タクソノミー名が異なる場合は <code>news</code> / <code>news_category</code> を置き換えてください。
-                            </p>
-                        </div>
-                        <button
-                            type="button"
-                            onClick={handleCopyRestApiCode}
-                            className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs font-medium text-gray-700 hover:bg-gray-100"
-                        >
-                            {copied ? (
-                                <>
-                                    <Check className="h-4 w-4 text-green-600" />
-                                    コピー済み
-                                </>
-                            ) : (
-                                <>
-                                    <Clipboard className="h-4 w-4" />
-                                    コピー
-                                </>
-                            )}
-                        </button>
-                    </div>
-                    <pre className="max-h-72 overflow-auto rounded-lg bg-gray-900 p-4 text-xs leading-relaxed text-gray-100">
-                        <code>{wpRestApiCode}</code>
-                    </pre>
-                </div>
-
                 <div className="flex space-x-3 pt-4 border-t border-gray-200">
                     <button
                         type="submit"
@@ -299,6 +266,41 @@ add_filter('register_taxonomy_args', function($args, $taxonomy) {
                     </button>
                 </div>
             </form>
+        </div>
+
+        <div className="rounded-xl border border-gray-200 bg-gray-50 p-6 shadow-sm">
+            <div className="mb-3 flex items-start justify-between gap-3">
+                <div>
+                    <p className="text-sm font-semibold text-gray-900">
+                        WordPress側に必要なREST API公開コード例
+                    </p>
+                    <p className="mt-1 text-xs text-gray-600">
+                        カスタム投稿タイプや独自カテゴリーを使う場合は、WordPressテーマの functions.php などに追加します。
+                        投稿タイプ名・タクソノミー名が異なる場合は <code>news</code> / <code>news_category</code> を置き換えてください。
+                    </p>
+                </div>
+                <button
+                    type="button"
+                    onClick={handleCopyRestApiCode}
+                    className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs font-medium text-gray-700 hover:bg-gray-100"
+                >
+                    {copied ? (
+                        <>
+                            <Check className="h-4 w-4 text-green-600" />
+                            コピー済み
+                        </>
+                    ) : (
+                        <>
+                            <Clipboard className="h-4 w-4" />
+                            コピー
+                        </>
+                    )}
+                </button>
+            </div>
+            <pre className="max-h-72 overflow-auto rounded-lg bg-gray-900 p-4 text-xs leading-relaxed text-gray-100">
+                <code>{wpRestApiCode}</code>
+            </pre>
+        </div>
         </div>
     );
 };
