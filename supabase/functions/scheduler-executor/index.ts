@@ -84,6 +84,7 @@ async function fetchWithTimeout(
 interface WordPressConfig {
   id: string;
   account_id?: string;
+  user_id?: string;
   name: string;
   url: string;
   username: string;
@@ -173,6 +174,7 @@ function isWithinScheduleDateRange(schedule: Schedule, now = new Date()): boolea
 interface AIConfig {
   id: string;
   account_id?: string;
+  user_id?: string;
   provider: string;
   api_key: string;
   model: string;
@@ -377,15 +379,8 @@ Deno.serve(async (req: Request) => {
       const { data: appSettings, error: appSettingsError } = await supabase
         .from('app_settings')
         .select('key, value')
+        .is('user_id', null)
         .in('key', [
-          'chatwork_api_token',
-          'chatwork_room_id',
-          'chatwork_message_template',
-          'fact_check_alert_chatwork_room_id',
-          'fact_check_notify_mode',
-          'serpapi_key',
-          'google_custom_search_api_key',
-          'google_custom_search_engine_id',
           'image_cost_usd_per_image',
           'scheduler_max_posts_per_run',
           'scheduler_max_total_posts_per_run'
@@ -480,6 +475,7 @@ Deno.serve(async (req: Request) => {
         const scheduleSetting: Schedule = schedule as any;
         const wpConfig: WordPressConfig = (schedule as any).wordpress_configs;
         const scheduleAccountId = scheduleSetting.account_id || wpConfig.account_id;
+        const scheduleUserId = scheduleSetting.user_id || wpConfig.user_id;
         const timeToUse = scheduleSetting.post_time;
 
         if (!forceExecute && executedWpConfigIds.has(wpConfig.id)) {
@@ -588,8 +584,9 @@ Deno.serve(async (req: Request) => {
 
           // Prefer schedule-specific AI config. Fall back to the active config.
           const accountAiConfigs = normalizedAiConfigs.filter((config) => {
-            if (!scheduleAccountId) return true;
-            return config.account_id === scheduleAccountId;
+            if (scheduleUserId) return config.user_id === scheduleUserId;
+            if (scheduleAccountId) return config.account_id === scheduleAccountId;
+            return true;
           });
           const accountActiveAiConfig = accountAiConfigs.find((config) => config.is_active) || accountAiConfigs[0];
 
@@ -618,11 +615,11 @@ Deno.serve(async (req: Request) => {
           let accountImageCostUsdPerImage = imageCostUsdPerImage;
           let accountImageGenerationAllowed = true;
 
-          if (scheduleAccountId) {
+          if (scheduleUserId || scheduleAccountId) {
             const { data: accountAppSettings, error: accountAppSettingsError } = await supabase
               .from('app_settings')
               .select('key, value')
-              .eq('account_id', scheduleAccountId)
+              .match(scheduleUserId ? { user_id: scheduleUserId } : { account_id: scheduleAccountId })
               .in('key', [
                 'chatwork_api_token',
                 'chatwork_room_id',
@@ -1002,6 +999,7 @@ async function createExecutionProgressHistory(
 ): Promise<string | null> {
   const payload: Record<string, any> = {
     account_id: params.schedule.account_id || params.wpConfig.account_id || null,
+    user_id: params.schedule.user_id || params.wpConfig.user_id || null,
     schedule_id: params.schedule.id,
     wordpress_config_id: params.wpConfig.id,
     executed_at: new Date().toISOString(),
@@ -1032,6 +1030,15 @@ async function createExecutionProgressHistory(
 
   if (isMissingColumnError(result.error, 'account_id')) {
     delete payload.account_id;
+    result = await supabase
+      .from('execution_history')
+      .insert(payload)
+      .select('id')
+      .single();
+  }
+
+  if (isMissingColumnError(result.error, 'user_id')) {
+    delete payload.user_id;
     result = await supabase
       .from('execution_history')
       .insert(payload)
@@ -1804,11 +1811,12 @@ async function executeSchedule(
 
   if (shouldUseTitleSet && schedule.title_set_id) {
     // 驛｢・ｧ繝ｻ・ｿ驛｢・ｧ繝ｻ・､驛｢譎冗樟・取刮・ｹ・ｧ繝ｻ・ｻ驛｢譏ｴ繝ｻ郢晢ｽｨ驍ｵ・ｺ闕ｵ譎｢・ｽ閾･・ｹ・ｧ繝ｻ・ｿ驛｢・ｧ繝ｻ・､驛｢譎冗樟・取刮・ｹ・ｧ髮区ｧｫ蠕宣辧霈斐・
-    const { data: titleSet } = await supabase
+    let titleSetQuery = supabase
       .from('title_sets')
       .select('titles')
-      .eq('id', schedule.title_set_id)
-      .maybeSingle();
+      .eq('id', schedule.title_set_id);
+    if (schedule.user_id) titleSetQuery = titleSetQuery.eq('user_id', schedule.user_id);
+    const { data: titleSet } = await titleSetQuery.maybeSingle();
 
     if (titleSet && titleSet.titles && titleSet.titles.length > 0) {
       const selectedTitle = await selectUnusedTitle(schedule.id, titleSet.titles, supabase);
@@ -1827,11 +1835,12 @@ async function executeSchedule(
     const useTitle = Boolean(schedule.title_set_id);
 
     if (useTitle && schedule.title_set_id) {
-      const { data: titleSet } = await supabase
+      let titleSetQuery = supabase
         .from('title_sets')
         .select('titles')
-        .eq('id', schedule.title_set_id)
-        .maybeSingle();
+        .eq('id', schedule.title_set_id);
+      if (schedule.user_id) titleSetQuery = titleSetQuery.eq('user_id', schedule.user_id);
+      const { data: titleSet } = await titleSetQuery.maybeSingle();
 
       if (titleSet && titleSet.titles && titleSet.titles.length > 0) {
         const selectedTitle = await selectUnusedTitle(schedule.id, titleSet.titles, supabase);
@@ -1876,11 +1885,12 @@ async function executeSchedule(
   // 1.5 驛｢譎丞ｹｲ・取ｺｽ・ｹ譎｢・ｽ・ｳ驛｢譎丞ｹｲ郢晢ｽｨ驛｢・ｧ繝ｻ・ｻ驛｢譏ｴ繝ｻ郢晢ｽｨ驍ｵ・ｺ繝ｻ・ｮ髯ｷ・ｿ鬮｢ﾂ繝ｻ・ｾ隴会ｽｦ繝ｻ・ｼ陋ｹ・ｻ遶包｣ｰ驛｢・ｧ陟募ｾ後・郢晢ｽｻ郢晢ｽｻ
   let customInstructions = '';
   if (schedule.prompt_set_id) {
-    const { data: promptSet } = await supabase
+    let promptSetQuery = supabase
       .from('prompt_sets')
       .select('custom_instructions')
-      .eq('id', schedule.prompt_set_id)
-      .maybeSingle();
+      .eq('id', schedule.prompt_set_id);
+    if (schedule.user_id) promptSetQuery = promptSetQuery.eq('user_id', schedule.user_id);
+    const { data: promptSet } = await promptSetQuery.maybeSingle();
 
     if (promptSet) {
       customInstructions = promptSet.custom_instructions;
@@ -2302,7 +2312,7 @@ async function executeSchedule(
     console.log(`Starting fact-check for article: ${articleTitle}`);
 
     try {
-      // Prefer account-scoped user settings, then fall back to account app_settings.
+      // Prefer user-scoped settings, then fall back to legacy account app_settings.
       const scheduleUserId = (schedule as any).user_id;
       const scheduleAccountId = (schedule as any).account_id;
       let factCheckSettings: any = null;
@@ -2336,7 +2346,9 @@ async function executeSchedule(
             'fact_check_auto_fix_enabled',
           ]);
 
-        if (scheduleAccountId) {
+        if (scheduleUserId) {
+          appSettingsQuery = appSettingsQuery.eq('user_id', scheduleUserId);
+        } else if (scheduleAccountId) {
           appSettingsQuery = appSettingsQuery.eq('account_id', scheduleAccountId);
         }
 
@@ -2472,6 +2484,7 @@ async function executeSchedule(
         // Save the fact-check report for execution history and alerts.
         const { data: savedReport } = await supabase.from('fact_check_results').insert({
           account_id: scheduleAccountId,
+          user_id: scheduleUserId || null,
           schedule_id: schedule.id,
           checked_items: factCheckResults,
           total_checked: itemsToCheck.length,
@@ -2560,6 +2573,7 @@ async function executeSchedule(
     status: articleSnapshotStatus,
     tone: writingTone,
     aiConfig,
+    schedule,
     wpConfig,
     postId,
     publishedAt: publishedAtIso,
@@ -2682,6 +2696,7 @@ ${factCheckAlerts.map((item, index) => `${index + 1}. ${item}`).join('\n')}${fac
   // 6. 陞ｳ貅ｯ・｡謔滂ｽｱ・･雎・ｽｴ郢ｧ蜑・ｽｿ譎擾ｽｭ繝ｻ
   const executionHistoryPayload: Record<string, any> = {
     account_id: schedule.account_id || wpConfig.account_id || null,
+    user_id: schedule.user_id || wpConfig.user_id || null,
     schedule_id: schedule.id,
     wordpress_config_id: wpConfig.id,
     executed_at: new Date().toISOString(),
@@ -3047,6 +3062,23 @@ function findHeadingOnlySections(content: string): string[] {
     headings.push({ index: i, level: getHeadingLevel(line), title });
   }
 
+  if (isMissingColumnError(executionHistoryResult.error, 'user_id')) {
+    console.warn('execution_history.user_id is missing. Retrying history save without user_id.');
+    delete executionHistoryPayload.user_id;
+    executionHistoryResult = progressHistoryId
+      ? await supabase
+        .from('execution_history')
+        .update(executionHistoryPayload)
+        .eq('id', progressHistoryId)
+        .select('id')
+        .single()
+      : await supabase
+        .from('execution_history')
+        .insert(executionHistoryPayload)
+        .select('id')
+        .single();
+  }
+
   const missing: string[] = [];
   for (let i = 0; i < headings.length; i++) {
     const current = headings[i];
@@ -3371,6 +3403,7 @@ async function saveGeneratedArticleSnapshot(
     status: 'draft' | 'published' | 'failed';
     tone: WritingTone;
     aiConfig: AIConfig;
+    schedule: Schedule;
     wpConfig: WordPressConfig;
     postId?: string | null;
     publishedAt?: string | null;
@@ -3380,6 +3413,8 @@ async function saveGeneratedArticleSnapshot(
   const readingTime = Math.max(1, Math.round(wordCount / 500));
 
   const payload = {
+    account_id: params.schedule.account_id || params.wpConfig.account_id || null,
+    user_id: params.schedule.user_id || params.wpConfig.user_id || null,
     title: params.title,
     content: params.content,
     excerpt: extractExcerpt(params.content),
@@ -3986,6 +4021,7 @@ async function recordScheduleExecutionFailure(
   try {
     const failureHistoryPayload: Record<string, any> = {
       account_id: schedule.account_id || wpConfig.account_id || null,
+      user_id: schedule.user_id || wpConfig.user_id || null,
       schedule_id: schedule.id,
       wordpress_config_id: wpConfig.id,
       executed_at: new Date().toISOString(),
@@ -4042,6 +4078,19 @@ async function recordScheduleExecutionFailure(
           .insert(failureHistoryPayload);
     }
 
+    if (isMissingColumnError(insertResult.error, 'user_id')) {
+      console.warn('execution_history.user_id is missing. Retrying failed history save without user_id.');
+      delete failureHistoryPayload.user_id;
+      insertResult = runningHistoryId
+        ? await supabase
+          .from('execution_history')
+          .update(failureHistoryPayload)
+          .eq('id', runningHistoryId)
+        : await supabase
+          .from('execution_history')
+          .insert(failureHistoryPayload);
+    }
+
     const { error: insertError } = insertResult;
 
     if (insertError) {
@@ -4060,6 +4109,7 @@ async function recordForceExecutionSkippedByLock(
   const reason = '前回の予約投稿実行ロックがまだ有効です。前の処理が実行中、または異常終了後のロック期間待ちです。数分後に再実行するか、ロックを解除してください。';
   const payload: Record<string, any> = {
     account_id: schedule.account_id || wpConfig.account_id || null,
+    user_id: schedule.user_id || wpConfig.user_id || null,
     schedule_id: schedule.id,
     wordpress_config_id: wpConfig.id,
     executed_at: new Date().toISOString(),
@@ -4088,6 +4138,13 @@ async function recordForceExecutionSkippedByLock(
 
     if (isMissingColumnError(result.error, 'account_id')) {
       delete payload.account_id;
+      result = await supabase
+        .from('execution_history')
+        .insert(payload);
+    }
+
+    if (isMissingColumnError(result.error, 'user_id')) {
+      delete payload.user_id;
       result = await supabase
         .from('execution_history')
         .insert(payload);

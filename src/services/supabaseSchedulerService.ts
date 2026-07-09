@@ -1,6 +1,11 @@
 import { supabase } from './supabaseClient';
 import { WordPressConfig, AIConfig, ScheduleSettings } from '../types';
-import { getCurrentAccountId, getRequiredAccountId } from './accountScope';
+import {
+  getRequiredAccountId,
+  getRequiredUserId,
+  scopeMutationToCurrentUser,
+  scopeQueryToCurrentUser,
+} from './accountScope';
 
 class SupabaseSchedulerService {
   private isMissingStyleReferenceColumnError(error: any): boolean {
@@ -22,6 +27,7 @@ class SupabaseSchedulerService {
     const normalizedPostType = wpConfig.postType || 'posts';
     const normalizedStyleReferenceUrl = wpConfig.styleReferenceUrl?.trim() || null;
     const accountId = getRequiredAccountId();
+    const userId = getRequiredUserId();
 
     const { data: account } = await supabase
       .from('accounts')
@@ -34,13 +40,15 @@ class SupabaseSchedulerService {
       .select('id')
       .eq('id', configId)
       .eq('account_id', accountId)
+      .eq('user_id', userId)
       .maybeSingle();
 
     if (!existingConfig) {
       const { count, error: countError } = await supabase
         .from('wordpress_configs')
         .select('*', { count: 'exact', head: true })
-        .eq('account_id', accountId);
+        .eq('account_id', accountId)
+        .eq('user_id', userId);
 
       if (countError) {
         console.error('Error checking WordPress config limit:', countError);
@@ -56,6 +64,7 @@ class SupabaseSchedulerService {
     const wordpressConfigData = {
       id: configId,
       account_id: accountId,
+      user_id: userId,
       name: wpConfig.name,
       url: wpConfig.url,
       username: wpConfig.username,
@@ -89,6 +98,7 @@ class SupabaseSchedulerService {
     const legacyConfigData = {
       id: configId,
       account_id: accountId,
+      user_id: userId,
       name: wpConfig.name,
       url: wpConfig.url,
       username: wpConfig.username,
@@ -125,16 +135,19 @@ class SupabaseSchedulerService {
   async saveScheduleSettings(wpConfigId: string, settings: ScheduleSettings): Promise<void> {
     if (!supabase) return;
     const accountId = getRequiredAccountId();
+    const userId = getRequiredUserId();
 
     const { data: existing } = await supabase
       .from('schedule_settings')
       .select('id')
       .eq('wp_config_id', wpConfigId)
       .eq('account_id', accountId)
+      .eq('user_id', userId)
       .maybeSingle();
 
     const scheduleData = {
       account_id: accountId,
+      user_id: userId,
       wp_config_id: wpConfigId,
       status: settings.isActive,
       frequency: settings.frequency,
@@ -148,7 +161,8 @@ class SupabaseSchedulerService {
         .from('schedule_settings')
         .update(scheduleData)
         .eq('id', existing.id)
-        .eq('account_id', accountId);
+        .eq('account_id', accountId)
+        .eq('user_id', userId);
 
       if (error) {
         console.error('Error updating schedule settings:', error);
@@ -168,8 +182,6 @@ class SupabaseSchedulerService {
 
   async loadWordPressConfigs(): Promise<WordPressConfig[]> {
     if (!supabase) return [];
-    const accountId = getCurrentAccountId();
-
     let configsQuery = supabase
       .from('wordpress_configs')
       .select('*')
@@ -178,11 +190,8 @@ class SupabaseSchedulerService {
     let schedulesQuery = supabase
       .from('schedule_settings')
       .select('wp_config_id, status, frequency, post_time, related_keywords, post_status');
-
-    if (accountId) {
-      configsQuery = configsQuery.eq('account_id', accountId);
-      schedulesQuery = schedulesQuery.eq('account_id', accountId);
-    }
+    configsQuery = scopeQueryToCurrentUser(configsQuery);
+    schedulesQuery = scopeQueryToCurrentUser(schedulesQuery);
 
     const [{ data: configsData, error: configsError }, { data: schedulesData, error: schedulesError }] = await Promise.all([
       configsQuery,
@@ -230,35 +239,31 @@ class SupabaseSchedulerService {
 
   async deleteWordPressConfig(id: string): Promise<void> {
     if (!supabase) return;
-    const accountId = getRequiredAccountId();
 
-    const { error: scheduleError } = await supabase
+    const { error: scheduleError } = await scopeMutationToCurrentUser(supabase
       .from('schedule_settings')
       .delete()
-      .eq('wp_config_id', id)
-      .eq('account_id', accountId);
+      .eq('wp_config_id', id));
 
     if (scheduleError) {
       console.error('Error deleting schedule settings:', scheduleError);
       throw new Error(`スケジュール設定の削除に失敗しました: ${scheduleError.message}`);
     }
 
-    const { error } = await supabase
+    const { error } = await scopeMutationToCurrentUser(supabase
       .from('wordpress_configs')
       .delete()
-      .eq('id', id)
-      .eq('account_id', accountId);
+      .eq('id', id));
 
     if (error) {
       console.error('Error deleting WordPress config:', error);
       throw new Error(`WordPress設定の削除に失敗しました: ${error.message}`);
     }
 
-    const { error: legacyDeleteError } = await supabase
+    const { error: legacyDeleteError } = await scopeMutationToCurrentUser(supabase
       .from('wp_configs')
       .delete()
-      .eq('id', id)
-      .eq('account_id', accountId);
+      .eq('id', id));
 
     if (legacyDeleteError) {
       console.error('Error deleting legacy wp_config:', legacyDeleteError);
@@ -269,9 +274,11 @@ class SupabaseSchedulerService {
   async saveAIConfig(config: AIConfig): Promise<string> {
     if (!supabase) return '';
     const accountId = getRequiredAccountId();
+    const userId = getRequiredUserId();
 
     const aiData: Record<string, any> = {
       account_id: accountId,
+      user_id: userId,
       provider: config.provider,
       model: config.model,
       temperature: config.temperature || 0.7,
@@ -288,6 +295,7 @@ class SupabaseSchedulerService {
       .select('id, is_active')
       .eq('provider', config.provider)
       .eq('account_id', accountId)
+      .eq('user_id', userId)
       .limit(1)
       .maybeSingle();
 
@@ -296,7 +304,8 @@ class SupabaseSchedulerService {
       .from('ai_configs')
       .select('*', { count: 'exact', head: true })
       .eq('is_active', true)
-      .eq('account_id', accountId);
+      .eq('account_id', accountId)
+      .eq('user_id', userId);
 
     const isFirstActive = !count && !existing;
 
@@ -341,6 +350,7 @@ class SupabaseSchedulerService {
         .delete()
         .eq('provider', config.provider)
         .eq('account_id', accountId)
+        .eq('user_id', userId)
         .neq('id', result.data.id);
     }
 
@@ -352,16 +362,11 @@ class SupabaseSchedulerService {
    */
   async loadAIConfigs(): Promise<AIConfig[]> {
     if (!supabase) return [];
-    const accountId = getCurrentAccountId();
-
     let query = supabase
       .from('ai_configs')
       .select('*')
       .order('created_at', { ascending: false });
-
-    if (accountId) {
-      query = query.eq('account_id', accountId);
-    }
+    query = scopeQueryToCurrentUser(query);
 
     const { data, error } = await query;
 
@@ -392,12 +397,14 @@ class SupabaseSchedulerService {
   async activateAIConfig(id: string): Promise<void> {
     if (!supabase) return;
     const accountId = getRequiredAccountId();
+    const userId = getRequiredUserId();
 
     // 全ての設定を一旦非アクティブにする（PostgRESTの安全制限を回避するためフィルタを追加）
     const { error: resetError } = await supabase
       .from('ai_configs')
       .update({ is_active: false })
       .eq('account_id', accountId)
+      .eq('user_id', userId)
       .neq('id', '00000000-0000-0000-0000-000000000000');
 
     if (resetError) {
@@ -410,7 +417,8 @@ class SupabaseSchedulerService {
       .from('ai_configs')
       .update({ is_active: true })
       .eq('id', id)
-      .eq('account_id', accountId);
+      .eq('account_id', accountId)
+      .eq('user_id', userId);
 
     if (activateError) {
       console.error('Error activating AI config:', activateError);
@@ -423,18 +431,13 @@ class SupabaseSchedulerService {
    */
   async loadAIConfig(): Promise<AIConfig | null> {
     if (!supabase) return null;
-    const accountId = getCurrentAccountId();
-
     let query = supabase
       .from('ai_configs')
       .select('*')
       .order('is_active', { ascending: false })
       .order('created_at', { ascending: false })
       .limit(1);
-
-    if (accountId) {
-      query = query.eq('account_id', accountId);
-    }
+    query = scopeQueryToCurrentUser(query);
 
     const { data, error } = await query.maybeSingle();
 
@@ -462,11 +465,10 @@ class SupabaseSchedulerService {
   async deleteAIConfig(id: string): Promise<void> {
     if (!supabase) return;
 
-    const { error } = await supabase
+    const { error } = await scopeMutationToCurrentUser(supabase
       .from('ai_configs')
       .delete()
-      .eq('id', id)
-      .eq('account_id', getRequiredAccountId());
+      .eq('id', id));
 
     if (error) {
       console.error('Error deleting AI config:', error);
@@ -476,8 +478,6 @@ class SupabaseSchedulerService {
 
   async getExecutionHistory(limit = 50) {
     if (!supabase) return [];
-    const accountId = getCurrentAccountId();
-
     let query = supabase
       .from('execution_history')
       .select(`
@@ -486,10 +486,7 @@ class SupabaseSchedulerService {
       `)
       .order('executed_at', { ascending: false })
       .limit(limit);
-
-    if (accountId) {
-      query = query.eq('account_id', accountId);
-    }
+    query = scopeQueryToCurrentUser(query);
 
     const { data, error } = await query;
 
@@ -501,25 +498,11 @@ class SupabaseSchedulerService {
         .order('executed_at', { ascending: false })
         .limit(limit);
 
-      if (accountId && !errorMessage.includes('account_id')) {
-        fallbackQuery = fallbackQuery.eq('account_id', accountId);
-      }
+      fallbackQuery = scopeQueryToCurrentUser(fallbackQuery);
 
       const fallback = await fallbackQuery;
       if (!fallback.error) {
         return fallback.data || [];
-      }
-
-      if (accountId && errorMessage.includes('account_id')) {
-        const unscopedFallback = await supabase
-          .from('execution_history')
-          .select('*')
-          .order('executed_at', { ascending: false })
-          .limit(limit);
-
-        if (!unscopedFallback.error) {
-          return unscopedFallback.data || [];
-        }
       }
 
       console.error('Error loading execution history:', error);
@@ -532,31 +515,16 @@ class SupabaseSchedulerService {
   async deleteFailedExecutionHistory(ids: string[]): Promise<void> {
     if (!supabase || ids.length === 0) return;
 
-    const accountId = getCurrentAccountId();
-    let query = supabase
+    let query = scopeQueryToCurrentUser(supabase
       .from('execution_history')
       .delete()
       .in('id', ids)
-      .eq('status', 'failed');
-
-    if (accountId) {
-      query = query.eq('account_id', accountId);
-    }
+      .eq('status', 'failed'));
 
     const { error } = await query;
 
     if (error) {
       const errorMessage = String(error.message || error.details || '').toLowerCase();
-      if (accountId && errorMessage.includes('account_id')) {
-        const fallback = await supabase
-          .from('execution_history')
-          .delete()
-          .in('id', ids)
-          .eq('status', 'failed');
-
-        if (!fallback.error) return;
-      }
-
       console.error('Error deleting failed execution history:', error);
       throw new Error(`失敗履歴の削除に失敗しました: ${error.message}`);
     }

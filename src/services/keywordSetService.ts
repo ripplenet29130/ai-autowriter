@@ -1,6 +1,6 @@
 import { supabase } from './supabaseClient';
 import { KeywordSet } from '../types';
-import { getCurrentAccountId, getRequiredAccountId } from './accountScope';
+import { getOwnershipInsertFields, scopeMutationToCurrentUser, scopeQueryToCurrentUser } from './accountScope';
 
 class KeywordSetService {
     /**
@@ -9,15 +9,11 @@ class KeywordSetService {
     async getKeywordSets(): Promise<KeywordSet[]> {
         if (!supabase) return [];
 
-        const accountId = getCurrentAccountId();
         let query = supabase
             .from('keyword_sets')
             .select('*')
             .order('created_at', { ascending: false });
-
-        if (accountId) {
-            query = query.eq('account_id', accountId);
-        }
+        query = scopeQueryToCurrentUser(query);
 
         const { data, error } = await query;
 
@@ -37,15 +33,14 @@ class KeywordSetService {
 
         if (set.id) {
             // 更新
-            const { data, error } = await supabase
+            const { data, error } = await scopeMutationToCurrentUser(supabase
                 .from('keyword_sets')
                 .update({
                     name: set.name,
                     keywords: set.keywords,
                     updated_at: new Date().toISOString()
                 })
-                .eq('id', set.id)
-                .eq('account_id', getRequiredAccountId())
+                .eq('id', set.id))
                 .select()
                 .single();
 
@@ -56,7 +51,7 @@ class KeywordSetService {
             const { data, error } = await supabase
                 .from('keyword_sets')
                 .insert({
-                    account_id: getRequiredAccountId(),
+                    ...getOwnershipInsertFields(),
                     name: set.name,
                     keywords: set.keywords
                 })
@@ -74,11 +69,10 @@ class KeywordSetService {
     async deleteKeywordSet(id: string): Promise<void> {
         if (!supabase) return;
 
-        const { error } = await supabase
+        const { error } = await scopeMutationToCurrentUser(supabase
             .from('keyword_sets')
             .delete()
-            .eq('id', id)
-            .eq('account_id', getRequiredAccountId());
+            .eq('id', id));
 
         if (error) {
             console.error('Error deleting keyword set:', error);

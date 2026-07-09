@@ -1,6 +1,6 @@
 import { supabase } from './supabaseClient';
 import { IS_CLIENT_DEPLOYMENT } from '@aw/config';
-import { getCurrentAccountId } from './accountScope';
+import { getCurrentUserId } from './accountScope';
 import {
   applyFallbackFactCheckFixes,
   buildFactCheckCorrectionPrompt,
@@ -89,33 +89,25 @@ export const factCheckService = {
     if (localSettings?.perplexity_api_key) return this.enforceSettings(localSettings);
 
     if (!supabase) return null;
-    const accountId = getCurrentAccountId();
-    if (!accountId) return null;
+    const userId = getCurrentUserId();
+    if (!userId) return null;
 
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser();
+    const { data } = await supabase
+      .from('fact_check_settings')
+      .select('*')
+      .eq('user_id', userId)
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
-    if (!authError && user) {
-      const { data } = await supabase
-        .from('fact_check_settings')
-        .select('*')
-        .eq('user_id', user.id)
-        .eq('account_id', accountId)
-        .order('updated_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (data) {
-        return this.enforceSettings((data as FactCheckSettingsRow) ?? null);
-      }
+    if (data) {
+      return this.enforceSettings((data as FactCheckSettingsRow) ?? null);
     }
 
     const { data: globalRows, error: globalError } = await supabase
       .from('app_settings')
       .select('key, value')
-      .eq('account_id', accountId)
+      .eq('user_id', userId)
       .in('key', [
         'perplexity_api_key',
         'fact_check_enabled',

@@ -30,6 +30,9 @@ export interface Article {
   articleStructureType?: ArticleStructureType;
   trendData?: TrendAnalysisResult;
   factCheckResults?: FactCheckResult[];
+  userId?: string;
+  accountId?: string;
+  ownerEmail?: string;
 }
 
 export interface WordPressConfig {

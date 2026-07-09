@@ -16,7 +16,7 @@ import { useAppStore } from '../store/useAppStore';
 import { apiKeyManager } from '../services/apiKeyManager';
 import { scheduleService } from '../services/scheduleService';
 import { supabase } from '../services/supabaseClient';
-import { getCurrentAccountId } from '../services/accountScope';
+import { getCurrentUserId } from '../services/accountScope';
 
 type SetupStep = {
   id: string;
@@ -50,13 +50,13 @@ export const GettingStarted: React.FC = () => {
       }
 
       if (!supabase) return;
-      const accountId = getCurrentAccountId();
-      if (!accountId) return;
+      const userId = getCurrentUserId();
+      if (!userId) return;
 
       const { data } = await supabase
         .from('app_settings')
         .select('value')
-        .eq('account_id', accountId)
+        .eq('user_id', userId)
         .eq('key', 'serpapi_key')
         .maybeSingle();
 

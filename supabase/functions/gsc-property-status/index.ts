@@ -71,9 +71,10 @@ serve(async (req) => {
 
   const { data: wpConfig, error: wpError } = await adminClient
     .from("wordpress_configs")
-    .select("id,account_id,name,url")
+    .select("id,account_id,user_id,name,url")
     .eq("id", wordpressConfigId)
     .eq("account_id", profile.account_id)
+    .eq("user_id", user.id)
     .maybeSingle();
 
   if (wpError) {
@@ -160,7 +161,7 @@ async function getValidGscToken(
   let { data: token, error } = await adminClient
     .from("gsc_tokens")
     .select("user_id,account_id,provider_token,provider_refresh_token,expires_at")
-    .eq("account_id", accountId)
+    .eq("user_id", userId)
     .order("updated_at", { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -173,7 +174,7 @@ async function getValidGscToken(
     const fallbackResult = await adminClient
       .from("gsc_tokens")
       .select("user_id,account_id,provider_token,provider_refresh_token,expires_at")
-      .eq("user_id", userId)
+      .eq("account_id", accountId)
       .maybeSingle();
 
     if (fallbackResult.error) {

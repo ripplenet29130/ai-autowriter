@@ -1,6 +1,6 @@
 import { supabase } from './supabaseClient';
 import { ScheduleSetting } from '../types';
-import { getCurrentAccountId, getRequiredAccountId } from './accountScope';
+import { getCurrentAccountId, getRequiredAccountId, getRequiredUserId, scopeMutationToCurrentUser, scopeQueryToCurrentUser } from './accountScope';
 
 class ScheduleService {
     private readonly maxSchemaRetryCount = 48;
@@ -38,6 +38,7 @@ class ScheduleService {
         }
         const targetId = String(wpConfigId || '').trim();
         const accountId = getCurrentAccountId();
+        const userId = getRequiredUserId();
         if (!targetId) {
             throw new Error('WordPress設定IDが空です。設定を選択し直してください。');
         }
@@ -51,6 +52,7 @@ class ScheduleService {
         if (accountId) {
             currentWpConfigQuery = currentWpConfigQuery.eq('account_id', accountId);
         }
+        currentWpConfigQuery = scopeQueryToCurrentUser(currentWpConfigQuery);
 
         const { data: currentWpConfig, error: currentWpConfigError } = await currentWpConfigQuery.maybeSingle();
 
@@ -77,6 +79,7 @@ class ScheduleService {
         if (accountId) {
             legacyQuery = legacyQuery.eq('account_id', accountId);
         }
+        legacyQuery = scopeQueryToCurrentUser(legacyQuery);
 
         const { data: legacyRow, error: legacyError } = await legacyQuery.maybeSingle();
 
@@ -100,6 +103,7 @@ class ScheduleService {
         let compatPayload: Record<string, any> = {
             id: legacyRow.id,
             account_id: accountId,
+            user_id: userId,
             name: legacyRow.name,
             url: legacyRow.url,
             username: legacyRow.username,
@@ -193,6 +197,7 @@ class ScheduleService {
     private async ensureSingleSchedulePerWordPress(
         wpConfigId: string,
         accountId: string,
+        userId: string,
         excludeScheduleId?: string
     ): Promise<void> {
         if (!supabase) {
@@ -204,6 +209,7 @@ class ScheduleService {
             .select('id')
             .eq('wp_config_id', wpConfigId)
             .eq('account_id', accountId)
+            .eq('user_id', userId)
             .limit(1);
 
         if (excludeScheduleId) {
@@ -231,6 +237,10 @@ class ScheduleService {
                 || text.includes('schedule_settings_wp_config_unique')
                 || text.includes('idx_schedule_settings_account_wordpress_config_unique')
                 || text.includes('schedule_settings_account_wordpress_config_unique')
+                || text.includes('idx_schedule_settings_user_wp_config_unique')
+                || text.includes('schedule_settings_user_wp_config_unique')
+                || text.includes('idx_schedule_settings_user_wordpress_config_unique')
+                || text.includes('schedule_settings_user_wordpress_config_unique')
                 || text.includes('idx_schedule_settings_wordpress_config_unique')
                 || text.includes('schedule_settings_wordpress_config_unique')
             );
@@ -243,17 +253,8 @@ class ScheduleService {
 
         await this.ensureWpConfigReference(schedule.wp_config_id);
         const accountId = getRequiredAccountId();
-        await this.ensureSingleSchedulePerWordPress(schedule.wp_config_id, accountId);
-
-        let currentUserId: string | null = null;
-        try {
-            const {
-                data: { user },
-            } = await supabase.auth.getUser();
-            currentUserId = user?.id || null;
-        } catch {
-            currentUserId = null;
-        }
+        const currentUserId = getRequiredUserId();
+        await this.ensureSingleSchedulePerWordPress(schedule.wp_config_id, accountId, currentUserId);
 
         const requestedAutoFixEnabled = schedule.fact_check_auto_fix_enabled === true;
         let insertPayload: Record<string, any> = {
@@ -359,10 +360,10 @@ class ScheduleService {
         }
 
         console.log('getSchedules: Fetching schedules...');
-        const { data, error } = await supabase
+        const { data, error } = await scopeQueryToCurrentUser(supabase
             .from('schedule_settings')
             .select('*')
-            .eq('account_id', getRequiredAccountId());
+            .eq('account_id', getRequiredAccountId()));
 
         if (error) {
             console.error('getSchedules: Error fetching schedules:', error);
@@ -378,11 +379,11 @@ class ScheduleService {
             throw new Error('Supabase is not initialized');
         }
 
-        const { data, error } = await supabase
+        const { data, error } = await scopeQueryToCurrentUser(supabase
             .from('schedule_settings')
             .select('*')
             .eq('id', id)
-            .eq('account_id', getRequiredAccountId())
+            .eq('account_id', getRequiredAccountId()))
             .single();
 
         if (error) {
@@ -402,25 +403,14 @@ class ScheduleService {
             await this.ensureWpConfigReference(updates.wp_config_id);
         }
         const accountId = getRequiredAccountId();
+        const currentUserId = getRequiredUserId();
         if (typeof updates.wp_config_id === 'string' && updates.wp_config_id.trim().length > 0) {
-            await this.ensureSingleSchedulePerWordPress(updates.wp_config_id, accountId, id);
-        }
-
-        let currentUserId: string | null = null;
-        try {
-            const {
-                data: { user },
-            } = await supabase.auth.getUser();
-            currentUserId = user?.id || null;
-        } catch {
-            currentUserId = null;
+            await this.ensureSingleSchedulePerWordPress(updates.wp_config_id, accountId, currentUserId, id);
         }
 
         const requestedAutoFixEnabled = updates.fact_check_auto_fix_enabled === true;
         const cleanUpdates = { ...updates };
-        if (!('user_id' in cleanUpdates) && currentUserId) {
-            (cleanUpdates as any).user_id = currentUserId;
-        }
+        if (!('user_id' in cleanUpdates)) (cleanUpdates as any).user_id = currentUserId;
         if (cleanUpdates.start_date === '') cleanUpdates.start_date = null as any;
         if (cleanUpdates.end_date === '') cleanUpdates.end_date = null as any;
         if (cleanUpdates.prompt_set_id === '') cleanUpdates.prompt_set_id = null as any;
@@ -440,11 +430,10 @@ class ScheduleService {
                 throw new Error('スケジュールの更新に失敗しました: 更新可能なカラムがありません。DBスキーマを更新してください。');
             }
 
-            const { data, error } = await supabase
+            const { data, error } = await scopeMutationToCurrentUser(supabase
                 .from('schedule_settings')
                 .update(updatePayload)
-                .eq('id', id)
-                .eq('account_id', accountId)
+                .eq('id', id))
                 .select()
                 .single();
 
@@ -503,11 +492,10 @@ class ScheduleService {
             throw new Error('Supabase is not initialized');
         }
 
-        const { error } = await supabase
+        const { error } = await scopeMutationToCurrentUser(supabase
             .from('schedule_settings')
             .delete()
-            .eq('id', id)
-            .eq('account_id', getRequiredAccountId());
+            .eq('id', id));
 
         if (error) {
             console.error('Error deleting schedule:', error);
@@ -529,11 +517,11 @@ class ScheduleService {
             throw new Error('Supabase is not initialized');
         }
 
-        const { data, error } = await supabase
+        const { data, error } = await scopeQueryToCurrentUser(supabase
             .from('schedule_settings')
             .select('*')
             .eq('wp_config_id', wpConfigId)
-            .eq('account_id', getRequiredAccountId())
+            .eq('account_id', getRequiredAccountId()))
             .order('created_at', { ascending: false });
 
         if (error) {
@@ -549,11 +537,11 @@ class ScheduleService {
             throw new Error('Supabase is not initialized');
         }
 
-        const { data, error } = await supabase
+        const { data, error } = await scopeQueryToCurrentUser(supabase
             .from('schedule_settings')
             .select('*')
             .eq('ai_config_id', aiConfigId)
-            .eq('account_id', getRequiredAccountId())
+            .eq('account_id', getRequiredAccountId()))
             .order('created_at', { ascending: false });
 
         if (error) {
@@ -569,11 +557,11 @@ class ScheduleService {
             throw new Error('Supabase is not initialized');
         }
 
-        const { data, error } = await supabase
+        const { data, error } = await scopeQueryToCurrentUser(supabase
             .from('execution_history')
             .select('keyword_used')
             .eq('schedule_id', scheduleId)
-            .eq('account_id', getRequiredAccountId());
+            .eq('account_id', getRequiredAccountId()));
 
         if (error) {
             console.error('Error fetching used keywords:', error);
@@ -591,12 +579,11 @@ class ScheduleService {
         const normalized = String(keyword || '').trim();
         if (!normalized) return;
 
-        const { error } = await supabase
+        const { error } = await scopeMutationToCurrentUser(supabase
             .from('execution_history')
             .delete()
             .eq('schedule_id', scheduleId)
-            .eq('account_id', getRequiredAccountId())
-            .eq('keyword_used', normalized);
+            .eq('keyword_used', normalized));
 
         if (error) {
             console.error('Error restoring keyword:', error);
@@ -615,12 +602,11 @@ class ScheduleService {
 
         if (targets.length === 0) return;
 
-        const { error } = await supabase
+        const { error } = await scopeMutationToCurrentUser(supabase
             .from('execution_history')
             .delete()
             .eq('schedule_id', scheduleId)
-            .eq('account_id', getRequiredAccountId())
-            .in('keyword_used', targets);
+            .in('keyword_used', targets));
 
         if (error) {
             console.error('Error resetting used keywords:', error);
@@ -633,11 +619,11 @@ class ScheduleService {
             throw new Error('Supabase is not initialized');
         }
 
-        const { data, error } = await supabase
+        const { data, error } = await scopeQueryToCurrentUser(supabase
             .from('execution_history')
             .select('article_title')
             .eq('schedule_id', scheduleId)
-            .eq('account_id', getRequiredAccountId());
+            .eq('account_id', getRequiredAccountId()));
 
         if (error) {
             console.error('Error fetching used titles:', error);
@@ -655,12 +641,11 @@ class ScheduleService {
         const normalized = String(title || '').trim();
         if (!normalized) return;
 
-        const { error } = await supabase
+        const { error } = await scopeMutationToCurrentUser(supabase
             .from('execution_history')
             .delete()
             .eq('schedule_id', scheduleId)
-            .eq('account_id', getRequiredAccountId())
-            .eq('article_title', normalized);
+            .eq('article_title', normalized));
 
         if (error) {
             console.error('Error restoring title:', error);
@@ -677,13 +662,14 @@ class ScheduleService {
         if (!normalized) return;
 
         const accountId = getRequiredAccountId();
-        const { data: existing, error: existingError } = await supabase
+        const userId = getRequiredUserId();
+        const { data: existing, error: existingError } = await scopeQueryToCurrentUser(supabase
             .from('execution_history')
             .select('id')
             .eq('schedule_id', scheduleId)
             .eq('account_id', accountId)
             .eq('article_title', normalized)
-            .limit(1);
+            .limit(1));
 
         if (existingError) {
             console.error('Error checking used title:', existingError);
@@ -697,6 +683,7 @@ class ScheduleService {
             .insert({
                 schedule_id: scheduleId,
                 account_id: accountId,
+                user_id: userId,
                 article_title: normalized,
                 keyword_used: '',
                 wordpress_post_id: '',
@@ -721,12 +708,11 @@ class ScheduleService {
 
         if (targets.length === 0) return;
 
-        const { error } = await supabase
+        const { error } = await scopeMutationToCurrentUser(supabase
             .from('execution_history')
             .delete()
             .eq('schedule_id', scheduleId)
-            .eq('account_id', getRequiredAccountId())
-            .in('article_title', targets);
+            .in('article_title', targets));
 
         if (error) {
             console.error('Error resetting used titles:', error);
@@ -738,15 +724,10 @@ class ScheduleService {
         if (!supabase) {
             throw new Error('Supabase is not initialized');
         }
-        const accountId = getRequiredAccountId();
-        let query = supabase
+        let query = scopeQueryToCurrentUser(supabase
             .from('execution_history')
             .select('executed_at')
-            .eq('schedule_id', scheduleId);
-
-        if (this.executionHistoryAccountScoped !== false) {
-            query = query.eq('account_id', accountId);
-        }
+            .eq('schedule_id', scheduleId));
 
         const { data, error } = await query
             .order('executed_at', { ascending: false })
@@ -758,21 +739,6 @@ class ScheduleService {
                 this.executionHistoryAccountScoped = true;
             }
             return data.executed_at;
-        }
-
-        const errorMessage = String(error?.message || error?.details || '').toLowerCase();
-        if (errorMessage.includes('account_id')) {
-            this.executionHistoryAccountScoped = false;
-            const fallback = await supabase
-                .from('execution_history')
-                .select('executed_at')
-                .eq('schedule_id', scheduleId)
-                .order('executed_at', { ascending: false })
-                .limit(1)
-                .maybeSingle();
-            if (!fallback.error && fallback.data) {
-                return fallback.data.executed_at;
-            }
         }
 
         if (error) {

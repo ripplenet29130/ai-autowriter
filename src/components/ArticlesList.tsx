@@ -1,5 +1,5 @@
 ﻿import React, { useState, useEffect } from 'react';
-import { FileText, Search, Filter, Calendar, Tag, TrendingUp, Trash2, Edit, Eye, ExternalLink, RefreshCw, Save, X } from 'lucide-react';
+import { FileText, Search, Filter, Calendar, Tag, TrendingUp, Trash2, Edit, Eye, ExternalLink, RefreshCw, Save, X, User } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
 import { Article } from '../types';
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
@@ -510,6 +510,13 @@ export const ArticlesList: React.FC = () => {
                         <div className="flex items-center gap-1">
                           <Calendar className="w-4 h-4" />
                           <span>{format(new Date(article.generatedAt), 'yyyy/MM/dd HH:mm')}</span>
+                        </div>
+                      )}
+
+                      {article.ownerEmail && (
+                        <div className="flex items-center gap-1">
+                          <User className="w-4 h-4" />
+                          <span>{article.ownerEmail}</span>
                         </div>
                       )}
 

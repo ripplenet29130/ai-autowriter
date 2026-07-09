@@ -1,6 +1,6 @@
 import { supabase } from './supabaseClient';
 import { TitleSet } from '../types';
-import { getCurrentAccountId, getRequiredAccountId } from './accountScope';
+import { getOwnershipInsertFields, scopeMutationToCurrentUser, scopeQueryToCurrentUser } from './accountScope';
 
 class TitleSetService {
     /**
@@ -9,15 +9,11 @@ class TitleSetService {
     async getTitleSets(): Promise<TitleSet[]> {
         if (!supabase) return [];
 
-        const accountId = getCurrentAccountId();
         let query = supabase
             .from('title_sets')
             .select('*')
             .order('created_at', { ascending: false });
-
-        if (accountId) {
-            query = query.eq('account_id', accountId);
-        }
+        query = scopeQueryToCurrentUser(query);
 
         const { data, error } = await query;
 
@@ -37,15 +33,14 @@ class TitleSetService {
 
         if (set.id) {
             // 更新
-            const { data, error } = await supabase
+            const { data, error } = await scopeMutationToCurrentUser(supabase
                 .from('title_sets')
                 .update({
                     name: set.name,
                     titles: set.titles,
                     updated_at: new Date().toISOString()
                 })
-                .eq('id', set.id)
-                .eq('account_id', getRequiredAccountId())
+                .eq('id', set.id))
                 .select()
                 .single();
 
@@ -56,7 +51,7 @@ class TitleSetService {
             const { data, error } = await supabase
                 .from('title_sets')
                 .insert({
-                    account_id: getRequiredAccountId(),
+                    ...getOwnershipInsertFields(),
                     name: set.name,
                     titles: set.titles
                 })
@@ -74,11 +69,10 @@ class TitleSetService {
     async deleteTitleSet(id: string): Promise<void> {
         if (!supabase) return;
 
-        const { error } = await supabase
+        const { error } = await scopeMutationToCurrentUser(supabase
             .from('title_sets')
             .delete()
-            .eq('id', id)
-            .eq('account_id', getRequiredAccountId());
+            .eq('id', id));
 
         if (error) {
             console.error('Error deleting title set:', error);

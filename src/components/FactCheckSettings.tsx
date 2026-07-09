@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { ExternalLink, Info, Key, Save, ShieldCheck } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { supabase } from '../services/supabaseClient';
-import { getCurrentAccountId, getRequiredAccountId } from '../services/accountScope';
+import { getCurrentUserId, getOwnershipInsertFields } from '../services/accountScope';
 
 type SettingsState = {
   autoFixEnabled: boolean;
@@ -52,40 +52,32 @@ export const FactCheckSettings: React.FC = () => {
       return;
     }
 
-    const accountId = getCurrentAccountId();
-    if (!accountId) {
+    const userId = getCurrentUserId();
+    if (!userId) {
       setInitialLoading(false);
       return;
     }
 
     try {
-      const {
-        data: { user },
-        error: authError,
-      } = await supabase.auth.getUser();
-
       let userSettings: any = null;
-      if (!authError && user) {
-        const { data, error } = await supabase
-          .from('fact_check_settings')
-          .select('*')
-          .eq('user_id', user.id)
-          .eq('account_id', accountId)
-          .order('updated_at', { ascending: false })
-          .limit(1)
-          .maybeSingle();
+      const { data, error } = await supabase
+        .from('fact_check_settings')
+        .select('*')
+        .eq('user_id', userId)
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
 
-        if (error) {
-          console.error('Initial load error details:', error);
-        }
-
-        userSettings = data;
+      if (error) {
+        console.error('Initial load error details:', error);
       }
+
+      userSettings = data;
 
       const { data: globalRows, error: globalError } = await supabase
         .from('app_settings')
         .select('key, value')
-        .eq('account_id', accountId)
+        .eq('user_id', userId)
         .in('key', [
           'perplexity_api_key',
           'fact_check_auto_fix_enabled',
@@ -135,38 +127,30 @@ export const FactCheckSettings: React.FC = () => {
         return;
       }
 
-      const accountId = getRequiredAccountId();
-      const {
-        data: { user },
-        error: authError,
-      } = await supabase.auth.getUser();
+      const ownership = getOwnershipInsertFields();
 
-      if (!authError && user) {
-        const { data: existingSettings } = await supabase
-          .from('fact_check_settings')
-          .select('id')
-          .eq('user_id', user.id)
-          .eq('account_id', accountId)
-          .order('updated_at', { ascending: false })
-          .limit(1)
-          .maybeSingle();
+      const { data: existingSettings } = await supabase
+        .from('fact_check_settings')
+        .select('id')
+        .eq('user_id', ownership.user_id)
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
 
-        const payload = {
-          account_id: accountId,
-          user_id: user.id,
-          enabled: true,
-          auto_fix_enabled: settings.autoFixEnabled,
-          perplexity_api_key: settings.perplexityApiKey,
-          updated_at: new Date().toISOString(),
-        };
+      const payload = {
+        ...ownership,
+        enabled: true,
+        auto_fix_enabled: settings.autoFixEnabled,
+        perplexity_api_key: settings.perplexityApiKey,
+        updated_at: new Date().toISOString(),
+      };
 
-        const result = existingSettings
-          ? await supabase.from('fact_check_settings').update(payload).eq('id', existingSettings.id)
-          : await supabase.from('fact_check_settings').insert([payload]);
+      const result = existingSettings
+        ? await supabase.from('fact_check_settings').update(payload).eq('id', existingSettings.id)
+        : await supabase.from('fact_check_settings').insert([payload]);
 
-        if (result.error) {
-          throw result.error;
-        }
+      if (result.error) {
+        throw result.error;
       }
 
       const globalSettingsToSave = [
@@ -191,11 +175,11 @@ export const FactCheckSettings: React.FC = () => {
 
       for (const item of globalSettingsToSave) {
         const { error } = await supabase.from('app_settings').upsert({
-          account_id: accountId,
+          ...ownership,
           key: item.key,
           value: item.value,
           description: item.description,
-        }, { onConflict: 'account_id,key' });
+        }, { onConflict: 'user_id,key' });
         if (error) {
           throw error;
         }

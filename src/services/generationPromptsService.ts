@@ -1,5 +1,6 @@
 ﻿import { supabase } from './supabaseClient';
 import { GenerationPrompt } from '../types';
+import { getOwnershipInsertFields, scopeQueryToCurrentUser } from './accountScope';
 
 export interface GenerationPromptRecord {
   id: string;
@@ -23,6 +24,7 @@ export const generationPromptsService = {
       const { data, error } = await supabase
         .from('generation_prompts')
         .insert([{
+          ...getOwnershipInsertFields(),
           article_id: articleId,
           topic: prompt.topic,
           keywords: prompt.keywords || [],
@@ -52,11 +54,11 @@ export const generationPromptsService = {
   async getPromptsByArticle(articleId: string): Promise<GenerationPromptRecord[]> {
     try {
       if (!supabase) return [];
-      const { data, error } = await supabase
+      const { data, error } = await scopeQueryToCurrentUser(supabase
         .from('generation_prompts')
         .select('*')
         .eq('article_id', articleId)
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false }));
 
       if (error) {
         console.error('記事のプロンプト取得に失敗しました:', error);
@@ -73,11 +75,11 @@ export const generationPromptsService = {
   async getRecentPrompts(limit: number = 20): Promise<GenerationPromptRecord[]> {
     try {
       if (!supabase) return [];
-      const { data, error } = await supabase
+      const { data, error } = await scopeQueryToCurrentUser(supabase
         .from('generation_prompts')
         .select('*')
         .order('created_at', { ascending: false })
-        .limit(limit);
+        .limit(limit));
 
       if (error) {
         console.error('最近のプロンプト取得に失敗しました:', error);

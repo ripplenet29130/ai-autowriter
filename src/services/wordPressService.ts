@@ -2,6 +2,7 @@ import axios from 'axios';
 import { Article, ScheduleSettings } from '../types';
 import { supabase } from './supabaseClient';
 import { convertToGutenbergBlocks } from '../utils/markdownToHtml';
+import { getOwnershipInsertFields, scopeQueryToCurrentUser } from './accountScope';
 
 export interface WordPressConfig {
   id: string;
@@ -61,11 +62,11 @@ export class WordPressService {
     if (!supabase) {
       throw new Error("Supabase client is not initialized");
     }
-    const { data, error } = await supabase
+    const { data, error } = await scopeQueryToCurrentUser(supabase
       .from("wordpress_configs")
       .select("*")
       .eq("is_active", true)
-      .limit(1);
+      .limit(1));
 
     if (error || !data || data.length === 0) {
       console.error("WordPress設定の取得に失敗しました:", error?.message);
@@ -1110,6 +1111,7 @@ export async function saveWordPressConfig(
   const { data, error } = await supabase
     .from('wordpress_configs')
     .insert({
+      ...getOwnershipInsertFields(),
       name,
       url: wp_url,
       username: wp_username,

@@ -67,9 +67,10 @@ serve(async (req) => {
 
   const { data: wpConfig, error: wpError } = await adminClient
     .from("wordpress_configs")
-    .select("id,account_id,name,url,username,password")
+    .select("id,account_id,user_id,name,url,username,password")
     .eq("id", wordpressConfigId)
     .eq("account_id", profile.account_id)
+    .eq("user_id", user.id)
     .maybeSingle();
 
   if (wpError) {

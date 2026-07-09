@@ -10,7 +10,7 @@ import {
 import { buildSummaryPrompt, buildSupplementPrompt } from "../shared/generationPrompts";
 import { buildHighQualitySectionPrompt } from "../shared/sectionGenerationPrompt";
 import { normalizeAiModel, supportsTemperature } from "../shared/aiModelCatalog";
-import { getCurrentAccountId } from "./accountScope";
+import { scopeQueryToCurrentUser } from "./accountScope";
 
 /**
  * AI関連サービス
@@ -27,17 +27,13 @@ export class AIService {
     try {
       if (!supabase) throw new Error("Supabase client is not initialized");
 
-      const accountId = getCurrentAccountId();
       let query = supabase
         .from("ai_configs")
         .select("*")
         .order("is_active", { ascending: false })
         .order("created_at", { ascending: false })
         .limit(1);
-
-      if (accountId) {
-        query = query.eq("account_id", accountId);
-      }
+      query = scopeQueryToCurrentUser(query);
 
       const { data, error } = await query.maybeSingle();
 

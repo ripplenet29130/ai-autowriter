@@ -1,4 +1,5 @@
 ﻿import { supabase } from './supabaseClient';
+import { getOwnershipInsertFields, scopeMutationToCurrentUser, scopeQueryToCurrentUser } from './accountScope';
 
 export interface CustomTopic {
   id: string;
@@ -21,6 +22,7 @@ export const customTopicsService = {
       const { data, error } = await supabase
         .from('custom_topics')
         .insert([{
+          ...getOwnershipInsertFields(),
           topic_name: topic.topicName,
           keywords: topic.keywords || [],
           tone: topic.tone || 'professional',
@@ -59,10 +61,10 @@ export const customTopicsService = {
       if (updates.lastUsedAt !== undefined) updateData.last_used_at = updates.lastUsedAt;
       if (updates.isFavorite !== undefined) updateData.is_favorite = updates.isFavorite;
 
-      const { data, error } = await supabase
+      const { data, error } = await scopeMutationToCurrentUser(supabase
         .from('custom_topics')
         .update(updateData)
-        .eq('id', id)
+        .eq('id', id))
         .select()
         .single();
 
@@ -81,10 +83,10 @@ export const customTopicsService = {
   async deleteTopic(id: string): Promise<boolean> {
     try {
       if (!supabase) return false;
-      const { error } = await supabase
+      const { error } = await scopeMutationToCurrentUser(supabase
         .from('custom_topics')
         .delete()
-        .eq('id', id);
+        .eq('id', id));
 
       if (error) {
         console.error('トピックの削除に失敗しました:', error);
@@ -101,10 +103,10 @@ export const customTopicsService = {
   async getTopic(id: string): Promise<CustomTopic | null> {
     try {
       if (!supabase) return null;
-      const { data, error } = await supabase
+      const { data, error } = await scopeQueryToCurrentUser(supabase
         .from('custom_topics')
         .select('*')
-        .eq('id', id)
+        .eq('id', id))
         .single();
 
       if (error) {
@@ -123,6 +125,7 @@ export const customTopicsService = {
     try {
       if (!supabase) return [];
       let query = supabase.from('custom_topics').select('*');
+      query = scopeQueryToCurrentUser(query);
 
       switch (sortBy) {
         case 'frequent':
@@ -160,10 +163,10 @@ export const customTopicsService = {
   async getTopicByName(topicName: string): Promise<CustomTopic | null> {
     try {
       if (!supabase) return null;
-      const { data, error } = await supabase
+      const { data, error } = await scopeQueryToCurrentUser(supabase
         .from('custom_topics')
         .select('*')
-        .eq('topic_name', topicName)
+        .eq('topic_name', topicName))
         .maybeSingle();
 
       if (error) {

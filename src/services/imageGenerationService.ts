@@ -1,5 +1,5 @@
 import { supabase } from './supabaseClient';
-import { getCurrentAccountId } from './accountScope';
+import { scopeQueryToCurrentUser } from './accountScope';
 
 export interface ImageGenerationOptions {
     prompt: string;
@@ -24,17 +24,13 @@ export const imageGenerationService = {
                 throw new Error('Supabase client is not initialized');
             }
 
-            const accountId = getCurrentAccountId();
             let query = supabase
                 .from('ai_configs')
                 .select('*')
                 .eq('is_active', true)
                 .order('created_at', { ascending: false })
                 .limit(1);
-
-            if (accountId) {
-                query = query.eq('account_id', accountId);
-            }
+            query = scopeQueryToCurrentUser(query);
 
             const { data: activeConfig, error: configError } = await query.maybeSingle();
 

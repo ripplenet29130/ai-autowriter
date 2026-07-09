@@ -1,6 +1,11 @@
 ﻿import { supabase } from './supabaseClient';
 import { Article } from '../types';
-import { getCurrentAccountId, getRequiredAccountId } from './accountScope';
+import {
+  getOwnershipInsertFields,
+  isCurrentUserAdmin,
+  scopeMutationToCurrentUser,
+  scopeQueryToCurrentUser,
+} from './accountScope';
 
 export interface ArticleFilters {
   status?: string;
@@ -25,11 +30,10 @@ export const articlesService = {
         console.warn('Database disabled: supabase client is null');
         return null;
       }
-      const accountId = getRequiredAccountId();
       const { data, error } = await supabase
         .from('articles')
         .insert([{
-          account_id: accountId,
+          ...getOwnershipInsertFields(),
           title: article.title,
           content: article.content,
           excerpt: article.excerpt || '',
@@ -93,11 +97,10 @@ export const articlesService = {
       if (updates.wordCount !== undefined) updateData.word_count = updates.wordCount;
       if (updates.trendData !== undefined) updateData.trend_data = updates.trendData;
 
-      const { data, error } = await supabase
+      const { data, error } = await scopeMutationToCurrentUser(supabase
         .from('articles')
         .update(updateData)
-        .eq('id', id)
-        .eq('account_id', getRequiredAccountId())
+        .eq('id', id))
         .select()
         .single();
 
@@ -116,13 +119,11 @@ export const articlesService = {
   async deleteArticle(id: string, options?: { unpublishedOnly?: boolean }): Promise<boolean> {
     try {
       if (!supabase) return false;
-      const accountId = getRequiredAccountId();
       if (options?.unpublishedOnly) {
-        const { data: existing, error: fetchError } = await supabase
+        const { data: existing, error: fetchError } = await scopeMutationToCurrentUser(supabase
           .from('articles')
           .select('status, is_published, wordpress_post_id, wordpress_url')
-          .eq('id', id)
-          .eq('account_id', accountId)
+          .eq('id', id))
           .single();
 
         if (fetchError || !existing) {
@@ -143,11 +144,10 @@ export const articlesService = {
         }
       }
 
-      let query = supabase
+      let query = scopeMutationToCurrentUser(supabase
         .from('articles')
         .delete()
-        .eq('id', id)
-        .eq('account_id', accountId);
+        .eq('id', id));
 
       const { error } = await query;
 
@@ -169,11 +169,10 @@ export const articlesService = {
         console.warn('Database disabled: supabase client is null');
         return null;
       }
-      const { data, error } = await supabase
+      const { data, error } = await scopeQueryToCurrentUser(supabase
         .from('articles')
         .select('*')
-        .eq('id', id)
-        .eq('account_id', getRequiredAccountId())
+        .eq('id', id))
         .single();
 
       if (error) {
@@ -199,12 +198,8 @@ export const articlesService = {
         console.warn('Database disabled: skip fetching articles');
         return [];
       }
-      const accountId = getCurrentAccountId();
       let query = supabase.from('articles').select('*');
-
-      if (accountId) {
-        query = query.eq('account_id', accountId);
-      }
+      query = scopeQueryToCurrentUser(query);
 
       if (filters?.status) {
         query = query.eq('status', filters.status);
@@ -262,7 +257,7 @@ export const articlesService = {
         return [];
       }
 
-      return data.map((item: any) => this.mapFromDatabase(item));
+      return this.enrichArticleOwners(data.map((item: any) => this.mapFromDatabase(item)));
     } catch (err) {
       console.error('記事一覧取得エラー:', err);
       return [];
@@ -275,12 +270,8 @@ export const articlesService = {
         console.warn('Database disabled: supabase client is null');
         return 0;
       }
-      const accountId = getCurrentAccountId();
       let query = supabase.from('articles').select('*', { count: 'exact', head: true });
-
-      if (accountId) {
-        query = query.eq('account_id', accountId);
-      }
+      query = scopeQueryToCurrentUser(query);
 
       if (filters?.status) {
         query = query.eq('status', filters.status);
@@ -348,6 +339,8 @@ export const articlesService = {
   mapFromDatabase(data: any): Article {
     return {
       id: data.id,
+      accountId: data.account_id,
+      userId: data.user_id,
       title: data.title,
       content: data.content,
       excerpt: data.excerpt || '',
@@ -370,6 +363,37 @@ export const articlesService = {
       generatedAt: data.created_at,
       updatedAt: data.updated_at
     };
+  },
+
+  async enrichArticleOwners(articles: Article[]): Promise<Article[]> {
+    if (!supabase || !isCurrentUserAdmin() || articles.length === 0) {
+      return articles;
+    }
+
+    const userIds = Array.from(new Set(articles.map((article) => article.userId).filter(Boolean))) as string[];
+    if (userIds.length === 0) return articles;
+
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('user_id,login_email,display_name')
+      .in('user_id', userIds);
+
+    if (error) {
+      console.warn('記事所有者情報の取得に失敗しました:', error);
+      return articles;
+    }
+
+    const ownerByUserId = new Map(
+      (data || []).map((profile: any) => [
+        profile.user_id,
+        profile.login_email || profile.display_name || profile.user_id,
+      ])
+    );
+
+    return articles.map((article) => ({
+      ...article,
+      ownerEmail: article.userId ? ownerByUserId.get(article.userId) : undefined,
+    }));
   }
 };
 

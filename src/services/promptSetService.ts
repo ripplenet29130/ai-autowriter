@@ -1,6 +1,6 @@
 import { supabase } from './supabaseClient';
 import { PromptSet } from '../types';
-import { getCurrentAccountId, getRequiredAccountId } from './accountScope';
+import { getOwnershipInsertFields, scopeMutationToCurrentUser, scopeQueryToCurrentUser } from './accountScope';
 
 class PromptSetService {
     /**
@@ -9,15 +9,11 @@ class PromptSetService {
     async getPromptSets(): Promise<PromptSet[]> {
         if (!supabase) return [];
 
-        const accountId = getCurrentAccountId();
         let query = supabase
             .from('prompt_sets')
             .select('*')
             .order('created_at', { ascending: false });
-
-        if (accountId) {
-            query = query.eq('account_id', accountId);
-        }
+        query = scopeQueryToCurrentUser(query);
 
         const { data, error } = await query;
 
@@ -47,7 +43,7 @@ class PromptSetService {
 
         const dbData = {
             id: set.id,
-            account_id: getRequiredAccountId(),
+            ...getOwnershipInsertFields(),
             name: set.name,
             custom_instructions: set.customInstructions,
             is_default: set.isDefault,
@@ -80,11 +76,10 @@ class PromptSetService {
     async deletePromptSet(id: string): Promise<void> {
         if (!supabase) return;
 
-        const { error } = await supabase
+        const { error } = await scopeMutationToCurrentUser(supabase
             .from('prompt_sets')
             .delete()
-            .eq('id', id)
-            .eq('account_id', getRequiredAccountId());
+            .eq('id', id));
 
         if (error) {
             console.error('Error deleting prompt set:', error);

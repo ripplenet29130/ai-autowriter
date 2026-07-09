@@ -3,7 +3,7 @@ import toast from 'react-hot-toast';
 import { Check, ExternalLink } from 'lucide-react';
 import { supabase } from '../services/supabaseClient';
 import { apiKeyManager } from '../services/apiKeyManager';
-import { getCurrentAccountId, getRequiredAccountId } from '../services/accountScope';
+import { getCurrentUserId, getOwnershipInsertFields } from '../services/accountScope';
 
 const DEFAULT_CHATWORK_TEMPLATE = `いつもお世話になっております。
 記事の投稿が完了しましたので、ご報告いたします。
@@ -48,13 +48,13 @@ const useApiKeySettings = () => {
 
     const loadAccountSettings = async () => {
       if (!supabase) return;
-      const accountId = getCurrentAccountId();
-      if (!accountId) return;
+      const userId = getCurrentUserId();
+      if (!userId) return;
 
       const { data } = await supabase
         .from('app_settings')
         .select('key,value')
-        .eq('account_id', accountId)
+        .eq('user_id', userId)
         .in('key', [
           'serpapi_key',
           'chatwork_api_token',
@@ -93,7 +93,7 @@ const useApiKeySettings = () => {
       return;
     }
 
-    const accountId = getRequiredAccountId();
+    const ownership = getOwnershipInsertFields();
     const settingsToSave = [
       values.serpApiKey !== undefined
         ? {
@@ -136,12 +136,12 @@ const useApiKeySettings = () => {
         .from('app_settings')
         .upsert(
           {
-            account_id: accountId,
+            ...ownership,
             key: setting.key,
             value: setting.value,
             description: setting.description,
           },
-          { onConflict: 'account_id,key' }
+          { onConflict: 'user_id,key' }
         );
 
       if (error) {

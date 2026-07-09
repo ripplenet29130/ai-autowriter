@@ -1,4 +1,5 @@
 import { supabase } from './supabaseClient';
+import { getOwnershipInsertFields, scopeMutationToCurrentUser, scopeQueryToCurrentUser } from './accountScope';
 
 export interface Keyword {
     id: string;
@@ -16,10 +17,10 @@ class KeywordService {
             return [];
         }
 
-        const { data, error } = await supabase
+        const { data, error } = await scopeQueryToCurrentUser(supabase
             .from('keywords')
             .select('*')
-            .order('created_at', { ascending: false });
+            .order('created_at', { ascending: false }));
 
         if (error) {
             console.error('Error fetching keywords:', error);
@@ -38,10 +39,10 @@ class KeywordService {
         }
 
         // 重複チェック
-        const { data: existing } = await supabase
+        const { data: existing } = await scopeQueryToCurrentUser(supabase
             .from('keywords')
             .select('id')
-            .eq('keyword', keyword)
+            .eq('keyword', keyword))
             .maybeSingle();
 
         if (existing) {
@@ -51,7 +52,7 @@ class KeywordService {
 
         const { data, error } = await supabase
             .from('keywords')
-            .insert({ keyword })
+            .insert({ ...getOwnershipInsertFields(), keyword })
             .select()
             .single();
 
@@ -72,16 +73,16 @@ class KeywordService {
         }
 
         // 既存のキーワードを取得して重複を除外
-        const { data: existingData } = await supabase
+        const { data: existingData } = await scopeQueryToCurrentUser(supabase
             .from('keywords')
             .select('keyword')
-            .in('keyword', keywords);
+            .in('keyword', keywords));
 
         const existingKeywords = new Set((existingData || []).map((k: any) => k.keyword));
 
         const newKeywords = keywords
             .filter(k => !existingKeywords.has(k))
-            .map(k => ({ keyword: k }));
+            .map(k => ({ ...getOwnershipInsertFields(), keyword: k }));
 
         if (newKeywords.length === 0) {
             return;
@@ -105,10 +106,10 @@ class KeywordService {
             return;
         }
 
-        const { error } = await supabase
+        const { error } = await scopeMutationToCurrentUser(supabase
             .from('keywords')
             .delete()
-            .eq('id', id);
+            .eq('id', id));
 
         if (error) {
             console.error('Error deleting keyword:', error);
