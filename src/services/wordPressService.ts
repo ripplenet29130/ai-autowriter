@@ -443,13 +443,20 @@ export class WordPressService {
         postData.date = this.formatWordPressLocalDate(publishDate);
       }
 
-      const response = await axios.post(
-        `${this.config.url}/wp-json/wp/v2/${postType}`,
-        postData,
-        { headers: this.getAuthHeaders() }
-      );
+      try {
+        const response = await axios.post(
+          `${this.config.url}/wp-json/wp/v2/${postType}`,
+          postData,
+          { headers: this.getAuthHeaders() }
+        );
 
-      if (response.status === 201) {
+        if (response.status !== 201) {
+          return {
+            success: false,
+            error: 'WordPress投稿に失敗しました'
+          };
+        }
+
         const fallbackResult = await this.assignCategoryViaXmlRpcIfNeeded(
           response.data.id,
           postType,
@@ -468,12 +475,28 @@ export class WordPressService {
           wordPressId: response.data.id,
           url: response.data.link
         };
-      }
+      } catch (postError) {
+        if (!this.isPermissionRelatedWpError(postError)) throw postError;
 
-      return {
-        success: false,
-        error: 'WordPress投稿に失敗しました'
-      };
+        console.warn('REST APIでの投稿作成が権限エラーで拒否されました。XML-RPC経由で再試行します。');
+        const xmlRpcResult = await this.publishViaXmlRpc(
+          postType,
+          article.title,
+          processedContent,
+          article.excerpt,
+          publishStatus,
+          taxonomyAssignments,
+          publishDate
+        );
+        if (!xmlRpcResult.success || !xmlRpcResult.postId) {
+          throw postError;
+        }
+
+        return {
+          success: true,
+          wordPressId: Number(xmlRpcResult.postId)
+        };
+      }
     } catch (error: any) {
       console.error('WordPress投稿エラー:', error);
       return {
@@ -515,13 +538,20 @@ export class WordPressService {
         }
       };
 
-      const response = await axios.post(
-        `${this.config.url}/wp-json/wp/v2/${postType}`,
-        postData,
-        { headers: this.getAuthHeaders() }
-      );
+      try {
+        const response = await axios.post(
+          `${this.config.url}/wp-json/wp/v2/${postType}`,
+          postData,
+          { headers: this.getAuthHeaders() }
+        );
 
-      if (response.status === 201) {
+        if (response.status !== 201) {
+          return {
+            success: false,
+            error: 'WordPress予約投稿に失敗しました'
+          };
+        }
+
         const fallbackResult = await this.assignCategoryViaXmlRpcIfNeeded(
           response.data.id,
           postType,
@@ -539,12 +569,28 @@ export class WordPressService {
           success: true,
           wordPressId: response.data.id
         };
-      }
+      } catch (postError) {
+        if (!this.isPermissionRelatedWpError(postError)) throw postError;
 
-      return {
-        success: false,
-        error: 'WordPress予約投稿に失敗しました'
-      };
+        console.warn('REST APIでの予約投稿作成が権限エラーで拒否されました。XML-RPC経由で再試行します。');
+        const xmlRpcResult = await this.publishViaXmlRpc(
+          postType,
+          article.title,
+          processedContent,
+          article.excerpt,
+          'future',
+          taxonomyAssignments,
+          publishDate
+        );
+        if (!xmlRpcResult.success || !xmlRpcResult.postId) {
+          throw postError;
+        }
+
+        return {
+          success: true,
+          wordPressId: Number(xmlRpcResult.postId)
+        };
+      }
     } catch (error: any) {
       console.error('WordPress予約投稿エラー:', error);
       return {
@@ -877,6 +923,86 @@ export class WordPressService {
       taxonomy: `${postType}_category`,
       term: category,
     };
+  }
+
+  private isPermissionRelatedWpError(error: unknown): boolean {
+    if (!axios.isAxiosError(error)) return false;
+    const status = error.response?.status;
+    if (status === 401) return true;
+    const code = String((error.response?.data as any)?.code || '').toLowerCase();
+    return ['rest_cannot_create', 'rest_not_logged_in', 'rest_cannot_edit', 'rest_forbidden'].includes(code);
+  }
+
+  /**
+   * REST APIがAuthorizationヘッダーを認識しないホスト（ロリポップ等のCGI/FastCGI環境で
+   * ヘッダーが破棄される場合）向けに、XML-RPC (wp.newPost) で投稿作成をリトライする。
+   * XML-RPCは認証情報をHTTPヘッダーではなくリクエスト本文で送るため、この制限を受けない。
+   */
+  private async publishViaXmlRpc(
+    postType: string,
+    title: string,
+    content: string,
+    excerpt: string,
+    status: string,
+    taxonomyAssignments: Record<string, number[]>,
+    publishDate?: Date
+  ): Promise<{ success: boolean; postId?: string; error?: string }> {
+    const config = this.config;
+    if (!config) return { success: false, error: 'WordPress設定が見つかりません' };
+    if (!supabase) return { success: false, error: 'Supabaseが初期化されていないため投稿できませんでした' };
+
+    const [firstField, firstIds] = Object.entries(taxonomyAssignments)[0] || [];
+    const taxonomy = firstField
+      ? (postType === 'posts' && firstField === 'categories' ? 'category' : firstField)
+      : undefined;
+
+    try {
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+      const response = await fetch(`${supabaseUrl}/functions/v1/wp-xmlrpc-publish`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${supabaseAnonKey}`,
+        },
+        body: JSON.stringify({
+          url: config.url,
+          username: config.username,
+          password: config.applicationPassword,
+          postType,
+          title,
+          content,
+          excerpt,
+          status,
+          taxonomy,
+          termIds: firstIds,
+          postDateGmt: publishDate ? this.formatWordPressGmtDate(publishDate) : undefined,
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok || data?.error || !data?.postId) {
+        console.error('XML-RPC投稿Edge Functionレスポンス:', data);
+        return {
+          success: false,
+          error: data?.error || `WordPress投稿(XML-RPC)に失敗しました (${response.status})`,
+        };
+      }
+
+      return { success: true, postId: String(data.postId) };
+    } catch (error) {
+      console.error('XML-RPC投稿Edge Functionエラー:', error);
+      return { success: false, error: 'WordPress投稿(XML-RPC)でエラーが発生しました' };
+    }
+  }
+
+  private formatWordPressGmtDate(date: Date): string {
+    const pad = (value: number) => String(value).padStart(2, '0');
+    return [
+      date.getUTCFullYear(),
+      pad(date.getUTCMonth() + 1),
+      pad(date.getUTCDate())
+    ].join('') + `T${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}:${pad(date.getUTCSeconds())}`;
   }
 
   private async assignCategoryViaXmlRpcIfNeeded(
