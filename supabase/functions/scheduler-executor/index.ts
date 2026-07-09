@@ -3660,8 +3660,8 @@ async function generateSchedulerArticleSinglePass(params: {
   ].filter(Boolean).join('\n');
 
   const maxTokens = Math.min(
-    12000,
-    Math.max(3000, Math.ceil(params.targetWordCount * 2.5))
+    16000,
+    Math.max(5000, Math.ceil(params.targetWordCount * 4))
   );
 
   let rawText: string;
