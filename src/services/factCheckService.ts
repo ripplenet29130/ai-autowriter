@@ -1,6 +1,7 @@
 import { supabase } from './supabaseClient';
 import { IS_CLIENT_DEPLOYMENT } from '@aw/config';
 import { getCurrentUserId } from './accountScope';
+import { callAiProxy } from './aiProxyClient';
 import {
   applyFallbackFactCheckFixes,
   buildFactCheckCorrectionPrompt,
@@ -155,6 +156,7 @@ export const factCheckService = {
       return [];
     }
 
+    const localApiKey = getLocalSettings()?.perplexity_api_key || undefined;
     const results: FactCheckResult[] = [];
     const batchSize = DEFAULT_BATCH_SIZE;
     const maxItems = settings.max_items_to_check;
@@ -169,25 +171,19 @@ export const factCheckService = {
       const prompt = buildFactCheckPrompt(batch, keyword);
 
       try {
-        const response = await fetch('https://api.perplexity.ai/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${settings.perplexity_api_key}`,
-          },
-          body: JSON.stringify({
-            model: selectedModel,
-            messages: [
-              { role: 'system', content: 'You are a precise fact-checking assistant. Return JSON only.' },
-              { role: 'user', content: prompt },
-            ],
-            temperature: 0.1,
-          }),
+        // ai-proxy 経由で呼び出す。DB 保存キーはサーバー側で解決されるため送らない。
+        // localStorage にのみ保存されたキーを使っている場合だけ明示的に渡す。
+        const data = await callAiProxy({
+          provider: 'perplexity',
+          ...(localApiKey ? { apiKey: localApiKey } : {}),
+          model: selectedModel,
+          messages: [
+            { role: 'system', content: 'You are a precise fact-checking assistant. Return JSON only.' },
+            { role: 'user', content: prompt },
+          ],
+          temperature: 0.1,
         });
 
-        if (!response.ok) throw new Error(`Perplexity API error: ${response.status}`);
-
-        const data = await response.json();
         const content: string = data?.choices?.[0]?.message?.content ?? '[]';
 
         results.push(...parseFactCheckBatchResults(batch, content));
@@ -228,25 +224,18 @@ export const factCheckService = {
     if (!prompt) return originalContent;
 
     try {
-      const response = await fetch('https://api.perplexity.ai/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${settings.perplexity_api_key}`,
-        },
-        body: JSON.stringify({
-          model: modelName || settings.model_name || DEFAULT_MODEL_NAME,
-          messages: [
-            { role: 'system', content: 'You edit Japanese articles to fix factual mistakes while preserving style.' },
-            { role: 'user', content: prompt },
-          ],
-          temperature: 0.2,
-        }),
+      const localApiKey = getLocalSettings()?.perplexity_api_key || undefined;
+      const data = await callAiProxy({
+        provider: 'perplexity',
+        ...(localApiKey ? { apiKey: localApiKey } : {}),
+        model: modelName || settings.model_name || DEFAULT_MODEL_NAME,
+        messages: [
+          { role: 'system', content: 'You edit Japanese articles to fix factual mistakes while preserving style.' },
+          { role: 'user', content: prompt },
+        ],
+        temperature: 0.2,
       });
 
-      if (!response.ok) throw new Error(`Perplexity API error: ${response.status}`);
-
-      const data = await response.json();
       const content: string = data?.choices?.[0]?.message?.content ?? '';
       const cleaned = cleanFactCheckModelText(content);
       return cleaned || applyFallbackFactCheckFixes(originalContent, issues);
