@@ -177,7 +177,13 @@ serve(async (req) => {
             case 'perplexity': {
                 // apiKey 未指定時はログインユーザーの設定からサーバー側で解決する
                 const perplexityKey = targetApiKey || await resolvePerplexityApiKey(authResult.userId);
-                responseData = await callPerplexity(perplexityKey, model, temperature, messages || [{ role: "user", content: prompt }]);
+                responseData = await callPerplexity(
+                    perplexityKey,
+                    model,
+                    temperature,
+                    messages || [{ role: "user", content: prompt }],
+                    otherParams.response_format,
+                );
                 break;
             }
 
@@ -299,23 +305,36 @@ async function callGemini(apiKey: string, model: string, temperature: number, ma
     return data;
 }
 
-async function callPerplexity(apiKey: string, model: string, temperature: number, messages: any[]) {
+async function callPerplexity(apiKey: string, model: string, temperature: number, messages: any[], responseFormat?: unknown) {
     if (!apiKey) throw new Error("Perplexity API Key is missing");
 
-    const response = await fetch("https://api.perplexity.ai/chat/completions", {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-            model: model,
-            messages: messages,
-            temperature: temperature ?? 0.1,
-        }),
-    });
+    const doCall = async (includeFormat: boolean) => {
+        const response = await fetch("https://api.perplexity.ai/chat/completions", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${apiKey}`,
+            },
+            body: JSON.stringify({
+                model: model,
+                messages: messages,
+                temperature: temperature ?? 0.1,
+                ...(includeFormat && responseFormat ? { response_format: responseFormat } : {}),
+            }),
+            signal: AbortSignal.timeout(90 * 1000),
+        });
+        const data = await response.json();
+        return { response, data };
+    };
 
-    const data = await response.json();
+    let { response, data } = await doCall(true);
+
+    // structured output 未対応モデルの 400 は、構造化出力なしで一度だけ再試行する
+    if (!response.ok && response.status === 400 && responseFormat) {
+        console.warn('Perplexity rejected response_format; retrying without structured output');
+        ({ response, data } = await doCall(false));
+    }
+
     if (!response.ok) {
         throw new Error(`Perplexity API error (${response.status}): ${JSON.stringify(data)}`);
     }

@@ -6,6 +6,7 @@ import {
   applyFallbackFactCheckFixes,
   buildFactCheckCorrectionPrompt,
   buildFactCheckPrompt,
+  buildFactCheckResponseFormat,
   cleanFactCheckModelText,
   DEFAULT_FACT_CHECK_BATCH_SIZE,
   DEFAULT_FACT_CHECK_MAX_ITEMS,
@@ -16,6 +17,7 @@ import {
   getFixableFactCheckIssues,
   hasFixableFactCheckIssues,
   parseFactCheckBatchResults,
+  runWithFactCheckRetries,
   selectFactCheckItems,
 } from '../shared/factCheckCore';
 
@@ -173,7 +175,8 @@ export const factCheckService = {
       try {
         // ai-proxy 経由で呼び出す。DB 保存キーはサーバー側で解決されるため送らない。
         // localStorage にのみ保存されたキーを使っている場合だけ明示的に渡す。
-        const data = await callAiProxy({
+        // 429/5xx/タイムアウトは指数バックオフでリトライする。
+        const data = await runWithFactCheckRetries(() => callAiProxy({
           provider: 'perplexity',
           ...(localApiKey ? { apiKey: localApiKey } : {}),
           model: selectedModel,
@@ -182,7 +185,8 @@ export const factCheckService = {
             { role: 'user', content: prompt },
           ],
           temperature: 0.1,
-        });
+          response_format: buildFactCheckResponseFormat(),
+        }));
 
         const content: string = data?.choices?.[0]?.message?.content ?? '[]';
 
@@ -225,7 +229,8 @@ export const factCheckService = {
 
     try {
       const localApiKey = getLocalSettings()?.perplexity_api_key || undefined;
-      const data = await callAiProxy({
+      // 修正結果は本文テキストなので structured output は使わない
+      const data = await runWithFactCheckRetries(() => callAiProxy({
         provider: 'perplexity',
         ...(localApiKey ? { apiKey: localApiKey } : {}),
         model: modelName || settings.model_name || DEFAULT_MODEL_NAME,
@@ -234,7 +239,7 @@ export const factCheckService = {
           { role: 'user', content: prompt },
         ],
         temperature: 0.2,
-      });
+      }));
 
       const content: string = data?.choices?.[0]?.message?.content ?? '';
       const cleaned = cleanFactCheckModelText(content);

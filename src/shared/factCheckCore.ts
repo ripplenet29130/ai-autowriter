@@ -29,6 +29,76 @@ type Candidate = FactCheckItem & { score: number };
 export const DEFAULT_FACT_CHECK_MAX_ITEMS = 50;
 export const DEFAULT_FACT_CHECK_BATCH_SIZE = 10;
 export const DEFAULT_FACT_CHECK_MODEL_NAME = 'sonar';
+export const FACT_CHECK_REQUEST_TIMEOUT_MS = 90 * 1000;
+export const FACT_CHECK_MAX_RETRIES = 2;
+
+export class FactCheckHttpError extends Error {
+  status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = 'FactCheckHttpError';
+    this.status = status;
+  }
+}
+
+// 429 / 5xx / ネットワーク断・タイムアウトのみリトライ対象とする（4xx は設定ミスなので即失敗）
+export const isRetryableFactCheckError = (error: unknown): boolean => {
+  const status = (error as { status?: unknown })?.status;
+  if (typeof status === 'number') return status === 429 || status >= 500;
+  if (error instanceof Error) {
+    return error.name === 'AbortError'
+      || error.name === 'TimeoutError'
+      || /network|fetch|abort|timeout|秒以内に完了しませんでした/i.test(error.message);
+  }
+  return false;
+};
+
+export const runWithFactCheckRetries = async <T>(
+  operation: () => Promise<T>,
+  maxRetries = FACT_CHECK_MAX_RETRIES,
+  baseDelayMs = 1500,
+): Promise<T> => {
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error;
+      if (attempt === maxRetries || !isRetryableFactCheckError(error)) throw error;
+      await new Promise((resolve) => setTimeout(resolve, baseDelayMs * 2 ** attempt));
+    }
+  }
+  throw lastError;
+};
+
+// Perplexity の structured output（JSON Schema）。ルートはオブジェクト必須のため results で包む。
+export const buildFactCheckResponseFormat = () => ({
+  type: 'json_schema',
+  json_schema: {
+    schema: {
+      type: 'object',
+      properties: {
+        results: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              claim_number: { type: 'integer' },
+              verdict: { type: 'string', enum: ['correct', 'incorrect', 'partially_correct', 'unverified'] },
+              confidence: { type: 'number' },
+              correct_info: { type: 'string' },
+              explanation: { type: 'string' },
+              source_url: { type: 'string' },
+            },
+            required: ['claim_number', 'verdict'],
+          },
+        },
+      },
+      required: ['results'],
+    },
+  },
+});
 
 const normalize = (text: string): string => text.replace(/\s+/g, ' ').trim();
 
@@ -169,13 +239,39 @@ export const buildFactCheckPrompt = (batch: FactCheckItem[], keyword: string): s
   ].join('\n');
 };
 
-export const parseFactCheckBatchResults = (batch: FactCheckItem[], content: string): FactCheckResult[] => {
-  let batchResults: PerplexityBatchResult[] = [];
+// 配列そのもの / {results: [...]} / それ以外は null
+const coerceBatchResults = (value: unknown): PerplexityBatchResult[] | null => {
+  if (Array.isArray(value)) return value as PerplexityBatchResult[];
+  if (value && typeof value === 'object') {
+    const results = (value as { results?: unknown }).results;
+    if (Array.isArray(results)) return results as PerplexityBatchResult[];
+  }
+  return null;
+};
 
+export const parseFactCheckBatchResults = (batch: FactCheckItem[], content: string): FactCheckResult[] => {
+  let batchResults: PerplexityBatchResult[] | null = null;
+
+  // 1. structured output ならそのまま JSON として読める
   try {
-    const jsonMatch = content.match(/\[[\s\S]*\]/);
-    batchResults = JSON.parse(jsonMatch ? jsonMatch[0] : content) as PerplexityBatchResult[];
+    batchResults = coerceBatchResults(JSON.parse(content));
   } catch {
+    // fall through
+  }
+
+  // 2. 前後に説明文が付いた応答から JSON 部分を切り出す（従来動作）
+  if (!batchResults) {
+    const jsonMatch = content.match(/\[[\s\S]*\]|\{[\s\S]*\}/);
+    if (jsonMatch) {
+      try {
+        batchResults = coerceBatchResults(JSON.parse(jsonMatch[0]));
+      } catch {
+        // fall through
+      }
+    }
+  }
+
+  if (!batchResults) {
     batchResults = batch.map((_, idx) => ({
       claim_number: idx + 1,
       verdict: 'unverified',
@@ -185,9 +281,23 @@ export const parseFactCheckBatchResults = (batch: FactCheckItem[], content: stri
     }));
   }
 
+  // claim_number が返っていれば番号で突き合わせる。位置での対応付けは
+  // claim_number が一切無い応答へのフォールバックに限定する（順序ズレの誤対応を防ぐ）。
+  const hasClaimNumbers = batchResults.some((r) => typeof r?.claim_number === 'number');
+
   return batch.flatMap((item, idx) => {
-    const result = batchResults.find((r) => r.claim_number === idx + 1) ?? batchResults[idx];
-    if (!result) return [];
+    const result = hasClaimNumbers
+      ? batchResults!.find((r) => r?.claim_number === idx + 1)
+      : batchResults![idx];
+    if (!result) {
+      return [{
+        claim: item.claim,
+        verdict: 'unverified' as FactCheckVerdict,
+        confidence: 0,
+        sourceUrl: '',
+        explanation: 'モデル応答に対応する結果が含まれていませんでした',
+      }];
+    }
 
     let verdict = result.verdict;
     let confidence = normalizeFactCheckConfidence(result.confidence);

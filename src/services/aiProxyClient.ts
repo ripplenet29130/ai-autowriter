@@ -1,5 +1,17 @@
 import { supabase } from './supabaseClient';
 
+const AI_PROXY_TIMEOUT_MS = 120 * 1000;
+
+export class AiProxyError extends Error {
+  status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = 'AiProxyError';
+    this.status = status;
+  }
+}
+
 /**
  * ai-proxy Edge Function の共通呼び出しヘルパー。
  * ログインユーザーのアクセストークンで認証する（anon key では 401 になる）。
@@ -31,6 +43,7 @@ export const callAiProxy = async (payload: Record<string, unknown>): Promise<any
       'apikey': supabaseAnonKey,
     },
     body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(AI_PROXY_TIMEOUT_MS),
   });
 
   if (!response.ok) {
@@ -38,7 +51,7 @@ export const callAiProxy = async (payload: Record<string, unknown>): Promise<any
     const message = typeof errorData?.error === 'string'
       ? errorData.error
       : `Unknown error`;
-    throw new Error(`AI Proxy Error (${response.status}): ${message}`);
+    throw new AiProxyError(response.status, `AI Proxy Error (${response.status}): ${message}`);
   }
 
   return await response.json();
