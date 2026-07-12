@@ -22,15 +22,17 @@ export class ApiKeyManager {
       'serpapi': import.meta.env.VITE_SERPAPI_KEY
     };
 
-    // 1. まずローカルストレージから読み込み
+    // 旧バージョンが localStorage に平文保存していたキーは読み込まず、削除する
+    // （XSS で盗まれるため。永続化はサーバー側の app_settings と環境変数に任せる）
     Object.keys(keys).forEach(service => {
-      const storedKey = localStorage.getItem(`api_key_${service}`);
-      if (storedKey) {
-        this.apiKeys.set(service, storedKey);
+      try {
+        localStorage.removeItem(`api_key_${service}`);
+      } catch {
+        // localStorage が使えない環境では何もしない
       }
     });
 
-    // 2. 環境変数があれば上書き（環境変数を優先）
+    // 環境変数があれば読み込む
     Object.entries(keys).forEach(([key, value]) => {
       if (value && value !== '既に設定したGoogle API Key' && value.length > 10) {
         this.apiKeys.set(key, value);
@@ -43,9 +45,9 @@ export class ApiKeyManager {
   }
 
   setApiKey(service: string, key: string): void {
+    // メモリ内のみ保持する。永続化はサーバー側の app_settings（各設定画面が保存）に任せ、
+    // localStorage への平文保存は行わない。
     this.apiKeys.set(service, key);
-    // セキュアな方法で保存（実際の実装では暗号化を検討）
-    localStorage.setItem(`api_key_${service}`, key);
   }
 
   hasApiKey(service: string): boolean {
