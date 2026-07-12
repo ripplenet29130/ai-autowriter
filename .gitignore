@@ -29,9 +29,19 @@ dist-ssr
 
 # Local build artifacts and temp files
 build/
+build_out/
 req.json
 supabase/.temp/
 *.tsbuildinfo
+
+# Local snapshots (git history is the backup; do not commit)
+backups/
+
+# Embedded repository (own .git; not part of this repo)
+seo-researcher/
+
+# Claude Code session worktrees
+.claude/worktrees/
 
 .vercel
 .env*.local
