@@ -30,7 +30,7 @@ import { callAI, resolveAiModelRate, estimateExecutionCostBreakdown, fetchStyleR
 import { conductCompetitorResearch, conductCompetitorResearchWithFallback, conductCompetitorResearchViaEdgeFunction, extractRelatedKeywordsFromCompetitorData, extractCompetitorHeadings, fetchRelatedKeywordsViaCustomSearch } from './_research.ts';
 import { formatContentForWordPress, normalizeGeneratedContentForPublishing, extractExcerpt, inferLengthCategory, countNonSummaryHeadings, findHeadingOnlySections, summarizeFactCheckContentChanges } from './_content-format.ts';
 import { publishToWordPress, publishViaXmlRpc, getTermIdBySlugOrName, getCategoryIdBySlugOrName, getTaxonomyCandidatesForPostType, resolveTermAssignmentForPostType, isPermissionRelatedWpError } from './_wordpress.ts';
-import { generateSchedulerArticleSinglePass, formatOutlineForSinglePass, validateGeneratedArticleCompleteness, compactArticleToTargetLength } from './_generation.ts';
+import { generateSchedulerArticleSectioned, generateSchedulerArticleSinglePass, formatOutlineForSinglePass, validateGeneratedArticleCompleteness, compactArticleToTargetLength } from './_generation.ts';
 import { sendChatworkNotifications, notifyScheduleExecutionFailure } from './_notifications.ts';
 
 Deno.serve(async (req: Request) => {
@@ -868,7 +868,7 @@ async function executeSchedule(
       progress: 82,
       title: fixedTitle || '',
     });
-    const generationResult = await generateSchedulerArticleSinglePass({
+    const generationParams = {
       outline,
       keyword,
       keywords: sectionKeywords,
@@ -876,7 +876,17 @@ async function executeSchedule(
       targetWordCount,
       customInstructions: effectiveCustomInstructions,
       aiConfig,
-    });
+    };
+
+    // セクション分割生成を優先し、失敗時は従来のシングルパスへフォールバックする
+    let generationResult;
+    try {
+      generationResult = await generateSchedulerArticleSectioned(generationParams);
+    } catch (sectionedError) {
+      const reason = sectionedError instanceof Error ? sectionedError.message : String(sectionedError || '');
+      console.warn(`[generation] Sectioned generation failed (${reason}); falling back to single-pass`);
+      generationResult = await generateSchedulerArticleSinglePass(generationParams);
+    }
 
     await updateExecutionProgressHistory(supabase, progressHistoryId, {
       stage: 'article_done',

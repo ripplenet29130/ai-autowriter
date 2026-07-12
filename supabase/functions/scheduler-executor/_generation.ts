@@ -158,6 +158,20 @@ export function compactArticleToTargetLength(content: string, targetWordCount: n
 }
 
 
+function buildToneInstruction(tone: WritingTone): string {
+  return tone === 'casual'
+    ? 'Tone: natural, approachable Japanese. Use desu/masu consistently, but do not sound childish. Keep sentences short and easy to follow.'
+    : 'Tone: natural professional Japanese for business readers. Write like an experienced practitioner answering a reader consultation. Avoid stiff report-like prose, manual-like prose, sales copy, and overusing overly polite phrases such as 「いたします」「させていただきます」「となります」. Keep sentences short, use concrete verbs, and make the next judgment/action clear for the reader.';
+}
+
+function buildKeywordLine(keyword: string, keywords: string[]): string {
+  return Array.from(new Set([keyword, ...(keywords || [])]
+    .map((item) => String(item || '').trim())
+    .filter(Boolean)))
+    .slice(0, 6)
+    .join(', ');
+}
+
 export async function generateSchedulerArticleSinglePass(params: {
   outline: ArticleOutline;
   keyword: string;
@@ -168,14 +182,8 @@ export async function generateSchedulerArticleSinglePass(params: {
   aiConfig: AIConfig;
 }): Promise<{ sectionsWithContent: any[]; fullContent: string; wordCount: number }> {
   const outlineText = formatOutlineForSinglePass(params.outline);
-  const keywordLine = Array.from(new Set([params.keyword, ...(params.keywords || [])]
-    .map((item) => String(item || '').trim())
-    .filter(Boolean)))
-    .slice(0, 6)
-    .join(', ');
-  const toneInstruction = params.tone === 'casual'
-    ? 'Tone: natural, approachable Japanese. Use desu/masu consistently, but do not sound childish. Keep sentences short and easy to follow.'
-    : 'Tone: natural professional Japanese for business readers. Write like an experienced practitioner answering a reader consultation. Avoid stiff report-like prose, manual-like prose, sales copy, and overusing overly polite phrases such as 「いたします」「させていただきます」「となります」. Keep sentences short, use concrete verbs, and make the next judgment/action clear for the reader.';
+  const keywordLine = buildKeywordLine(params.keyword, params.keywords);
+  const toneInstruction = buildToneInstruction(params.tone);
   const hardMaxChars = Math.round(params.targetWordCount * 1.2);
   const hardMinChars = Math.round(params.targetWordCount * 0.85);
   const prompt = [
@@ -277,6 +285,151 @@ export async function generateSchedulerArticleSinglePass(params: {
     }
     validateGeneratedArticleCompleteness(fullContent, params.outline, params.targetWordCount);
   }
+
+  return {
+    sectionsWithContent: [],
+    fullContent,
+    wordCount: countGeneratedChars(fullContent),
+  };
+}
+
+
+// モデルが指示に反して付けた見出し行を除去する（見出しは組み立て側で付与する）
+function stripModelHeadings(text: string): string {
+  return text
+    .split('\n')
+    .filter((line) => !/^\s*#{1,6}\s/.test(line))
+    .join('\n')
+    .trim();
+}
+
+// セクション分割生成。各セクションを個別の AI 呼び出しで書き、
+// 文脈は「アウトライン全体 + 執筆済み見出し一覧 + 直前セクションの末尾」に圧縮して渡す
+// （全文を毎回渡す方式に比べて入力トークンを大幅に抑える）。
+export async function generateSchedulerArticleSectioned(params: {
+  outline: ArticleOutline;
+  keyword: string;
+  keywords: string[];
+  tone: WritingTone;
+  targetWordCount: number;
+  customInstructions?: string;
+  aiConfig: AIConfig;
+}): Promise<{ sectionsWithContent: any[]; fullContent: string; wordCount: number }> {
+  const sections = params.outline.sections || [];
+  if (sections.length === 0) {
+    throw new Error('Sectioned generation requires an outline with sections');
+  }
+
+  const outlineText = formatOutlineForSinglePass(params.outline);
+  const keywordLine = buildKeywordLine(params.keyword, params.keywords);
+  const toneInstruction = buildToneInstruction(params.tone);
+
+  // 文字数配分: アウトラインの estimatedWordCount 比率で配分し、無ければ均等割り
+  const totalEstimated = sections.reduce((sum, s) => sum + (Number(s.estimatedWordCount) || 0), 0);
+  const evenBudget = Math.round(params.targetWordCount / sections.length);
+  const budgetFor = (section: OutlineSection): number => {
+    const raw = totalEstimated > 0
+      ? Math.round(params.targetWordCount * ((Number(section.estimatedWordCount) || evenBudget) / totalEstimated))
+      : evenBudget;
+    return Math.min(900, Math.max(150, raw));
+  };
+
+  const hasLead = sections.some((s) => s.isLead);
+  const steps: Array<{ section: OutlineSection | null; isLead: boolean }> = [];
+  if (!hasLead) steps.push({ section: null, isLead: true });
+  for (const section of sections) steps.push({ section, isLead: section.isLead });
+
+  const parts: string[] = [];
+  const writtenHeadings: string[] = [];
+  let previousTail = '';
+
+  for (const step of steps) {
+    const section = step.section;
+    const budget = section
+      ? budgetFor(section)
+      : Math.min(400, Math.max(200, Math.round(params.targetWordCount * 0.08)));
+    const minChars = Math.round(budget * 0.7);
+    const maxChars = Math.round(budget * 1.4);
+
+    const task = step.isLead
+      ? 'Write ONLY the lead paragraphs that open the article (2-3 short paragraphs shown before the first heading).'
+      : [
+          `Write ONLY the body text of the section titled 「${section!.title}」.`,
+          section!.description ? `Section focus: ${section!.description}` : '',
+        ].filter(Boolean).join('\n');
+
+    const contextBlock = [
+      writtenHeadings.length > 0
+        ? `Sections already written (do NOT repeat their content):\n${writtenHeadings.map((h) => `- ${h}`).join('\n')}`
+        : '',
+      previousTail
+        ? `The previous section ends with the following text. Connect the flow naturally and do not repeat it:\n${previousTail}`
+        : '',
+    ].filter(Boolean).join('\n\n');
+
+    const prompt = [
+      'You are writing ONE part of a longer Japanese article. The other parts are written separately.',
+      '',
+      `Article title: ${params.outline.title}`,
+      `Main keyword: ${params.keyword}`,
+      keywordLine ? `Related keywords: ${keywordLine}` : '',
+      toneInstruction,
+      '',
+      'Full outline of the article (context only — do NOT write the other sections):',
+      outlineText,
+      contextBlock ? `\n${contextBlock}` : '',
+      '',
+      task,
+      '',
+      'Hard requirements:',
+      `- Length: between ${minChars} and ${maxChars} Japanese characters.`,
+      '- Output only the body text in Markdown. Do NOT output any headings (## or ###), the article title, explanations, JSON, code fences, or notes.',
+      '- 2-4 short sentences per paragraph. Separate paragraphs with one blank line.',
+      '- Prefer clear, short Japanese sentences. Explain technical terms briefly for general readers.',
+      '- Do not summarize the entire article here unless this section is the closing summary.',
+      '- Avoid unfinished sentences and placeholder text.',
+      params.customInstructions ? `\nAdditional instructions:\n${params.customInstructions}` : '',
+    ].filter(Boolean).join('\n');
+
+    const maxTokens = Math.min(4000, Math.max(600, Math.ceil(maxChars * 2.5)));
+
+    let rawText: string;
+    try {
+      rawText = await callAI(prompt, params.aiConfig, maxTokens);
+    } catch (error: any) {
+      const partial = typeof error?.partialText === 'string' ? error.partialText : '';
+      if (countGeneratedChars(partial) >= Math.max(120, Math.round(minChars * 0.6))) {
+        console.warn(`[sectioned] Token limit hit; using partial text (${countGeneratedChars(partial)} chars) for "${section?.title ?? 'lead'}"`);
+        rawText = partial;
+      } else {
+        // 一度だけトークン上限を引き上げて再試行。ここで失敗すれば呼び出し元がシングルパスへフォールバックする
+        rawText = await callAI(prompt, params.aiConfig, Math.min(6000, maxTokens * 2));
+      }
+    }
+
+    const text = stripModelHeadings(String(rawText || '').trim());
+    if (!text) {
+      throw new Error(`Sectioned generation returned empty content for "${section?.title ?? 'lead'}"`);
+    }
+
+    if (step.isLead || !section) {
+      parts.push(text);
+      writtenHeadings.push('(リード文)');
+    } else {
+      const headingPrefix = section.level === 3 ? '###' : '##';
+      parts.push(`${headingPrefix} ${section.title}\n\n${text}`);
+      writtenHeadings.push(section.title);
+    }
+
+    previousTail = text.replace(/\s+/g, ' ').trim().slice(-160);
+  }
+
+  const fullContent = formatArticleBodyForReadability(parts.join('\n\n'));
+  if (!fullContent) {
+    throw new Error('Sectioned article generation returned empty content');
+  }
+
+  validateGeneratedArticleCompleteness(fullContent, params.outline, params.targetWordCount);
 
   return {
     sectionsWithContent: [],
