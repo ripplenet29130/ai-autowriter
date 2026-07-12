@@ -51,6 +51,41 @@ const authenticateRequest = async (req: Request): Promise<{ userId: string } | {
     return { userId: data.user.id };
 };
 
+// configId から API キーをサーバー側で解決する。
+// キーをブラウザに往復させないための経路。所有者本人か admin のみ利用できる。
+const resolveConfigApiKey = async (configId: string, userId: string): Promise<string> => {
+    const supabaseUrl = Deno.env.get('SUPABASE_URL');
+    const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+    if (!supabaseUrl || !serviceRoleKey) {
+        throw new Error('Server configuration is missing for API key resolution');
+    }
+
+    const admin = createClient(supabaseUrl, serviceRoleKey);
+    const { data: config, error } = await admin
+        .from('ai_configs')
+        .select('user_id, api_key')
+        .eq('id', configId)
+        .maybeSingle();
+
+    if (error || !config?.api_key) {
+        throw new Error('AI config was not found or has no API key');
+    }
+
+    if (config.user_id !== userId) {
+        const { data: profile } = await admin
+            .from('profiles')
+            .select('role')
+            .eq('user_id', userId)
+            .maybeSingle();
+
+        if (profile?.role !== 'admin') {
+            throw new Error('You do not have permission to use this AI config');
+        }
+    }
+
+    return config.api_key;
+};
+
 serve(async (req) => {
     // CORS handling
     if (req.method === 'OPTIONS') {
@@ -64,17 +99,18 @@ serve(async (req) => {
 
     try {
         const body = await req.json();
-        const { provider, type, apiKey, model, temperature, maxTokens, prompt, messages, ...otherParams } = body;
+        const { provider, type, apiKey, configId, model, temperature, maxTokens, prompt, messages, ...otherParams } = body;
 
         console.log(`🤖 AI Proxy Request (Supabase): ${type || provider} (${model || 'no-model'})`);
 
         // API Key Handling
-        // クライアントから送られてきた apiKey を優先するが、
-        // まだ実装されていない場合は環境変数から取得（セキュリティ的には環境変数がベスト）
-        // 今回はNetlifyからの移行なので、クライアントからキーが送られてくるロジックを維持しつつ、
-        // サーバー側の環境変数も使えるようにフォールバックを入れる。
+        // 推奨経路: configId を受け取り、DB からサーバー側で解決する（キーがブラウザを往復しない）。
+        // 後方互換: 旧フロントの apiKey 直送も受け付ける。どちらも無ければ環境変数フォールバック。
 
         let targetApiKey = apiKey;
+        if (configId) {
+            targetApiKey = await resolveConfigApiKey(String(configId), authResult.userId);
+        }
         if (!targetApiKey) {
             if (provider === 'openai') targetApiKey = Deno.env.get('OPENAI_API_KEY');
             if (provider === 'claude') targetApiKey = Deno.env.get('ANTHROPIC_API_KEY');

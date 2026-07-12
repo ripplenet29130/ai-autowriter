@@ -727,12 +727,12 @@ JSON形式の配列（文字列のみの配列）で出力してください。
 
   // 生のテキストを取得するためのヘルパー
   private async callRawGemini(prompt: string): Promise<string> {
-    const { apiKey, model, temperature, maxTokens } = this.config!;
+    const { id: configId, model, temperature, maxTokens } = this.config!;
 
-    // Proxy邨檎罰縺ｧGemini繧貞他縺ｳ蜃ｺ縺・
+    // APIキーは送らず、configId を渡してサーバー側で解決させる
     const data = await this.callProxy({
       provider: 'gemini',
-      apiKey,
+      configId,
       model,
       temperature,
       maxTokens,
@@ -743,12 +743,12 @@ JSON形式の配列（文字列のみの配列）で出力してください。
   }
 
   private async callRawClaude(prompt: string): Promise<string> {
-    const { apiKey, model, temperature, maxTokens } = this.config!;
+    const { id: configId, model, temperature, maxTokens } = this.config!;
 
-    // Proxy邨檎罰縺ｧClaude繧貞他縺ｳ蜃ｺ縺・
+    // APIキーは送らず、configId を渡してサーバー側で解決させる
     const data = await this.callProxy({
       provider: 'claude',
-      apiKey,
+      configId,
       model,
       temperature,
       maxTokens,
@@ -759,12 +759,12 @@ JSON形式の配列（文字列のみの配列）で出力してください。
   }
 
   private async callRawOpenAI(prompt: string): Promise<string> {
-    const { apiKey, model, temperature, maxTokens } = this.config!;
+    const { id: configId, model, temperature, maxTokens } = this.config!;
 
-    // Proxy邨檎罰縺ｧOpenAI繧貞他縺ｳ蜃ｺ縺・
+    // APIキーは送らず、configId を渡してサーバー側で解決させる
     const data = await this.callProxy({
       provider: 'openai',
-      apiKey,
+      configId,
       model,
       temperature,
       maxTokens,
