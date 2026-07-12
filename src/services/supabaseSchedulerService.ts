@@ -550,6 +550,14 @@ class SupabaseSchedulerService {
       throw new Error('Supabase URL or Key is not configured');
     }
 
+    // 強制実行・ロック解除はログインユーザーのトークンで認可される
+    const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+    const accessToken = sessionData?.session?.access_token;
+
+    if (sessionError || !accessToken) {
+      throw new Error('ログインセッションが見つかりません。再度ログインしてください。');
+    }
+
     const functionUrl = `${supabaseUrl}/functions/v1/scheduler-executor`;
     console.log('Calling scheduler function:', { ...payload, functionUrl });
 
@@ -557,7 +565,7 @@ class SupabaseSchedulerService {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${supabaseKey}`,
+        'Authorization': `Bearer ${accessToken}`,
         'apikey': supabaseKey,
       },
       body: JSON.stringify(payload),
