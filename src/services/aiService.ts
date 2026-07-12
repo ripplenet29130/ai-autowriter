@@ -583,6 +583,18 @@ JSON形式の配列（文字列のみの配列）で出力してください。
       throw new Error("Supabase configurations are missing");
     }
 
+    if (!supabase) {
+      throw new Error("Supabase client is not initialized");
+    }
+
+    // ai-proxy はログインユーザーのアクセストークンを要求する
+    const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+    const accessToken = sessionData?.session?.access_token;
+
+    if (sessionError || !accessToken) {
+      throw new Error("ログインセッションが見つかりません。再度ログインしてください。");
+    }
+
     // Supabase Edge Functionのエンドポイント
     const endpoint = `${supabaseUrl}/functions/v1/ai-proxy`;
 
@@ -592,7 +604,8 @@ JSON形式の配列（文字列のみの配列）で出力してください。
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${supabaseAnonKey}`
+        'Authorization': `Bearer ${accessToken}`,
+        'apikey': supabaseAnonKey
       },
       body: JSON.stringify(payload)
     });

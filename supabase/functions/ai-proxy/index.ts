@@ -4,6 +4,7 @@
 // This enables autocomplete, go to definition, etc.
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "npm:@supabase/supabase-js@2";
 import {
     normalizeAiModel,
     supportsTemperature,
@@ -14,10 +15,51 @@ const corsHeaders = {
     'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// ログインユーザーのアクセストークンのみ許可する。
+// anon key は verify_jwt を通過してしまうため、auth.getUser() で実ユーザーを確認する。
+const authenticateRequest = async (req: Request): Promise<{ userId: string } | { errorResponse: Response }> => {
+    const unauthorized = (message: string) => ({
+        errorResponse: new Response(JSON.stringify({ error: message }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            status: 401,
+        }),
+    });
+
+    const authHeader = req.headers.get('Authorization') ?? '';
+    const token = authHeader.replace(/^Bearer\s+/i, '').trim();
+    if (!token) {
+        return unauthorized('Missing Authorization header');
+    }
+
+    const supabaseUrl = Deno.env.get('SUPABASE_URL');
+    const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY');
+    if (!supabaseUrl || !supabaseAnonKey) {
+        return {
+            errorResponse: new Response(JSON.stringify({ error: 'Server auth configuration is missing' }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 500,
+            }),
+        };
+    }
+
+    const supabase = createClient(supabaseUrl, supabaseAnonKey);
+    const { data, error } = await supabase.auth.getUser(token);
+    if (error || !data?.user) {
+        return unauthorized('Invalid or expired session token');
+    }
+
+    return { userId: data.user.id };
+};
+
 serve(async (req) => {
     // CORS handling
     if (req.method === 'OPTIONS') {
         return new Response('ok', { headers: corsHeaders });
+    }
+
+    const authResult = await authenticateRequest(req);
+    if ('errorResponse' in authResult) {
+        return authResult.errorResponse;
     }
 
     try {
@@ -94,7 +136,8 @@ serve(async (req) => {
 
     } catch (error) {
         console.error("🔥 Proxy Error:", error);
-        return new Response(JSON.stringify({ error: error.message, details: error }), {
+        const message = error instanceof Error ? error.message : 'Unexpected proxy error';
+        return new Response(JSON.stringify({ error: message }), {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
             status: 500,
         });
