@@ -104,13 +104,23 @@ class CompetitorResearchService {
             const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
             const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
+            // competitor-search はログインユーザーのトークンを要求する
+            const { data: sessionData } = supabase
+                ? await supabase.auth.getSession()
+                : { data: null };
+            const accessToken = sessionData?.session?.access_token;
+            if (!accessToken) {
+                throw new Error('ログインセッションが見つかりません。再度ログインしてください。');
+            }
+
             const response = await fetch(
                 `${supabaseUrl}/functions/v1/competitor-search`,
                 {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${supabaseKey}`,
+                        'Authorization': `Bearer ${accessToken}`,
+                        'apikey': supabaseKey,
                     },
                     body: JSON.stringify({ keyword, limit, serpApiKey }), // serpApiKeyを追加
                 }

@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { corsHeaders } from "../_shared/cors.ts";
+import { requireAuthenticatedCaller } from "../_shared/auth.ts";
 import { DOMParser } from "https://deno.land/x/deno_dom/deno-dom-wasm.ts";
 
 console.log("強化版・競合検索関数が起動しました");
@@ -17,6 +18,11 @@ interface CompetitorArticle {
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
+  }
+
+  const caller = await requireAuthenticatedCaller(req);
+  if ("errorResponse" in caller) {
+    return caller.errorResponse;
   }
 
   try {
@@ -134,7 +140,7 @@ serve(async (req) => {
           excerpt: excerpt
         };
       } catch (err) {
-        console.error(`スクレイピング失敗: ${url}`, err.message);
+        console.error(`スクレイピング失敗: ${url}`, err instanceof Error ? err.message : String(err));
         return {
           title: item.title,
           url: url,

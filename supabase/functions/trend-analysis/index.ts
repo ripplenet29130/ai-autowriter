@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { corsHeaders } from "../_shared/cors.ts";
+import { requireAuthenticatedCaller } from "../_shared/auth.ts";
 
 console.log("トレンド分析関数が起動しました");
 
@@ -22,6 +23,11 @@ serve(async (req) => {
     // CORSヘッダーを追加
     if (req.method === "OPTIONS") {
         return new Response("ok", { headers: corsHeaders });
+    }
+
+    const caller = await requireAuthenticatedCaller(req);
+    if ("errorResponse" in caller) {
+        return caller.errorResponse;
     }
 
     try {
