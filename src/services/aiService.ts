@@ -27,9 +27,10 @@ export class AIService {
     try {
       if (!supabase) throw new Error("Supabase client is not initialized");
 
+      // api_key はクライアントから SELECT 不可（サーバー側が configId で解決する）
       let query = supabase
         .from("ai_configs")
-        .select("*")
+        .select("id, provider, model, temperature, max_tokens, image_enabled, image_provider, images_per_article")
         .order("is_active", { ascending: false })
         .order("created_at", { ascending: false })
         .limit(1);
@@ -50,7 +51,7 @@ export class AIService {
       this.config = {
         id: data.id,
         provider: data.provider,
-        apiKey: data.api_key,
+        apiKey: '', // キーはサーバー側(ai-proxy)が configId から解決する
         model: this.validateModelName(data.provider, data.model),
         temperature: data.temperature ?? 0.7,
         maxTokens: data.max_tokens ?? 16384,
@@ -172,9 +173,8 @@ JSON形式の配列（文字列のみの配列）で出力してください。
       // 設定ロード（未ロードなら実行）
       if (!this.config) await this.loadActiveConfig();
 
-      // 必須項目チェック
+      // 必須項目チェック（APIキーはサーバー側で解決されるためここでは確認しない）
       if (!this.config?.provider) throw new Error("AI provider is not configured.");
-      if (!this.config?.apiKey) throw new Error("API key is not configured.");
       if (!this.config?.model) throw new Error("Model is not configured.");
 
       // 蛻晏屓逕滓・

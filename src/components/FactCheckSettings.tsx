@@ -26,6 +26,8 @@ export const FactCheckSettings: React.FC = () => {
   });
   const [loading, setLoading] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
+  // perplexity_api_key はクライアントから読めないため、保存済みかどうかは設定行の有無で判定する
+  const [hasStoredApiKey, setHasStoredApiKey] = useState(false);
 
   useEffect(() => {
     void loadSettings();
@@ -62,7 +64,7 @@ export const FactCheckSettings: React.FC = () => {
       let userSettings: any = null;
       const { data, error } = await supabase
         .from('fact_check_settings')
-        .select('*')
+        .select('id, enabled, auto_fix_enabled')
         .eq('user_id', userId)
         .order('updated_at', { ascending: false })
         .limit(1)
@@ -73,13 +75,13 @@ export const FactCheckSettings: React.FC = () => {
       }
 
       userSettings = data;
+      setHasStoredApiKey(Boolean(userSettings));
 
       const { data: globalRows, error: globalError } = await supabase
         .from('app_settings')
         .select('key, value')
         .eq('user_id', userId)
         .in('key', [
-          'perplexity_api_key',
           'fact_check_auto_fix_enabled',
           'fact_check_alert_chatwork_room_id',
           'fact_check_notify_mode',
@@ -94,12 +96,13 @@ export const FactCheckSettings: React.FC = () => {
         map.set(String(row.key), String(row.value ?? ''));
       });
 
-      setSettings({
+      setSettings((prev) => ({
         autoFixEnabled: Boolean(userSettings?.auto_fix_enabled ?? parseBoolean(map.get('fact_check_auto_fix_enabled'))),
-        perplexityApiKey: userSettings?.perplexity_api_key ?? map.get('perplexity_api_key') ?? '',
+        // 保存済みキーは表示できない。変更したい場合のみ入力してもらう
+        perplexityApiKey: prev.perplexityApiKey,
         alertChatworkRoomId: map.get('fact_check_alert_chatwork_room_id') ?? '',
         notifyMode: map.get('fact_check_notify_mode') === 'every' ? 'every' : 'anomaly',
-      });
+      }));
     } catch (error) {
       console.error('Failed to load fact check settings:', error);
     } finally {
@@ -110,17 +113,22 @@ export const FactCheckSettings: React.FC = () => {
   const handleSave = async () => {
     setLoading(true);
     try {
-      window.localStorage.setItem(
-        LOCAL_STORAGE_KEY,
-        JSON.stringify({
-          enabled: true,
-          autoFixEnabled: settings.autoFixEnabled,
-          perplexityApiKey: settings.perplexityApiKey,
-          alertChatworkRoomId: settings.alertChatworkRoomId,
-          notifyMode: settings.notifyMode,
-          modelName: 'sonar',
-        })
-      );
+      const enteredApiKey = settings.perplexityApiKey.trim();
+
+      // キーが入力された場合のみローカル保存を更新する（空文字で既存の値を消さない）
+      if (enteredApiKey) {
+        window.localStorage.setItem(
+          LOCAL_STORAGE_KEY,
+          JSON.stringify({
+            enabled: true,
+            autoFixEnabled: settings.autoFixEnabled,
+            perplexityApiKey: enteredApiKey,
+            alertChatworkRoomId: settings.alertChatworkRoomId,
+            notifyMode: settings.notifyMode,
+            modelName: 'sonar',
+          })
+        );
+      }
 
       if (!supabase) {
         toast.success('ファクトチェック設定を保存しました（ローカル設定）');
@@ -137,13 +145,22 @@ export const FactCheckSettings: React.FC = () => {
         .limit(1)
         .maybeSingle();
 
-      const payload = {
+      if (!enteredApiKey && !existingSettings) {
+        toast.error('Perplexity APIキーを入力してください');
+        return;
+      }
+
+      const payload: Record<string, unknown> = {
         ...ownership,
         enabled: true,
         auto_fix_enabled: settings.autoFixEnabled,
-        perplexity_api_key: settings.perplexityApiKey,
         updated_at: new Date().toISOString(),
       };
+
+      // 空のまま保存しても既存のキーを消さない（キーは書き込み専用）
+      if (enteredApiKey) {
+        payload.perplexity_api_key = enteredApiKey;
+      }
 
       const result = existingSettings
         ? await supabase.from('fact_check_settings').update(payload).eq('id', existingSettings.id)
@@ -153,8 +170,11 @@ export const FactCheckSettings: React.FC = () => {
         throw result.error;
       }
 
+      setHasStoredApiKey(true);
+      setSettings((prev) => ({ ...prev, perplexityApiKey: '' }));
+
       const globalSettingsToSave = [
-        { key: 'perplexity_api_key', value: settings.perplexityApiKey, description: 'Perplexity API key' },
+        // perplexity_api_key は app_settings に平文コピーしない（fact_check_settings のみが正）
         { key: 'fact_check_enabled', value: 'true', description: 'Enable fact check' },
         {
           key: 'fact_check_auto_fix_enabled',
@@ -250,8 +270,9 @@ export const FactCheckSettings: React.FC = () => {
           type="password"
           value={settings.perplexityApiKey}
           onChange={(e) => setSettings({ ...settings, perplexityApiKey: e.target.value })}
-          placeholder="pplx-..."
+          placeholder={hasStoredApiKey ? '保存済みです。変更する場合のみ入力してください' : 'pplx-...'}
           className="w-full rounded-lg border border-gray-300 px-4 py-2 font-mono text-sm focus:border-transparent focus:ring-2 focus:ring-blue-500"
+          autoComplete="new-password"
         />
       </div>
 

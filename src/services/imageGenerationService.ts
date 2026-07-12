@@ -24,9 +24,11 @@ export const imageGenerationService = {
                 throw new Error('Supabase client is not initialized');
             }
 
+            // api_key はクライアントから SELECT 不可。画像生成はプロキシ未対応（3c 保留）のため
+            // 環境変数キー（VITE_*）へのフォールバックのみで動作する。
             let query = supabase
                 .from('ai_configs')
-                .select('*')
+                .select('id, provider, model, image_enabled, image_provider, images_per_article')
                 .eq('is_active', true)
                 .order('created_at', { ascending: false })
                 .limit(1);
@@ -39,10 +41,10 @@ export const imageGenerationService = {
             const provider = activeConfig?.image_provider || 'nanobanana';
 
             if (provider === 'dalle3') {
-                return await this.generateWithDalle(options, activeConfig?.api_key || '');
+                return await this.generateWithDalle(options, '');
             }
 
-            return await this.generateWithGemini(options, activeConfig?.api_key || '');
+            return await this.generateWithGemini(options, '');
         } catch (error: any) {
             console.error('Image generation error:', error);
             throw new Error(`画像生成に失敗しました: ${error.message}`);

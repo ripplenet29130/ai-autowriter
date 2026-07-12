@@ -302,7 +302,7 @@ class SupabaseSchedulerService {
     // 他にアクティブな設定があるか確認
     const { count } = await supabase
       .from('ai_configs')
-      .select('*', { count: 'exact', head: true })
+      .select('id', { count: 'exact', head: true })
       .eq('is_active', true)
       .eq('account_id', accountId)
       .eq('user_id', userId);
@@ -322,18 +322,19 @@ class SupabaseSchedulerService {
 
     if (existing) {
       // Update existing config for this provider
+      // （api_key はクライアントから SELECT 不可のため、返却カラムは明示する）
       result = await supabase
         .from('ai_configs')
         .update(dataToSave)
         .eq('id', existing.id)
-        .select()
+        .select('id')
         .single();
     } else {
       // Insert new config
       result = await supabase
         .from('ai_configs')
         .insert(dataToSave)
-        .select()
+        .select('id')
         .single();
     }
 
@@ -364,7 +365,7 @@ class SupabaseSchedulerService {
     if (!supabase) return [];
     let query = supabase
       .from('ai_configs')
-      .select('*')
+      .select('id, provider, model, temperature, max_tokens, is_active, image_enabled, image_provider, images_per_article, created_at')
       .order('created_at', { ascending: false });
     query = scopeQueryToCurrentUser(query);
 
@@ -379,7 +380,7 @@ class SupabaseSchedulerService {
       id: item.id,
       name: `${item.provider} (${item.model})`, // 名前カラムがないため生成
       provider: item.provider as any,
-      apiKey: item.api_key,
+      apiKey: '', // api_key はクライアントから読めない（保存済みキーは id の存在で判定する）
       model: item.model,
       temperature: item.temperature,
       maxTokens: item.max_tokens,
@@ -433,7 +434,7 @@ class SupabaseSchedulerService {
     if (!supabase) return null;
     let query = supabase
       .from('ai_configs')
-      .select('*')
+      .select('id, provider, model, temperature, max_tokens, is_active, image_enabled, image_provider, images_per_article, created_at')
       .order('is_active', { ascending: false })
       .order('created_at', { ascending: false })
       .limit(1);
@@ -450,7 +451,7 @@ class SupabaseSchedulerService {
       id: data.id,
       name: `${data.provider} (${data.model})`,
       provider: data.provider as any,
-      apiKey: data.api_key,
+      apiKey: '', // api_key はクライアントから読めない（保存済みキーは id の存在で判定する）
       model: data.model,
       temperature: data.temperature,
       maxTokens: data.max_tokens,

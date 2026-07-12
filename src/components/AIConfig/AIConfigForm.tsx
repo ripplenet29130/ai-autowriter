@@ -34,7 +34,8 @@ export const AIConfigForm: React.FC<AIConfigFormProps> = ({
 
   const [testingConnection, setTestingConnection] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<'idle' | 'success' | 'error'>('idle');
-  const hasStoredApiKey = Boolean(initialConfig?.apiKey);
+  // api_key はクライアントから読めないため、保存済みかどうかは既存行(id)の有無で判定する
+  const hasStoredApiKey = Boolean(initialConfig?.id || initialConfig?.apiKey);
 
   useEffect(() => {
     if (initialConfig) {
@@ -79,7 +80,11 @@ export const AIConfigForm: React.FC<AIConfigFormProps> = ({
     const testApiKey = config.apiKey.trim() || initialConfig?.apiKey?.trim() || '';
 
     if (!testApiKey) {
-      toast.error('APIキーを入力してください');
+      toast.error(
+        hasStoredApiKey
+          ? '接続テストにはAPIキーの入力が必要です（保存済みキーはセキュリティ上表示・再利用できません）'
+          : 'APIキーを入力してください'
+      );
       return;
     }
 

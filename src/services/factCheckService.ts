@@ -95,9 +95,10 @@ export const factCheckService = {
     const userId = getCurrentUserId();
     if (!userId) return null;
 
+    // perplexity_api_key はクライアントから SELECT 不可（ai-proxy がサーバー側で解決する）
     const { data } = await supabase
       .from('fact_check_settings')
-      .select('*')
+      .select('enabled, max_items_to_check, model_name, auto_fix_enabled')
       .eq('user_id', userId)
       .order('updated_at', { ascending: false })
       .limit(1)
@@ -153,8 +154,9 @@ export const factCheckService = {
 
     const settings = await this.resolveSettings();
 
-    if (!settings?.enabled || !settings?.perplexity_api_key) {
-      console.warn('Fact check settings not found or API key missing (user/global)');
+    // キーの有無はサーバー側で判定される（未設定なら ai-proxy がエラーを返す）
+    if (!settings?.enabled) {
+      console.warn('Fact check is not enabled for this user');
       return [];
     }
 
@@ -219,7 +221,7 @@ export const factCheckService = {
     modelName?: string
   ): Promise<string | null> {
     const settings = await this.getSettings();
-    if (!settings?.enabled || !settings?.perplexity_api_key) return null;
+    if (!settings?.enabled) return null;
 
     const issues = getFixableFactCheckIssues(results);
     if (issues.length === 0) return originalContent;
