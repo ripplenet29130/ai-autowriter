@@ -292,43 +292,69 @@ export async function callAI(
   }
 
   if (provider === 'gemini') {
-    const response = await fetchWithTimeout(
-      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: {
-            temperature,
-            maxOutputTokens: resolvedMaxTokens,
-          },
-        }),
-      }
-    );
+    // Gemini の思考(thinking)トークンは maxOutputTokens に含まれ出力単価で課金されるため、
+    // 記事生成では思考を止めて本文にトークンを使わせる。Pro 系は 0 を受け付けないので最小値にする。
+    const thinkingBudget = model.toLowerCase().includes('pro') ? 128 : 0;
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Gemini API error: ${response.status} - ${errorText}`);
-    }
+    const requestGemini = async (tokens: number, withThinkingConfig: boolean): Promise<string> => {
+      const response = await fetchWithTimeout(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: {
+              temperature,
+              maxOutputTokens: tokens,
+              ...(withThinkingConfig ? { thinkingConfig: { thinkingBudget } } : {}),
+            },
+          }),
+        }
+      );
 
-    const data = await response.json();
-    const candidate = data?.candidates?.[0];
-    const parts = candidate?.content?.parts;
-    const text = Array.isArray(parts)
-      ? parts
-        .map((part: any) => (typeof part?.text === 'string' ? part.text : ''))
-        .join('\n')
-        .trim()
-      : '';
-    if (candidate?.finishReason === 'MAX_TOKENS') {
-      if (text) {
-        throw new AiOutputTruncatedError('Geminiの出力がmaxOutputTokens上限で途中終了しました。', text);
+      if (!response.ok) {
+        const errorText = await response.text();
+        // thinkingConfig 非対応モデルの 400 は、指定を外して同条件で再試行する
+        if (withThinkingConfig && response.status === 400 && /thinking/i.test(errorText)) {
+          return requestGemini(tokens, false);
+        }
+        throw new Error(`Gemini API error: ${response.status} - ${errorText}`);
       }
-      throw new Error('Geminiの出力がmaxOutputTokens上限で途中終了しました。');
+
+      const data = await response.json();
+      const candidate = data?.candidates?.[0];
+      const parts = candidate?.content?.parts;
+      const text = Array.isArray(parts)
+        ? parts
+          .map((part: any) => (typeof part?.text === 'string' ? part.text : ''))
+          .join('\n')
+          .trim()
+        : '';
+      if (candidate?.finishReason === 'MAX_TOKENS') {
+        if (text) {
+          throw new AiOutputTruncatedError('Geminiの出力がmaxOutputTokens上限で途中終了しました。', text);
+        }
+        throw new Error('Geminiの出力がmaxOutputTokens上限で途中終了しました。');
+      }
+      if (!text) throw new Error('Gemini API returned empty content');
+      return text;
+    };
+
+    try {
+      return await requestGemini(resolvedMaxTokens, true);
+    } catch (error) {
+      // 本文が空のまま上限に達した場合(思考でトークンを使い切ったケース)のみ予算を2倍にして
+      // 1回だけ再試行する。部分テキストがある AiOutputTruncatedError は呼び出し元が救済する。
+      const isEmptyTruncation =
+        error instanceof Error &&
+        !(error instanceof AiOutputTruncatedError) &&
+        error.message.includes('maxOutputTokens上限');
+      if (!isEmptyTruncation) throw error;
+      const retryTokens = Math.min(16384, resolvedMaxTokens * 2);
+      console.warn(`[callAI] Gemini hit maxOutputTokens with empty text (budget=${resolvedMaxTokens}); retrying with ${retryTokens}`);
+      return await requestGemini(retryTokens, true);
     }
-    if (!text) throw new Error('Gemini API returned empty content');
-    return text;
   }
 
   throw new Error(`Unsupported AI provider: ${aiConfig.provider}`);
