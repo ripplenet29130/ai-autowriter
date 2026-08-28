@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { LogOut, Plus, RefreshCw, Save, Trash2, Users } from 'lucide-react';
+import { KeyRound, LogOut, Plus, RefreshCw, Save, Trash2, Users } from 'lucide-react';
 import { supabase } from '../services/supabaseClient';
 import { Account, useAuthStore } from '../store/useAuthStore';
 
@@ -54,6 +54,7 @@ export const AdminDashboard: React.FC = () => {
     password: '',
     wordpress_site_limit: 1,
   });
+  const [passwordByAccountId, setPasswordByAccountId] = useState<Record<string, string>>({});
 
   const activeCount = useMemo(
     () => accounts.filter((account) => account.status === 'active').length,
@@ -242,6 +243,38 @@ export const AdminDashboard: React.FC = () => {
 
     setMessage('clientアカウントを削除しました。');
     await loadAccounts();
+    setIsSaving(false);
+  };
+
+  const resetClientPassword = async (account: AccountRow) => {
+    if (!supabase) return;
+
+    const password = passwordByAccountId[account.id] ?? '';
+    if (password.length < 8) {
+      setError('新しいパスワードは8文字以上で入力してください。');
+      return;
+    }
+    if (!account.login_email) {
+      setError('このクライアントにはログインメールアドレスが登録されていません。');
+      return;
+    }
+    if (!window.confirm(`${account.login_email} のパスワードを変更しますか？`)) return;
+
+    setIsSaving(true);
+    setError(null);
+    setMessage(null);
+    const { error: resetError } = await supabase.functions.invoke('admin-reset-client-password', {
+      body: { account_id: account.id, password },
+    });
+
+    if (resetError) {
+      setError(await getSupabaseErrorMessage(resetError));
+      setIsSaving(false);
+      return;
+    }
+
+    setPasswordByAccountId((current) => ({ ...current, [account.id]: '' }));
+    setMessage(`${account.login_email} のパスワードを変更しました。`);
     setIsSaving(false);
   };
 
@@ -482,6 +515,34 @@ export const AdminDashboard: React.FC = () => {
                       />
                       <div className="text-xs text-gray-500">登録済み {account.wordpress_count ?? 0}</div>
                     </label>
+                  </div>
+
+                  <div className="space-y-1">
+                    <span className="block text-xs font-medium text-gray-500">パスワード再設定</span>
+                    <div className="flex gap-2">
+                      <input
+                        type="password"
+                        value={passwordByAccountId[account.id] ?? ''}
+                        onChange={(event) =>
+                          setPasswordByAccountId((current) => ({
+                            ...current,
+                            [account.id]: event.target.value,
+                          }))
+                        }
+                        placeholder="8文字以上の新しいパスワード"
+                        className="min-w-0 flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                        autoComplete="new-password"
+                      />
+                      <button
+                        type="button"
+                        disabled={isSaving || !account.login_email}
+                        onClick={() => resetClientPassword(account)}
+                        className="inline-flex shrink-0 items-center justify-center gap-1 border border-blue-200 bg-white hover:bg-blue-50 disabled:bg-gray-100 text-blue-700 rounded-lg px-3 py-2 text-sm font-medium"
+                      >
+                        <KeyRound className="w-4 h-4" />
+                        変更
+                      </button>
+                    </div>
                   </div>
 
                   <div className="flex xl:flex-col gap-2 xl:items-stretch justify-end">
