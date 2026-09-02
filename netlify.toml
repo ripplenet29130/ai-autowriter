@@ -6,6 +6,12 @@
 [functions]
   node_bundler = "esbuild"
 
+# 共有レビューURL（/review/:token）を直接開いた場合にもSPAを表示する。
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
 # === scheduler.ts を毎分実行（テスト） ===
 [functions."scheduler"]
   schedule = "*/1 * * * *"

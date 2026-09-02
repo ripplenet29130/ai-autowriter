@@ -12,11 +12,15 @@ import { SettingsComponent } from './components/Settings';
 import { ArticlesList } from './components/ArticlesList';
 import { KeywordSettings } from './components/KeywordSettings';
 import { useAppStore } from './store/useAppStore';
+import { ReviewPage } from './components/ArticleReview/ReviewPage';
 
 function App() {
   const { activeView, loadFromSupabase } = useAppStore();
+  const reviewMatch = window.location.pathname.match(/^\/review\/([^/]+)$/);
 
   useEffect(() => {
+    // 共有レビュー画面では管理画面用の記事一覧を読み込まない。
+    if (window.location.pathname.startsWith('/review/')) return;
     loadFromSupabase().catch(error => {
       console.error('Failed to load from Supabase:', error);
     });
@@ -69,31 +73,10 @@ function App() {
   try {
     return (
       <Router>
-        <div className="App min-h-screen bg-gray-50">
-          <Layout>
-            {renderContent()}
-          </Layout>
-          <Toaster
-            position="top-right"
-            toastOptions={{
-              duration: 4000,
-              style: {
-                background: '#363636',
-                color: '#fff',
-              },
-              success: {
-                style: {
-                  background: '#10B981',
-                },
-              },
-              error: {
-                style: {
-                  background: '#EF4444',
-                },
-              },
-            }}
-          />
-        </div>
+        {reviewMatch ? <ReviewPage token={reviewMatch[1]} /> : <div className="App min-h-screen bg-gray-50">
+            <Layout>{renderContent()}</Layout>
+            <Toaster position="top-right" toastOptions={{ duration: 4000, style: { background: '#363636', color: '#fff' }, success: { style: { background: '#10B981' } }, error: { style: { background: '#EF4444' } } }} />
+          </div>}
       </Router>
     );
   } catch (error) {

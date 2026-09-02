@@ -309,3 +309,38 @@ export interface SectionGenerationRequest {
   tone: 'professional' | 'casual' | 'technical' | 'friendly';
   customInstructions?: string;
 }
+
+export type ReviewPermission = 'view' | 'comment' | 'edit';
+
+export interface ArticleReviewLink {
+  id: string;
+  articleId: string;
+  permission: ReviewPermission;
+  expiresAt?: string | null;
+  revokedAt?: string | null;
+  lastAccessedAt?: string | null;
+  createdAt: string;
+}
+
+export interface ArticleComment {
+  id: string;
+  articleId: string;
+  parentId?: string | null;
+  field: 'title' | 'excerpt' | 'content';
+  selectedText?: string | null;
+  startOffset?: number | null;
+  endOffset?: number | null;
+  body: string;
+  authorName: string;
+  status: 'open' | 'resolved';
+  createdAt: string;
+  updatedAt?: string;
+  replies?: ArticleComment[];
+}
+
+export interface ReviewArticlePayload {
+  article: Pick<Article, 'id' | 'title' | 'excerpt' | 'content' | 'updatedAt'>;
+  permission: ReviewPermission;
+  comments: ArticleComment[];
+  revisionId?: string;
+}

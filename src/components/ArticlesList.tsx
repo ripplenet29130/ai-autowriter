@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { FileText, Search, Filter, Calendar, Tag, TrendingUp, Trash2, Edit, Eye, ExternalLink, RefreshCw, Save, X } from 'lucide-react';
+import { FileText, Search, Filter, Calendar, Tag, TrendingUp, Trash2, Edit, Eye, ExternalLink, RefreshCw, Save, X, Share2 } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
 import { Article } from '../types';
 import ReactMarkdown from 'react-markdown';
@@ -10,6 +10,7 @@ import { format } from 'date-fns';
 import { useWordPressPublish } from '../hooks/useWordPressPublish';
 import { useWordPressConfig } from '../hooks/useWordPressConfig';
 import { Globe, Send, X as CloseIcon } from 'lucide-react';
+import { ShareDialog } from './ArticleReview/ShareDialog';
 
 export const ArticlesList: React.FC = () => {
   const { deleteArticle } = useAppStore();
@@ -26,6 +27,7 @@ export const ArticlesList: React.FC = () => {
   const [selectedConfigId, setSelectedConfigId] = useState<string>('');
   const [publishStatus, setPublishStatus] = useState<'publish' | 'draft' | 'future'>('publish');
   const [scheduledDate, setScheduledDate] = useState<string>('');
+  const [sharingArticleId, setSharingArticleId] = useState<string | null>(null);
 
   // 編集モード用のstate
   const [isEditing, setIsEditing] = useState(false);
@@ -423,6 +425,13 @@ export const ArticlesList: React.FC = () => {
                       >
                         <Edit className="w-5 h-5" />
                       </button>
+                      <button
+                        onClick={() => setSharingArticleId(selectedArticle.id)}
+                        className="p-2 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors shrink-0"
+                        title="レビューを共有"
+                      >
+                        <Share2 className="w-5 h-5" />
+                      </button>
                     </div>
                     <div className="flex items-center gap-4 text-sm text-gray-600">
                       {getStatusBadge(selectedArticle.status)}
@@ -493,6 +502,7 @@ export const ArticlesList: React.FC = () => {
           </div>
         )
       }
+      {sharingArticleId && <ShareDialog articleId={sharingArticleId} onClose={() => setSharingArticleId(null)} />}
       {/* 投稿先選択モーダル */}
       {
         publishingArticle && (
