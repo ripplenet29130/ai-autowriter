@@ -1,5 +1,5 @@
 ﻿import React, { useState, useEffect } from 'react';
-import { FileText, Search, Filter, Calendar, Tag, TrendingUp, Trash2, Edit, Eye, ExternalLink, RefreshCw, Save, X, User } from 'lucide-react';
+import { FileText, Search, Filter, Calendar, Tag, TrendingUp, Trash2, Edit, Eye, ExternalLink, RefreshCw, Save, X, User, Share2 } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
 import { Article } from '../types';
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
@@ -13,6 +13,7 @@ import { Globe, Send, X as CloseIcon, ShieldCheck, Wand2 } from 'lucide-react';
 import { FactCheckResult } from '../types/factCheck';
 import { factCheckService } from '../services/factCheckService';
 import { FactCheckResultsDisplay } from './FactCheckResultsDisplay';
+import { ShareDialog } from './ArticleReview/ShareDialog';
 
 const ARTICLES_PAGE_SIZE = 100;
 
@@ -31,6 +32,7 @@ export const ArticlesList: React.FC = () => {
   const [selectedConfigId, setSelectedConfigId] = useState<string>('');
   const [publishStatus, setPublishStatus] = useState<'publish' | 'draft' | 'future'>('publish');
   const [scheduledDate, setScheduledDate] = useState<string>('');
+  const [sharingArticleId, setSharingArticleId] = useState<string | null>(null);
 
   // ファクトチェック用のstate
   const [factCheckResults, setFactCheckResults] = useState<FactCheckResult[]>([]);
@@ -669,6 +671,7 @@ export const ArticlesList: React.FC = () => {
                         >
                           <Edit className="w-5 h-5" />
                         </button>
+                        <button onClick={() => setSharingArticleId(selectedArticle.id)} className="p-2.5 bg-white border border-purple-200 text-purple-600 hover:bg-purple-50 rounded-lg" title="レビューを共有"><Share2 className="w-5 h-5" /></button>
                         <button
                           onClick={() => void handleFactCheckFix()}
                           disabled={isFactCheckFixing || !canApplyFactCheckFix}
@@ -818,6 +821,7 @@ export const ArticlesList: React.FC = () => {
           </div>
         )
       }
+      {sharingArticleId && <ShareDialog articleId={sharingArticleId} onClose={() => setSharingArticleId(null)} />}
       {/* 投稿先選択モーダル */}
       {
         publishingArticle && (

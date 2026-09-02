@@ -21,6 +21,7 @@ import { Login } from './components/Login';
 import { AdminDashboard } from './components/AdminDashboard';
 import { supabase } from './services/supabaseClient';
 import { searchConsoleService } from './services/searchConsoleService';
+import { ReviewPage } from './components/ArticleReview/ReviewPage';
 
 function App() {
   const { activeView, loadFromSupabase } = useAppStore();
@@ -30,6 +31,7 @@ function App() {
     new URLSearchParams(window.location.search).get('auth') === 'recovery' ||
     window.location.hash.includes('type=recovery')
   );
+  const reviewMatch = window.location.pathname.match(/^\/review\/([^/]+)$/);
 
   const unavailableFeature = (
     <div className="bg-white border border-gray-200 rounded-lg p-8 text-center">
@@ -144,6 +146,9 @@ function App() {
   };
 
   try {
+    if (reviewMatch) {
+      return <Router><ReviewPage token={reviewMatch[1]} /><Toaster position="top-right" /></Router>;
+    }
     if (isLoading) {
       return (
         <div className="min-h-screen bg-gray-50 flex items-center justify-center">
