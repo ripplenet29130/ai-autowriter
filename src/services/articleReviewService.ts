@@ -13,7 +13,13 @@ type ReviewAction =
 async function invoke<T>(action: ReviewAction, payload: Record<string, unknown>): Promise<T> {
   if (!supabase) throw new Error('データベース接続が設定されていません');
   const { data, error } = await supabase.functions.invoke('article-review', { body: { action, ...payload } });
-  if (error) throw new Error(error.message || 'レビュー機能の処理に失敗しました');
+  if (error) {
+    const response = error.context as Response | undefined;
+    const detail = response
+      ? await response.clone().json().catch(() => undefined) as { error?: string } | undefined
+      : undefined;
+    throw new Error(detail?.error || error.message || 'レビュー機能の処理に失敗しました');
+  }
   if (data?.error) throw new Error(data.error);
   return data as T;
 }

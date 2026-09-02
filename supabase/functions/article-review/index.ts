@@ -113,7 +113,6 @@ async function resolveComment(admin: any, link: any, commentId: string, authorNa
   if (!canComment(link.permission) || !['open', 'resolved'].includes(status) || !authorName?.trim()) return json({ error: 'コメントを更新する権限がありません' }, 403);
   const { data: original } = await admin.from('article_comments').select('*').eq('id', commentId).eq('article_id', link.article_id).maybeSingle();
   if (!original) return json({ error: 'コメントが見つかりません' }, 404);
-  if (original.author_name !== authorName.trim()) return json({ error: '自分のコメントだけを解決できます' }, 403);
   const { data, error } = await admin.from('article_comments').update({ status, resolved_at: status === 'resolved' ? new Date().toISOString() : null, resolved_by: status === 'resolved' ? authorName.trim() : null }).eq('id', commentId).select().single();
   if (error) throw error;
   return json({ comment: mapComment(data) });
