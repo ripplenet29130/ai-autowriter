@@ -83,7 +83,7 @@ export const ReviewPage: React.FC<{ token: string }> = ({ token }) => {
   return <main className="min-h-screen bg-gray-100 text-gray-900">
     <header className="sticky top-0 z-20 bg-white border-b border-gray-200"><div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between"><span className="font-semibold">記事レビュー</span><span className="text-xs rounded-full bg-blue-50 text-blue-700 px-3 py-1">{review.permission === 'view' ? '閲覧のみ' : review.permission === 'comment' ? 'コメント可' : '編集可'}</span></div></header>
     <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_340px] gap-6 p-4 lg:p-8">
-      <article className="bg-white border border-gray-200 rounded-xl p-6 lg:p-10 shadow-sm">
+      <article className="bg-white border border-gray-200 rounded-xl p-6 pb-64 lg:p-10 lg:pb-56 shadow-sm">
         {canEdit && <div className="mb-6 max-w-xs"><label className="mb-1 block text-xs font-medium text-gray-500">編集者名</label><input value={authorName} onChange={e => setAuthorName(e.target.value)} placeholder="例：山田 花子" className="input-field" /></div>}
         {saving && <div className="mb-6 text-sm text-blue-600">保存中…</div>}
         {canEdit ? <EditableArticle article={review.article} onSave={saveArticle} saving={saving} /> : <ReadArticle article={review.article} rootRef={articleRef} commentTexts={comments.map(comment => comment.selectedText).filter((text): text is string => Boolean(text))} onSelect={() => { const value = articleRef.current && selectedOffsets(articleRef.current); if (value) setSelection(value); }} />}
