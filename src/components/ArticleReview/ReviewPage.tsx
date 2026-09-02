@@ -85,7 +85,7 @@ export const ReviewPage: React.FC<{ token: string }> = ({ token }) => {
     <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_340px] gap-6 p-4 lg:p-8">
       <article className="bg-white border border-gray-200 rounded-xl p-6 lg:p-10 shadow-sm">
         <div className="mb-8 flex flex-col sm:flex-row gap-3 sm:items-end sm:justify-between"><div><label className="block text-xs font-medium text-gray-500 mb-1">レビュー参加者名</label><input value={authorName} onChange={e => setAuthorName(e.target.value)} placeholder="例：山田 花子" className="input-field max-w-xs" /></div>{saving && <span className="text-sm text-blue-600">保存中…</span>}</div>
-        {canEdit ? <EditableArticle article={review.article} onSave={saveArticle} saving={saving} /> : <ReadArticle article={review.article} rootRef={articleRef} onSelect={() => { const value = articleRef.current && selectedOffsets(articleRef.current); if (value) setSelection(value); }} />}
+        {canEdit ? <EditableArticle article={review.article} onSave={saveArticle} saving={saving} /> : <ReadArticle article={review.article} rootRef={articleRef} commentTexts={comments.map(comment => comment.selectedText).filter((text): text is string => Boolean(text))} onSelect={() => { const value = articleRef.current && selectedOffsets(articleRef.current); if (value) setSelection(value); }} />}
         {canComment && !canEdit && selection && <div className="fixed inset-x-0 bottom-0 z-30 border-t border-blue-200 bg-white/95 p-4 shadow-[0_-8px_24px_rgba(15,23,42,0.12)] backdrop-blur"><div className="mx-auto max-w-3xl rounded-xl border border-blue-200 bg-blue-50 p-4"><div className="flex justify-end"><button onClick={() => { setSelection(null); setCommentBody(''); window.getSelection()?.removeAllRanges(); }} className="rounded p-1 text-blue-700 hover:bg-blue-100" title="コメント入力を閉じる"><X className="w-4 h-4" /></button></div><div className="flex flex-col gap-3 sm:flex-row sm:items-end"><textarea autoFocus value={commentBody} onChange={e => setCommentBody(e.target.value)} placeholder="コメントを入力" rows={2} className="input-field flex-1" /><button onClick={addComment} disabled={saving || !commentBody.trim() || !authorName.trim()} className="btn-primary shrink-0 flex items-center justify-center gap-2 disabled:opacity-50"><Send className="w-4 h-4" />コメントを投稿</button></div></div></div>}
       </article>
       <aside className="bg-white border border-gray-200 rounded-xl shadow-sm h-fit lg:sticky lg:top-20"><div className="p-4 border-b font-semibold flex gap-2"><MessageSquare className="w-5 h-5 text-blue-600" />コメント ({comments.length})</div><div className="max-h-[70vh] overflow-y-auto divide-y divide-gray-100">{comments.length ? comments.map(comment => <CommentCard key={comment.id} comment={comment} canResolve={canComment} onResolve={() => resolve(comment)} />) : <p className="p-5 text-sm text-gray-500">コメントはまだありません。</p>}</div></aside>
@@ -94,7 +94,37 @@ export const ReviewPage: React.FC<{ token: string }> = ({ token }) => {
   </main>;
 };
 
-const ReadArticle: React.FC<{ article: ReviewArticlePayload['article']; rootRef: React.RefObject<HTMLDivElement>; onSelect: () => void }> = ({ article, rootRef, onSelect }) => <><h1 className="text-3xl font-bold mb-6">{article.title}</h1>{article.excerpt && <p className="p-4 bg-gray-50 border-l-4 border-gray-300 italic text-gray-600 mb-8">{article.excerpt}</p>}<div ref={rootRef} onMouseUp={onSelect} className="article-prose select-text"><ReactMarkdown remarkPlugins={[remarkGfm]}>{article.content}</ReactMarkdown></div></>;
+const ReadArticle: React.FC<{ article: ReviewArticlePayload['article']; rootRef: React.RefObject<HTMLDivElement>; commentTexts: string[]; onSelect: () => void }> = ({ article, rootRef, commentTexts, onSelect }) => {
+  const highlightKey = commentTexts.join('\u0000');
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root || !commentTexts.length) return;
+    const phrases = [...new Set(commentTexts.filter(Boolean))];
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    const textNodes: Text[] = [];
+    while (walker.nextNode()) textNodes.push(walker.currentNode as Text);
+    textNodes.forEach(node => {
+      const source = node.textContent || '';
+      const phrase = phrases.find(item => source.includes(item));
+      if (!phrase || !node.parentElement) return;
+      const fragment = document.createDocumentFragment();
+      let remaining = source;
+      while (remaining.includes(phrase)) {
+        const index = remaining.indexOf(phrase);
+        fragment.append(remaining.slice(0, index));
+        const mark = document.createElement('mark');
+        mark.dataset.reviewHighlight = 'true';
+        mark.className = 'bg-yellow-200 text-inherit rounded-sm px-0.5';
+        mark.textContent = phrase;
+        fragment.append(mark);
+        remaining = remaining.slice(index + phrase.length);
+      }
+      fragment.append(remaining);
+      node.replaceWith(fragment);
+    });
+  }, [highlightKey, rootRef]);
+  return <><h1 className="text-3xl font-bold mb-6">{article.title}</h1>{article.excerpt && <p className="p-4 bg-gray-50 border-l-4 border-gray-300 italic text-gray-600 mb-8">{article.excerpt}</p>}<div ref={rootRef} onMouseUp={onSelect} className="article-prose select-text"><ReactMarkdown key={highlightKey} remarkPlugins={[remarkGfm]}>{article.content}</ReactMarkdown></div></>;
+};
 
 const EditableArticle: React.FC<{ article: ReviewArticlePayload['article']; onSave: (article: ReviewArticlePayload['article']) => void; saving: boolean }> = ({ article, onSave, saving }) => {
   const [draft, setDraft] = useState(article);
