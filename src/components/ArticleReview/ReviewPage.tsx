@@ -123,7 +123,7 @@ const ReadArticle: React.FC<{ article: ReviewArticlePayload['article']; rootRef:
       node.replaceWith(fragment);
     });
   }, [highlightKey, rootRef]);
-  return <><h1 className="text-3xl font-bold mb-6">{article.title}</h1>{article.excerpt && <p className="p-4 bg-gray-50 border-l-4 border-gray-300 italic text-gray-600 mb-8">{article.excerpt}</p>}<div ref={rootRef} onMouseUp={onSelect} className="article-prose select-text"><ReactMarkdown key={highlightKey} remarkPlugins={[remarkGfm]}>{article.content}</ReactMarkdown></div></>;
+  return <><h1 className="text-3xl font-bold mb-6">{article.title}</h1><div ref={rootRef} onMouseUp={onSelect} className="article-prose select-text"><ReactMarkdown key={highlightKey} remarkPlugins={[remarkGfm]}>{article.content}</ReactMarkdown></div></>;
 };
 
 const EditableArticle: React.FC<{ article: ReviewArticlePayload['article']; onSave: (article: ReviewArticlePayload['article']) => void; saving: boolean }> = ({ article, onSave, saving }) => {
