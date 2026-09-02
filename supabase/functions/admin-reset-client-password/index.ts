@@ -7,6 +7,25 @@ type ResetClientPasswordRequest = {
   password: string;
 };
 
+const findAuthUserByEmail = async (
+  adminClient: ReturnType<typeof createClient>,
+  email: string,
+) => {
+  const normalizedEmail = email.trim().toLowerCase();
+  const perPage = 1000;
+
+  for (let page = 1; page <= 100; page += 1) {
+    const { data, error } = await adminClient.auth.admin.listUsers({ page, perPage });
+    if (error) throw error;
+
+    const user = data.users.find((candidate) => candidate.email?.toLowerCase() === normalizedEmail);
+    if (user) return user;
+    if (data.users.length < perPage) break;
+  }
+
+  return null;
+};
+
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
     status,
@@ -48,15 +67,57 @@ serve(async (req) => {
   const adminClient = createClient(supabaseUrl, serviceRoleKey);
   const { data: profile, error: profileError } = await adminClient
     .from("profiles")
-    .select("user_id")
+    .select("id,user_id,login_email")
     .eq("account_id", accountId)
     .eq("role", "client")
     .maybeSingle();
   if (profileError) return json({ error: profileError.message }, 500);
   if (!profile) return json({ error: "No client login is registered for this account." }, 404);
 
-  const { error: updateError } = await adminClient.auth.admin.updateUserById(profile.user_id, { password });
+  const { data: authUserData, error: authUserError } = await adminClient.auth.admin.getUserById(profile.user_id);
+  if (authUserError || !authUserData.user?.email) {
+    return json({ error: "The client authentication user could not be found." }, 404);
+  }
+  let authUser = authUserData.user;
+  let mappingRepaired = false;
+  if (profile.login_email && authUser.email.toLowerCase() !== profile.login_email.trim().toLowerCase()) {
+    let matchingUser;
+    try {
+      matchingUser = await findAuthUserByEmail(adminClient, profile.login_email);
+    } catch (error) {
+      return json({ error: error instanceof Error ? error.message : "Failed to find the login user." }, 500);
+    }
+
+    if (!matchingUser) {
+      return json({ error: "No authentication user exists for the registered login email." }, 404);
+    }
+
+    const { error: repairError } = await adminClient
+      .from("profiles")
+      .update({ user_id: matchingUser.id })
+      .eq("id", profile.id);
+    if (repairError) {
+      return json({ error: `Failed to repair the login account mapping: ${repairError.message}` }, 409);
+    }
+
+    authUser = matchingUser;
+    mappingRepaired = true;
+  }
+
+  const { error: updateError } = await adminClient.auth.admin.updateUserById(authUser.id, { password });
   if (updateError) return json({ error: updateError.message }, 500);
 
-  return json({ success: true });
+  // Verify against the same password grant used by the application before
+  // reporting success. This catches an unexpected Auth/user mapping issue
+  // without exposing the password or session to the browser.
+  const verificationClient = createClient(supabaseUrl, anonKey);
+  const { error: verificationError } = await verificationClient.auth.signInWithPassword({
+    email: authUser.email,
+    password,
+  });
+  if (verificationError) {
+    return json({ error: `Password was updated but sign-in verification failed: ${verificationError.message}` }, 500);
+  }
+
+  return json({ success: true, mapping_repaired: mappingRepaired });
 });
