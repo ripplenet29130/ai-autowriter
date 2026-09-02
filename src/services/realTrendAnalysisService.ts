@@ -184,7 +184,7 @@ export class RealTrendAnalysisService {
       keyword,
       articles,
       averageLength: articles.length > 0 ? 2500 : 0,
-      commonTopics: this.extractKeywordsFromText(items.map(i => i.title + ' ' + i.snippet).join(' '), keyword)
+      commonTopics: this.extractKeywordsFromText(items.map((i: any) => i.title + ' ' + i.snippet).join(' '), keyword)
     };
   }
 
@@ -220,7 +220,7 @@ export class RealTrendAnalysisService {
       keyword,
       articles,
       averageLength: articles.length > 0 ? 2500 : 0,
-      commonTopics: this.extractKeywordsFromText(items.map(i => i.title + ' ' + i.snippet).join(' '), keyword)
+      commonTopics: this.extractKeywordsFromText(items.map((i: any) => i.title + ' ' + i.snippet).join(' '), keyword)
     };
   }
 

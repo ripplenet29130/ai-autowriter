@@ -19,6 +19,7 @@ export interface GenerationPromptRecord {
 export const generationPromptsService = {
   async createPrompt(articleId: string | null, prompt: GenerationPrompt): Promise<GenerationPromptRecord | null> {
     try {
+      if (!supabase) return null;
       const { data, error } = await supabase
         .from('generation_prompts')
         .insert([{
@@ -50,6 +51,7 @@ export const generationPromptsService = {
 
   async getPromptsByArticle(articleId: string): Promise<GenerationPromptRecord[]> {
     try {
+      if (!supabase) return [];
       const { data, error } = await supabase
         .from('generation_prompts')
         .select('*')
@@ -70,6 +72,7 @@ export const generationPromptsService = {
 
   async getRecentPrompts(limit: number = 20): Promise<GenerationPromptRecord[]> {
     try {
+      if (!supabase) return [];
       const { data, error } = await supabase
         .from('generation_prompts')
         .select('*')

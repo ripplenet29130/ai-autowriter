@@ -190,6 +190,7 @@ export interface TrendAnalysisResult {
     geographicData: GeographicTrend[];
   };
   timestamp: Date;
+  trend?: 'rising' | 'stable' | 'declining';
 }
 
 export interface CompetitorArticle {

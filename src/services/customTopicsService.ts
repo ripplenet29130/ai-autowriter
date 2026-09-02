@@ -17,6 +17,7 @@ export interface CustomTopic {
 export const customTopicsService = {
   async createTopic(topic: Partial<CustomTopic>): Promise<CustomTopic | null> {
     try {
+      if (!supabase) return null;
       const { data, error } = await supabase
         .from('custom_topics')
         .insert([{
@@ -46,6 +47,7 @@ export const customTopicsService = {
 
   async updateTopic(id: string, updates: Partial<CustomTopic>): Promise<CustomTopic | null> {
     try {
+      if (!supabase) return null;
       const updateData: any = {};
 
       if (updates.topicName !== undefined) updateData.topic_name = updates.topicName;
@@ -78,6 +80,7 @@ export const customTopicsService = {
 
   async deleteTopic(id: string): Promise<boolean> {
     try {
+      if (!supabase) return false;
       const { error } = await supabase
         .from('custom_topics')
         .delete()
@@ -97,6 +100,7 @@ export const customTopicsService = {
 
   async getTopic(id: string): Promise<CustomTopic | null> {
     try {
+      if (!supabase) return null;
       const { data, error } = await supabase
         .from('custom_topics')
         .select('*')
@@ -117,6 +121,7 @@ export const customTopicsService = {
 
   async getAllTopics(sortBy: 'recent' | 'frequent' | 'favorite' = 'recent', limit: number = 50): Promise<CustomTopic[]> {
     try {
+      if (!supabase) return [];
       let query = supabase.from('custom_topics').select('*');
 
       switch (sortBy) {
@@ -154,6 +159,7 @@ export const customTopicsService = {
 
   async getTopicByName(topicName: string): Promise<CustomTopic | null> {
     try {
+      if (!supabase) return null;
       const { data, error } = await supabase
         .from('custom_topics')
         .select('*')
@@ -174,6 +180,7 @@ export const customTopicsService = {
 
   async incrementUseCount(id: string): Promise<boolean> {
     try {
+      if (!supabase) return false;
       const { error } = await supabase.rpc('increment_topic_use_count', { topic_id: id });
 
       if (error) {

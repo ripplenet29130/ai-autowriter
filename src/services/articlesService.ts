@@ -62,6 +62,7 @@ export const articlesService = {
 
   async updateArticle(id: string, updates: Partial<Article>): Promise<Article | null> {
     try {
+      if (!supabase) return null;
       const updateData: any = {};
 
       if (updates.title !== undefined) updateData.title = updates.title;
@@ -126,6 +127,7 @@ export const articlesService = {
 
   async getArticle(id: string): Promise<Article | null> {
     try {
+      if (!supabase) return null;
       const { data, error } = await supabase
         .from('articles')
         .select('*')
@@ -201,6 +203,7 @@ export const articlesService = {
 
   async getArticleCount(filters?: ArticleFilters): Promise<number> {
     try {
+      if (!supabase) return 0;
       let query = supabase.from('articles').select('*', { count: 'exact', head: true });
 
       if (filters?.status) {

@@ -68,7 +68,9 @@ export const ReviewPage: React.FC<{ token: string }> = ({ token }) => {
     if (!authorName.trim()) { setError('編集前に表示名を入力してください'); return; }
     setSaving(true);
     try {
-      const result = await articleReviewService.updateArticle(token, authorName, article, review?.article.updatedAt);
+      const updatedAt = review?.article.updatedAt;
+      const expectedUpdatedAt = updatedAt instanceof Date ? updatedAt.toISOString() : updatedAt;
+      const result = await articleReviewService.updateArticle(token, authorName, article, expectedUpdatedAt);
       setReview(current => current ? { ...current, article: result.article, revisionId: result.revisionId } : current);
       localStorage.setItem(`reviewer:${token}`, authorName.trim());
     } catch (e) { setError(e instanceof Error ? e.message : '保存できませんでした'); }
