@@ -35,6 +35,10 @@ export interface Article {
   ownerEmail?: string;
 }
 
+export type ReviewPermission = 'view' | 'comment' | 'edit';
+export interface ArticleComment { id: string; articleId: string; field: 'title' | 'excerpt' | 'content'; selectedText?: string | null; startOffset?: number | null; endOffset?: number | null; body: string; authorName: string; status: 'open' | 'resolved'; createdAt: string; }
+export interface ReviewArticlePayload { article: Pick<Article, 'id' | 'title' | 'excerpt' | 'content' | 'updatedAt'>; permission: ReviewPermission; comments: ArticleComment[]; revisionId?: string; }
+
 export interface WordPressConfig {
   id: string;
   name: string;
