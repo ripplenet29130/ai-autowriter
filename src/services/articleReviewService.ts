@@ -14,6 +14,8 @@ async function invoke<T>(action: string, payload: Record<string, unknown>): Prom
 }
 export const articleReviewService = {
   createLink: (articleId: string, permission: ReviewPermission, expiresAt?: string, password?: string) => invoke<{ token: string }>('create-link', { articleId, permission, expiresAt, password }),
+  listLinks: (articleId: string) => invoke<{ links: Array<{ id: string; permission: ReviewPermission; expiresAt?: string | null; revokedAt?: string | null; createdAt: string }> }>('list-links', { articleId }),
+  revokeLink: (linkId: string) => invoke<void>('revoke-link', { linkId }),
   getReview: (token: string, password?: string) => invoke<ReviewArticlePayload>('get-review', { token, password }),
   createComment: (token: string, comment: Pick<ArticleComment, 'field' | 'selectedText' | 'startOffset' | 'endOffset' | 'body' | 'authorName'>) => invoke<{ comment: ArticleComment }>('create-comment', { token, comment }),
   resolveComment: (token: string, commentId: string, authorName: string, status: 'open' | 'resolved') => invoke<{ comment: ArticleComment }>('resolve-comment', { token, commentId, authorName, status }),
