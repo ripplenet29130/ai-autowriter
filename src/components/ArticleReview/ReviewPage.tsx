@@ -11,6 +11,21 @@ export function ReviewPage({ token }: { token: string }) {
   const load = async () => { try { setReview(await articleReviewService.getReview(token)); } catch (e) { setError(e instanceof Error ? e.message : '共有リンクを開けません'); } };
   useEffect(() => { void load(); }, [token]);
   const canComment = review?.permission === 'comment' || review?.permission === 'edit'; const canEdit = review?.permission === 'edit';
+  useEffect(() => {
+    if (mode !== 'preview' || !review || !contentRef.current) return;
+    const selectedTexts = [...new Set(review.comments.filter(comment => comment.status === 'open').map(comment => comment.selectedText?.trim()).filter((text): text is string => Boolean(text)))];
+    if (!selectedTexts.length) return;
+    const pattern = new RegExp(selectedTexts.sort((a, b) => b.length - a.length).map(text => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'g');
+    const walker = document.createTreeWalker(contentRef.current, NodeFilter.SHOW_TEXT, { acceptNode: node => node.parentElement?.closest('mark') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT });
+    const textNodes: Text[] = []; let node: Node | null;
+    while ((node = walker.nextNode())) textNodes.push(node as Text);
+    textNodes.forEach(textNode => {
+      const value = textNode.nodeValue || ''; if (!pattern.test(value)) { pattern.lastIndex = 0; return; } pattern.lastIndex = 0;
+      const fragment = document.createDocumentFragment(); let lastIndex = 0;
+      value.replace(pattern, (match, offset: number) => { fragment.append(value.slice(lastIndex, offset)); const marker = document.createElement('mark'); marker.className = 'rounded bg-yellow-200 px-0.5 text-inherit'; marker.textContent = match; fragment.append(marker); lastIndex = offset + match.length; return match; });
+      fragment.append(value.slice(lastIndex)); textNode.replaceWith(fragment); pattern.lastIndex = 0;
+    });
+  }, [mode, review]);
   const select = () => { const text = window.getSelection()?.toString().trim() || ''; if (text && contentRef.current?.contains(window.getSelection()?.anchorNode || null)) setSelection(text); };
   const post = async () => { if (!review || !name.trim() || !selection || !comment.trim()) return; setBusy(true); try { const { comment: created } = await articleReviewService.createComment(token, { field:'content', selectedText:selection, body:comment, authorName:name.trim() }); localStorage.setItem(`reviewer:${token}`, name.trim()); setReview({ ...review, comments:[...review.comments, created] }); setComment(''); setSelection(''); window.getSelection()?.removeAllRanges(); } catch(e) { setError(e instanceof Error ? e.message : 'コメントを保存できません'); } finally { setBusy(false); } };
   const resolve = async (id:string, status:'open'|'resolved') => { if (!review) return; const commenter = review.comments.find(c => c.id === id); const resolverName = name.trim() || commenter?.authorName; if (!resolverName) { setError('レビュー参加者名を入力してください'); return; } try { const { comment: changed } = await articleReviewService.resolveComment(token,id,resolverName,status); setReview({ ...review, comments:review.comments.map(c=>c.id===id?changed:c) }); } catch(e) { setError(e instanceof Error ? e.message : '更新できません'); } };
