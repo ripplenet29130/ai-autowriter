@@ -102,6 +102,6 @@ body {
 /* モバイルのレビュー画面では、画面下固定のコメントフォームに一覧が隠れないようにする */
 @media (max-width: 1023px) {
   main.min-h-screen.bg-slate-50 > .mx-auto.grid.max-w-7xl {
-    padding-bottom: 18rem;
+    padding-bottom: 24rem;
   }
 }
