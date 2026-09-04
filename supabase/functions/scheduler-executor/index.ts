@@ -1717,9 +1717,19 @@ async function sendScheduledReviewRequest(params: {
       .map((recipient: any) => `[To:${String(recipient.accountId).trim()}]${String(recipient.name || '担当者').trim()}`)
       .join('\n');
     const reviewUrl = `${appUrl.replace(/\/$/, '')}/review/${token}`;
+    // 通知には、スケジュールで指定した入力だけを載せる。
+    // タイトルセットだけで生成する場合、内部的にはタイトルを keyword としても
+    // 扱うため、その値を「キーワード」として通知しないようにする。
+    const hasConfiguredTitle = Boolean(schedule.title_set_id);
+    const hasConfiguredKeyword = String(schedule.keyword || '')
+      .split(',')
+      .some((item) => item.trim());
+    const configuredInputLines = [
+      hasConfiguredTitle ? 'タイトル: {title}' : '',
+      hasConfiguredKeyword ? 'キーワード: {keyword}' : '',
+    ].filter(Boolean).join('\n');
     const template = `[info][title]記事レビューのお願い[/title]
-${toLines ? `${toLines}\n\n` : ''}タイトル: {title}
-キーワード: {keyword}
+${toLines ? `${toLines}\n\n` : ''}${configuredInputLines ? `${configuredInputLines}\n\n` : ''}
 
 以下のリンクから内容をご確認ください。
 {url}
