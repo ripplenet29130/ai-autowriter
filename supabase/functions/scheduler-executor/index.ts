@@ -1353,7 +1353,7 @@ async function executeSchedule(
     ? (finalPostStatus === 'publish' ? 'published' : 'draft')
     : 'failed';
 
-  await saveGeneratedArticleSnapshot(supabase, {
+  const articleSnapshotId = await saveGeneratedArticleSnapshot(supabase, {
     title: articleTitle,
     content: fullContent,
     keywords: sectionKeywords,
@@ -1365,6 +1365,17 @@ async function executeSchedule(
     postId,
     publishedAt: publishedAtIso,
   });
+
+  if (articleSnapshotId) {
+    await sendScheduledReviewRequest({
+      schedule,
+      supabase,
+      articleId: articleSnapshotId,
+      title: articleTitle,
+      keyword,
+      apiToken: chatworkApiToken,
+    });
+  }
 
   // 5.5 Send the standard ChatWork publication notification.
   if (postId && schedule.chatwork_room_id && chatworkApiToken) {
@@ -1668,6 +1679,56 @@ async function saveGeneratedArticleSnapshot(
     console.log(`Saved generated article snapshot: ${articleId}`);
   }
   return articleId;
+}
+
+async function sendScheduledReviewRequest(params: {
+  schedule: Schedule;
+  supabase: any;
+  articleId: string;
+  title: string;
+  keyword: string;
+  apiToken: string | null;
+}): Promise<void> {
+  const { schedule, supabase, articleId, title, keyword, apiToken } = params;
+  const roomIds = String(schedule.chatwork_room_id || '').trim();
+  if (!schedule.chatwork_notify_on_review || !roomIds || !apiToken) return;
+
+  const appUrl = Deno.env.get('APP_URL') || Deno.env.get('PUBLIC_APP_URL');
+  if (!appUrl) {
+    console.warn('ChatWork review notification skipped: APP_URL is not configured.');
+    return;
+  }
+
+  try {
+    const token = Array.from(crypto.getRandomValues(new Uint8Array(32))).map((byte) => byte.toString(16).padStart(2, '0')).join('');
+    const tokenHash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token)))).map((byte) => byte.toString(16).padStart(2, '0')).join('');
+    const expiresDays = Math.min(365, Math.max(1, Number(schedule.chatwork_review_expires_days || 30)));
+    const { error } = await supabase.from('article_review_links').insert({
+      article_id: articleId,
+      token_hash: tokenHash,
+      permission: ['view', 'comment', 'edit'].includes(String(schedule.chatwork_review_permission)) ? schedule.chatwork_review_permission : 'comment',
+      expires_at: new Date(Date.now() + expiresDays * 24 * 60 * 60 * 1000).toISOString(),
+    });
+    if (error) throw error;
+
+    const recipients = Array.isArray(schedule.chatwork_recipients) ? schedule.chatwork_recipients : [];
+    const toLines = recipients
+      .filter((recipient: any) => String(recipient?.accountId || '').trim())
+      .map((recipient: any) => `[To:${String(recipient.accountId).trim()}]${String(recipient.name || '担当者').trim()}`)
+      .join('\n');
+    const reviewUrl = `${appUrl.replace(/\/$/, '')}/review/${token}`;
+    const template = `[info][title]記事レビューのお願い[/title]
+${toLines ? `${toLines}\n\n` : ''}タイトル: {title}
+キーワード: {keyword}
+
+以下のリンクから内容をご確認ください。
+{url}
+
+リンク有効期限: ${expiresDays}日[/info]`;
+    await sendChatworkNotifications(apiToken, roomIds, template, title, reviewUrl, keyword, 'レビュー依頼');
+  } catch (error) {
+    console.error('ChatWork review notification failed:', error);
+  }
 }
 
 

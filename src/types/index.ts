@@ -163,6 +163,10 @@ export interface ScheduleSetting {
   end_date?: string;
   chatwork_room_id?: string;
   chatwork_message_template?: string;
+  chatwork_recipients?: ChatworkRecipient[];
+  chatwork_notify_on_review?: boolean;
+  chatwork_review_permission?: ReviewPermission;
+  chatwork_review_expires_days?: number;
   target_word_count?: number;
   writing_tone?: string;
   article_goal?: 'standard' | 'beginner' | 'practical' | 'seo' | 'authority' | 'comparison' | 'conversion';
@@ -180,6 +184,11 @@ export interface ScheduleSetting {
   fact_check_notify_on_every_run?: boolean;
   image_generation_enabled?: boolean;
   images_per_article?: number;
+}
+
+export interface ChatworkRecipient {
+  name: string;
+  accountId: string;
 }
 
 export type ArticleGoal =

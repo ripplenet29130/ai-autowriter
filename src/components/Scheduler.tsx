@@ -3,7 +3,7 @@ import { AlertCircle, Calendar, Globe, Clock, Tag, Trash2, Edit2, Power, Message
 import { scheduleService } from '../services/scheduleService';
 import { supabaseSchedulerService } from '../services/supabaseSchedulerService';
 import { supabase } from '../services/supabaseClient';
-import { ScheduleSetting } from '../types';
+import { ChatworkRecipient, ScheduleSetting } from '../types';
 import { useAppStore } from '../store/useAppStore';
 import { PromptSetManager } from './AIGenerator/PromptSetManager';
 import { formatSharedTone, getSharedToneDescription, normalizeSharedTone, sharedToneOptions } from '../shared/toneOptions';
@@ -99,6 +99,10 @@ export const Scheduler: React.FC = () => {
     end_date: '',
     chatwork_room_id: '',
     chatwork_message_template: DEFAULT_CHATWORK_TEMPLATE,
+    chatwork_recipients: [] as ChatworkRecipient[],
+    chatwork_notify_on_review: true,
+    chatwork_review_permission: 'comment' as 'view' | 'comment' | 'edit',
+    chatwork_review_expires_days: 30,
     prompt_set_id: '',
     target_word_count: 2000,
     writing_tone: 'professional',
@@ -444,6 +448,10 @@ export const Scheduler: React.FC = () => {
       end_date: schedule.end_date || '',
       chatwork_room_id: schedule.chatwork_room_id || '',
       chatwork_message_template: schedule.chatwork_message_template || DEFAULT_CHATWORK_TEMPLATE,
+      chatwork_recipients: schedule.chatwork_recipients || [],
+      chatwork_notify_on_review: schedule.chatwork_notify_on_review ?? true,
+      chatwork_review_permission: schedule.chatwork_review_permission || 'comment',
+      chatwork_review_expires_days: schedule.chatwork_review_expires_days ?? 30,
       prompt_set_id: schedule.prompt_set_id || '',
       target_word_count: Math.min(schedule.target_word_count || 2000, 3000),
       writing_tone: normalizeSharedTone(schedule.writing_tone),
@@ -544,6 +552,10 @@ export const Scheduler: React.FC = () => {
       end_date: '',
       chatwork_room_id: '',
       chatwork_message_template: DEFAULT_CHATWORK_TEMPLATE,
+      chatwork_recipients: [],
+      chatwork_notify_on_review: true,
+      chatwork_review_permission: 'comment',
+      chatwork_review_expires_days: 30,
       prompt_set_id: '',
       target_word_count: 2000,
       writing_tone: 'professional',
@@ -1207,6 +1219,33 @@ export const Scheduler: React.FC = () => {
             </div>
 
           </div>
+        </section>
+
+        <section className="bg-white rounded-xl shadow-sm border border-sky-200 p-6 space-y-4">
+          <div>
+            <h3 className="text-lg font-semibold text-gray-900">ChatWorkレビュー通知</h3>
+            <p className="mt-1 text-sm text-gray-600">この予約投稿が完了したら、担当者へプレビュー共有リンクを送ります。</p>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">通知先ルームID</label>
+            <input value={formData.chatwork_room_id} onChange={(e) => setFormData({ ...formData, chatwork_room_id: e.target.value })} placeholder="例: 123456789（複数はカンマ区切り）" className="input-field" />
+          </div>
+          <div className="space-y-2">
+            <p className="text-sm font-medium text-gray-700">宛先担当者（複数可）</p>
+            {formData.chatwork_recipients.map((recipient, index) => (
+              <div key={index} className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_1fr_auto]">
+                <input value={recipient.name} onChange={(e) => setFormData({ ...formData, chatwork_recipients: formData.chatwork_recipients.map((item, itemIndex) => itemIndex === index ? { ...item, name: e.target.value } : item) })} placeholder="担当者名" className="input-field" />
+                <input value={recipient.accountId} onChange={(e) => setFormData({ ...formData, chatwork_recipients: formData.chatwork_recipients.map((item, itemIndex) => itemIndex === index ? { ...item, accountId: e.target.value } : item) })} placeholder="ChatWorkアカウントID" className="input-field" />
+                <button type="button" onClick={() => setFormData({ ...formData, chatwork_recipients: formData.chatwork_recipients.filter((_, itemIndex) => itemIndex !== index) })} className="btn-secondary text-red-600">削除</button>
+              </div>
+            ))}
+            <button type="button" onClick={() => setFormData({ ...formData, chatwork_recipients: [...formData.chatwork_recipients, { name: '', accountId: '' }] })} className="text-sm font-medium text-blue-600">+ 担当者を追加</button>
+          </div>
+          <label className="flex items-center gap-2 text-sm text-gray-700"><input type="checkbox" checked={formData.chatwork_notify_on_review} onChange={(e) => setFormData({ ...formData, chatwork_notify_on_review: e.target.checked })} />プレビュー共有リンクを送る</label>
+          {formData.chatwork_notify_on_review && <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <label className="text-sm text-gray-700">共有権限<select value={formData.chatwork_review_permission} onChange={(e) => setFormData({ ...formData, chatwork_review_permission: e.target.value as 'view' | 'comment' | 'edit' })} className="input-field mt-1"><option value="view">閲覧のみ</option><option value="comment">コメント可</option><option value="edit">編集可</option></select></label>
+            <label className="text-sm text-gray-700">リンク有効日数<input type="number" min="1" max="365" value={formData.chatwork_review_expires_days} onChange={(e) => setFormData({ ...formData, chatwork_review_expires_days: Math.max(1, Number(e.target.value) || 1) })} className="input-field mt-1" /></label>
+          </div>}
         </section>
 
         <section className="bg-white rounded-xl shadow-sm border border-blue-200 p-6 space-y-4">
