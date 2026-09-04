@@ -5,6 +5,17 @@ import { supabase } from '../services/supabaseClient';
 import { apiKeyManager } from '../services/apiKeyManager';
 import { getCurrentUserId, getOwnershipInsertFields } from '../services/accountScope';
 
+const normalizeChatworkRoomIds = (value: string): string[] => Array.from(new Set(
+  String(value || '')
+    .split(/[\s,]+/)
+    .map((item) => {
+      const trimmed = item.trim();
+      const urlMatch = trimmed.match(/(?:rid|rooms\/)(\d+)/i);
+      return urlMatch?.[1] || (/^\d+$/.test(trimmed) ? trimmed : '');
+    })
+    .filter(Boolean)
+));
+
 type ApiKeySettingsState = {
   serpApiKey: string;
   chatworkApiToken: string;
@@ -89,8 +100,8 @@ const useApiKeySettings = () => {
       values.chatworkRoomId !== undefined
         ? {
             key: 'chatwork_room_id',
-            value: values.chatworkRoomId.trim(),
-            description: 'Default ChatWork room IDs for scheduled post notifications',
+            value: normalizeChatworkRoomIds(values.chatworkRoomId).join(','),
+            description: 'ChatWork room IDs for scheduled post failure notifications',
           }
         : null,
     ].filter((setting): setting is { key: string; value: string; description: string } =>
@@ -248,11 +259,11 @@ export const ChatWorkNotificationSettings: React.FC = () => {
             type="text"
             value={settings.chatworkRoomId}
             onChange={(event) => updateSettings({ chatworkRoomId: event.target.value })}
-            placeholder="例: 123456789"
+            placeholder="例: https://www.chatwork.com/#!rid123456789"
             className="input-field w-full"
           />
           <span className="mt-1 block text-xs text-gray-500">
-            複数のルームへ送る場合はカンマで区切ってください。
+            ChatWorkのルームURLまたはルームIDを入力できます。複数の通知先はカンマまたは改行で区切れます。保存時にルームIDへ自動変換します。
           </span>
         </label>
 
