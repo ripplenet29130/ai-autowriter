@@ -11,7 +11,14 @@ export async function sendChatworkNotifications(
   keyword: string,
   status: string
 ): Promise<void> {
-  const roomIds = roomIdsStr.split(',').map(id => id.trim()).filter(id => id);
+  const roomIds = Array.from(new Set(String(roomIdsStr || '')
+    .split(/[\s,]+/)
+    .map((value) => {
+      const room = value.trim();
+      const match = room.match(/(?:rid|rooms\/)(\d+)/i);
+      return match?.[1] || (/^\d+$/.test(room) ? room : '');
+    })
+    .filter(Boolean)));
 
   if (roomIds.length === 0) return;
 
