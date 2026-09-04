@@ -1778,9 +1778,17 @@ export const Scheduler: React.FC = () => {
                           </div>
                         )}
                         {schedule.chatwork_room_id && (
-                          <div className="flex items-center space-x-2 text-sm">
-                            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">ChatWork ID:</span>
-                            <span className="font-mono text-xs bg-gray-50 text-gray-600 px-2 py-0.5 rounded border border-gray-200">{schedule.chatwork_room_id}</span>
+                          <div className="flex flex-wrap items-center gap-2 text-sm">
+                            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">ChatWork通知先:</span>
+                            <span className="font-mono text-xs bg-sky-50 text-sky-700 px-2 py-0.5 rounded border border-sky-100">ルーム {schedule.chatwork_room_id}</span>
+                            {schedule.chatwork_notify_on_review !== false && (
+                              <span className="text-xs bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded border border-emerald-100">レビュー通知ON</span>
+                            )}
+                            {(schedule.chatwork_recipients || []).filter((recipient) => recipient.name || recipient.accountId).map((recipient, recipientIndex) => (
+                              <span key={`${recipient.accountId}-${recipientIndex}`} className="text-xs bg-gray-50 text-gray-700 px-2 py-0.5 rounded border border-gray-200">
+                                {recipient.name || recipient.accountId}
+                              </span>
+                            ))}
                           </div>
                         )}
                         {promptSetName && (
