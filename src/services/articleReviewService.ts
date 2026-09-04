@@ -21,4 +21,9 @@ export const articleReviewService = {
   resolveComment: (token: string, commentId: string, authorName: string, status: 'open' | 'resolved') => invoke<{ comment: ArticleComment }>('resolve-comment', { token, commentId, authorName, status }),
   deleteComment: (token: string, commentId: string) => invoke<void>('delete-comment', { token, commentId }),
   updateArticle: (token: string, authorName: string, article: Pick<Article, 'title' | 'excerpt' | 'content'>, expectedUpdatedAt?: string) => invoke<{ article: ReviewArticlePayload['article'] }>('update-article', { token, authorName, article, expectedUpdatedAt }),
+  publishToWordPress: (token: string, status: 'draft' | 'publish') => {
+    if (!supabase) throw new Error('データベース接続が設定されていません');
+    return supabase.functions.invoke<{ postId: string; url?: string | null; status: 'draft' | 'publish' }>('review-wordpress-publish', { body: { token, status } })
+      .then(({ data, error }) => { if (error) throw error; if (!data) throw new Error('WordPress投稿結果を取得できません'); return data; });
+  },
 };
