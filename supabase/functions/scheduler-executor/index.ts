@@ -111,7 +111,6 @@ Deno.serve(async (req: Request) => {
       // 1.5 髯ｷ・ｷ郢晢ｽｻ繝ｻ・ｨ繝ｻ・ｮAPI驛｢譎冗樟郢晢ｽｻ驛｢・ｧ繝ｻ・ｯ驛｢譎｢・ｽ・ｳ驛｢譎｢・ｽ・ｻ驛｢・ｧ繝ｻ・ｭ驛｢譎｢・ｽ・ｼ驍ｵ・ｺ繝ｻ・ｮ髯ｷ・ｿ鬮｢ﾂ繝ｻ・ｾ郢晢ｽｻ
       let chatworkApiToken: string | null = null;
       let chatworkRoomId: string | null = null;
-      let chatworkMessageTemplate: string | null = null;
       let factCheckAlertChatworkRoomId: string | null = null;
       let factCheckNotifyMode: string | null = null;
       let serpApiKey: string | null = null;
@@ -141,7 +140,6 @@ Deno.serve(async (req: Request) => {
         appSettings.forEach((setting: any) => {
           if (setting.key === 'chatwork_api_token') chatworkApiToken = setting.value;
           if (setting.key === 'chatwork_room_id') chatworkRoomId = setting.value;
-          if (setting.key === 'chatwork_message_template') chatworkMessageTemplate = setting.value;
           if (setting.key === 'fact_check_alert_chatwork_room_id') factCheckAlertChatworkRoomId = setting.value;
           if (setting.key === 'fact_check_notify_mode') factCheckNotifyMode = setting.value;
           if (setting.key === 'serpapi_key') serpApiKey = setting.value;
@@ -351,7 +349,6 @@ Deno.serve(async (req: Request) => {
 
           let accountChatworkApiToken = chatworkApiToken;
           let accountChatworkRoomId = chatworkRoomId;
-          let accountChatworkMessageTemplate = chatworkMessageTemplate;
           let accountFactCheckAlertChatworkRoomId = factCheckAlertChatworkRoomId;
           let accountFactCheckNotifyMode = factCheckNotifyMode;
           let accountSerpApiKey = serpApiKey;
@@ -368,7 +365,6 @@ Deno.serve(async (req: Request) => {
               .in('key', [
                 'chatwork_api_token',
                 'chatwork_room_id',
-                'chatwork_message_template',
                 'fact_check_alert_chatwork_room_id',
                 'fact_check_notify_mode',
                 'serpapi_key',
@@ -384,7 +380,6 @@ Deno.serve(async (req: Request) => {
             (accountAppSettings || []).forEach((setting: any) => {
               if (setting.key === 'chatwork_api_token') accountChatworkApiToken = setting.value;
               if (setting.key === 'chatwork_room_id') accountChatworkRoomId = setting.value;
-              if (setting.key === 'chatwork_message_template') accountChatworkMessageTemplate = setting.value;
               if (setting.key === 'fact_check_alert_chatwork_room_id') accountFactCheckAlertChatworkRoomId = setting.value;
               if (setting.key === 'fact_check_notify_mode') accountFactCheckNotifyMode = setting.value;
               if (setting.key === 'serpapi_key') accountSerpApiKey = setting.value;
@@ -445,8 +440,11 @@ Deno.serve(async (req: Request) => {
 
           const effectiveScheduleSetting = {
             ...scheduleSetting,
-            chatwork_room_id: scheduleSetting.chatwork_room_id || accountChatworkRoomId || '',
-            chatwork_message_template: scheduleSetting.chatwork_message_template || accountChatworkMessageTemplate || '',
+            // レビュー通知先はスケジュール個別に限定する。
+            chatwork_room_id: scheduleSetting.chatwork_room_id || '',
+            chatwork_message_template: scheduleSetting.chatwork_message_template || '',
+            // 接続・API設定のルームIDは、投稿失敗・実行エラーの共通通知先。
+            chatwork_failure_room_id: accountChatworkRoomId || '',
             fact_check_alert_chatwork_room_id: scheduleSetting.fact_check_alert_chatwork_room_id || accountFactCheckAlertChatworkRoomId || '',
             // 「通知しない」はスケジュール個別の設定より優先する。停止操作を
             // すべての予約投稿へ即時に反映するため。
@@ -1381,26 +1379,6 @@ async function executeSchedule(
       keyword,
       apiToken: chatworkApiToken,
     });
-  }
-
-  // 5.5 Send the standard ChatWork publication notification.
-  if (postId && schedule.chatwork_room_id && chatworkApiToken) {
-    console.log(`Sending Chatwork notification to rooms: ${schedule.chatwork_room_id}`);
-    try {
-      const postUrl = `${wpConfig.url}/?p=${postId}`; // Public URL
-      await sendChatworkNotifications(
-        chatworkApiToken,
-        schedule.chatwork_room_id,
-        schedule.chatwork_message_template || '',
-        articleTitle,
-        postUrl,
-        keyword,
-        schedule.post_status === 'publish' ? '公開' : '下書き'
-      );
-    } catch (cwError) {
-      console.error('Chatwork notification failed:', cwError);
-      // Build title and message.
-    }
   }
 
   const rawNotifyEveryRun = (schedule as any).fact_check_notify_on_every_run === true;

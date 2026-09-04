@@ -106,6 +106,7 @@ export interface Schedule {
   end_date?: string;
   chatwork_room_id?: string;
   chatwork_message_template?: string;
+  chatwork_failure_room_id?: string;
   chatwork_recipients?: Array<{ name?: string; accountId?: string }>;
   chatwork_notify_on_review?: boolean;
   chatwork_review_permission?: 'view' | 'comment' | 'edit';

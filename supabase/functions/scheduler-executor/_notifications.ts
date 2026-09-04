@@ -102,7 +102,7 @@ export async function notifyScheduleExecutionFailure(
   chatworkApiToken: string | null,
   error: unknown
 ): Promise<void> {
-  const roomIds = String(schedule.fact_check_alert_chatwork_room_id || schedule.chatwork_room_id || '').trim();
+  const roomIds = String(schedule.chatwork_failure_room_id || '').trim();
   if (!chatworkApiToken || !roomIds) return;
 
   const reason = formatScheduleFailureReason(error);

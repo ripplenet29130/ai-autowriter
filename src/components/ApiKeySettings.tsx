@@ -5,30 +5,10 @@ import { supabase } from '../services/supabaseClient';
 import { apiKeyManager } from '../services/apiKeyManager';
 import { getCurrentUserId, getOwnershipInsertFields } from '../services/accountScope';
 
-const DEFAULT_CHATWORK_TEMPLATE = `いつもお世話になっております。
-記事の投稿が完了しましたので、ご報告いたします。
-
-■ 記事タイトル
-{title}
-
-■ キーワード
-{keyword}
-
-■ 投稿URL
-{url}
-
-■ 投稿状態
-{status}
-
-問題などございましたら、お気軽にお知らせください。
-
-今後ともよろしくお願いいたします。`;
-
 type ApiKeySettingsState = {
   serpApiKey: string;
   chatworkApiToken: string;
   chatworkRoomId: string;
-  chatworkMessageTemplate: string;
 };
 
 const useApiKeySettings = () => {
@@ -36,7 +16,6 @@ const useApiKeySettings = () => {
     serpApiKey: '',
     chatworkApiToken: '',
     chatworkRoomId: '',
-    chatworkMessageTemplate: DEFAULT_CHATWORK_TEMPLATE,
   });
   const [saved, setSaved] = useState(false);
 
@@ -59,7 +38,6 @@ const useApiKeySettings = () => {
           'serpapi_key',
           'chatwork_api_token',
           'chatwork_room_id',
-          'chatwork_message_template',
         ]);
 
       const map = new Map<string, string>();
@@ -71,7 +49,6 @@ const useApiKeySettings = () => {
         serpApiKey: map.get('serpapi_key') || prev.serpApiKey,
         chatworkApiToken: map.get('chatwork_api_token') || prev.chatworkApiToken,
         chatworkRoomId: map.get('chatwork_room_id') || prev.chatworkRoomId,
-        chatworkMessageTemplate: map.get('chatwork_message_template') || prev.chatworkMessageTemplate,
       }));
 
       const accountSerpKey = map.get('serpapi_key');
@@ -114,13 +91,6 @@ const useApiKeySettings = () => {
             key: 'chatwork_room_id',
             value: values.chatworkRoomId.trim(),
             description: 'Default ChatWork room IDs for scheduled post notifications',
-          }
-        : null,
-      values.chatworkMessageTemplate !== undefined
-        ? {
-            key: 'chatwork_message_template',
-            value: values.chatworkMessageTemplate.trim() || DEFAULT_CHATWORK_TEMPLATE,
-            description: 'Default ChatWork message template for scheduled post notifications',
           }
         : null,
     ].filter((setting): setting is { key: string; value: string; description: string } =>
@@ -239,7 +209,7 @@ export const ChatWorkNotificationSettings: React.FC = () => {
     <div className="space-y-5">
       <div className="flex items-center gap-2">
         <span className="rounded-full bg-gray-100 px-2.5 py-1 text-xs font-semibold text-gray-600">任意</span>
-        <h3 className="text-base font-semibold text-gray-900">予約投稿の通知設定</h3>
+        <h3 className="text-base font-semibold text-gray-900">予約投稿の失敗通知設定</h3>
       </div>
 
       <div className="space-y-4 rounded-lg border border-gray-200 bg-white p-4">
@@ -247,7 +217,7 @@ export const ChatWorkNotificationSettings: React.FC = () => {
           <div>
             <h4 className="font-semibold text-gray-900">ChatWork通知設定</h4>
             <p className="mt-1 text-sm text-gray-600">
-              予約投稿の完了通知をChatWorkへ送る場合だけ設定します。
+              WordPressへの投稿失敗や予約実行エラーをChatWorkへ通知する場合だけ設定します。レビュー共有の通知先は、各スケジュールで設定します。
             </p>
           </div>
           <a
@@ -273,7 +243,7 @@ export const ChatWorkNotificationSettings: React.FC = () => {
         </label>
 
         <label className="block">
-          <span className="mb-1 block text-sm font-medium text-gray-700">通知先ルームID</span>
+          <span className="mb-1 block text-sm font-medium text-gray-700">エラー通知先ルームID</span>
           <input
             type="text"
             value={settings.chatworkRoomId}
@@ -286,18 +256,6 @@ export const ChatWorkNotificationSettings: React.FC = () => {
           </span>
         </label>
 
-        <label className="block">
-          <span className="mb-1 block text-sm font-medium text-gray-700">通知メッセージテンプレート</span>
-          <textarea
-            value={settings.chatworkMessageTemplate}
-            onChange={(event) => updateSettings({ chatworkMessageTemplate: event.target.value })}
-            rows={7}
-            className="input-field w-full font-mono text-sm"
-          />
-          <span className="mt-1 block text-xs text-gray-500">
-            使用可能な変数: {'{title}'}, {'{url}'}, {'{keyword}'}, {'{status}'}
-          </span>
-        </label>
       </div>
 
       <button
@@ -305,7 +263,6 @@ export const ChatWorkNotificationSettings: React.FC = () => {
         onClick={() => saveSettings({
           chatworkApiToken: settings.chatworkApiToken,
           chatworkRoomId: settings.chatworkRoomId,
-          chatworkMessageTemplate: settings.chatworkMessageTemplate,
         })}
         className="btn-primary inline-flex items-center gap-2"
       >
