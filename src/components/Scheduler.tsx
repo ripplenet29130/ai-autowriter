@@ -1,9 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { Calendar, Globe, Clock, Tag, Trash2, Edit2, Power } from 'lucide-react';
 import { scheduleService } from '../services/scheduleService';
-import { ScheduleSetting } from '../types';
+import { ChatworkRecipient, ScheduleSetting } from '../types';
 import { useAppStore } from '../store/useAppStore';
 import toast from 'react-hot-toast';
+
+type ScheduleFormData = Omit<ScheduleSetting, 'id' | 'created_at' | 'updated_at' | 'chatwork_recipients' | 'chatwork_notify_on_review' | 'chatwork_review_permission' | 'chatwork_review_expires_days'> & {
+  chatwork_recipients: ChatworkRecipient[];
+  chatwork_notify_on_review: boolean;
+  chatwork_review_permission: 'view' | 'comment' | 'edit';
+  chatwork_review_expires_days: number;
+};
 
 export const Scheduler: React.FC = () => {
   const { aiConfigs, wordPressConfigs, keywordSets, loadKeywordSets } = useAppStore();
@@ -14,7 +21,7 @@ export const Scheduler: React.FC = () => {
   const [editingSchedule, setEditingSchedule] = useState<ScheduleSetting | null>(null);
 
   // Form state
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<ScheduleFormData>({
     ai_config_id: '',
     wp_config_id: '',
     keyword: '',
@@ -24,6 +31,10 @@ export const Scheduler: React.FC = () => {
     start_date: '',
     end_date: '',
     chatwork_room_id: '',
+    chatwork_recipients: [] as ChatworkRecipient[],
+    chatwork_notify_on_review: true,
+    chatwork_review_permission: 'comment',
+    chatwork_review_expires_days: 30,
     status: true,
   });
 
@@ -112,6 +123,10 @@ export const Scheduler: React.FC = () => {
       start_date: schedule.start_date || '',
       end_date: schedule.end_date || '',
       chatwork_room_id: schedule.chatwork_room_id || '',
+      chatwork_recipients: schedule.chatwork_recipients || [],
+      chatwork_notify_on_review: schedule.chatwork_notify_on_review ?? true,
+      chatwork_review_permission: schedule.chatwork_review_permission || 'comment',
+      chatwork_review_expires_days: schedule.chatwork_review_expires_days ?? 30,
       status: schedule.status,
     });
     // Scroll to top to show the form
@@ -156,6 +171,10 @@ export const Scheduler: React.FC = () => {
       start_date: '',
       end_date: '',
       chatwork_room_id: '',
+      chatwork_recipients: [],
+      chatwork_notify_on_review: true,
+      chatwork_review_permission: 'comment',
+      chatwork_review_expires_days: 30,
       status: true,
     });
     setEditingSchedule(null);
@@ -394,8 +413,50 @@ export const Scheduler: React.FC = () => {
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             />
             <p className="text-xs text-gray-500 mt-1">
-              ※ 空欄の場合はChatWorkに送信されません
+              ※ 空欄の場合はChatWorkに送信されません。複数ルームはカンマ区切りで指定できます。
             </p>
+          </div>
+
+          <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 space-y-3">
+            <div>
+              <h4 className="text-sm font-semibold text-gray-900">レビュー依頼の宛先担当者</h4>
+              <p className="mt-1 text-xs text-gray-500">予約投稿ごとに、ChatWorkでTo通知する担当者を複数指定できます。</p>
+            </div>
+            {formData.chatwork_recipients.map((recipient, index) => (
+              <div key={index} className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_1fr_auto]">
+                <input
+                  type="text"
+                  value={recipient.name}
+                  onChange={(e) => setFormData({ ...formData, chatwork_recipients: formData.chatwork_recipients.map((item, itemIndex) => itemIndex === index ? { ...item, name: e.target.value } : item) })}
+                  placeholder="担当者名（例: 田中さん）"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                />
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={recipient.accountId}
+                  onChange={(e) => setFormData({ ...formData, chatwork_recipients: formData.chatwork_recipients.map((item, itemIndex) => itemIndex === index ? { ...item, accountId: e.target.value } : item) })}
+                  placeholder="ChatWorkアカウントID"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                />
+                <button type="button" onClick={() => setFormData({ ...formData, chatwork_recipients: formData.chatwork_recipients.filter((_, itemIndex) => itemIndex !== index) })} className="px-3 py-2 text-sm text-red-600 border border-red-200 rounded-lg hover:bg-red-50">削除</button>
+              </div>
+            ))}
+            <button type="button" onClick={() => setFormData({ ...formData, chatwork_recipients: [...formData.chatwork_recipients, { name: '', accountId: '' }] })} className="text-sm text-blue-600 hover:text-blue-700">+ 担当者を追加</button>
+            <label className="flex items-center gap-2 text-sm text-gray-700">
+              <input type="checkbox" checked={formData.chatwork_notify_on_review} onChange={(e) => setFormData({ ...formData, chatwork_notify_on_review: e.target.checked })} />
+              記事生成後、プレビュー共有リンクをChatWorkへ送る
+            </label>
+            {formData.chatwork_notify_on_review && (
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <label className="text-sm text-gray-700">共有権限
+                  <select value={formData.chatwork_review_permission} onChange={(e) => setFormData({ ...formData, chatwork_review_permission: e.target.value as 'view' | 'comment' | 'edit' })} className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg"><option value="view">閲覧のみ</option><option value="comment">コメント可</option><option value="edit">編集可</option></select>
+                </label>
+                <label className="text-sm text-gray-700">リンク有効日数
+                  <input type="number" min="1" max="365" value={formData.chatwork_review_expires_days} onChange={(e) => setFormData({ ...formData, chatwork_review_expires_days: Math.max(1, Number(e.target.value) || 1) })} className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg" />
+                </label>
+              </div>
+            )}
           </div>
 
           {/* スケジュール有効化 */}

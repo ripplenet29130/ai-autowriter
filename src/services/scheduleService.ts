@@ -24,6 +24,10 @@ class ScheduleService {
                 start_date: schedule.start_date || null,
                 end_date: schedule.end_date || null,
                 chatwork_room_id: schedule.chatwork_room_id,
+                chatwork_recipients: schedule.chatwork_recipients || [],
+                chatwork_notify_on_review: schedule.chatwork_notify_on_review ?? true,
+                chatwork_review_permission: schedule.chatwork_review_permission || 'comment',
+                chatwork_review_expires_days: schedule.chatwork_review_expires_days ?? 30,
             })
             .select()
             .single();

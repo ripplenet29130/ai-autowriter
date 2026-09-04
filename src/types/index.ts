@@ -131,6 +131,10 @@ export interface ScheduleSetting {
   start_date?: string;
   end_date?: string;
   chatwork_room_id?: string;
+  chatwork_recipients?: ChatworkRecipient[];
+  chatwork_notify_on_review?: boolean;
+  chatwork_review_permission?: ReviewPermission;
+  chatwork_review_expires_days?: number;
   created_at?: string;
   updated_at?: string;
 }
@@ -191,6 +195,11 @@ export interface TrendAnalysisResult {
   };
   timestamp: Date;
   trend?: 'rising' | 'stable' | 'declining';
+}
+
+export interface ChatworkRecipient {
+  name: string;
+  accountId: string;
 }
 
 export interface CompetitorArticle {

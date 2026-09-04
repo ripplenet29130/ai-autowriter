@@ -1,11 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { Key, Check, AlertCircle, ExternalLink } from 'lucide-react';
 import { apiKeyManager } from '../services/apiKeyManager';
+import { supabase } from '../services/supabaseClient';
 
 export const ApiKeySettings: React.FC = () => {
     const [serpApiKey, setSerpApiKey] = useState('');
     const [googleApiKey, setGoogleApiKey] = useState('');
     const [searchEngineId, setSearchEngineId] = useState('');
+    const [chatworkToken, setChatworkToken] = useState('');
+    const [chatworkConfigured, setChatworkConfigured] = useState(false);
     const [saved, setSaved] = useState(false);
     const [validationStatus, setValidationStatus] = useState<{
         isValid: boolean;
@@ -25,9 +28,10 @@ export const ApiKeySettings: React.FC = () => {
 
         // 検証状態を取得
         setValidationStatus(apiKeyManager.validateConfiguration());
+        void supabase?.functions.invoke('chatwork-settings', { body: { action: 'get' } }).then(({ data }) => setChatworkConfigured(Boolean(data?.configured)));
     }, []);
 
-    const handleSave = () => {
+    const handleSave = async () => {
         // APIキーを保存
         if (serpApiKey) {
             apiKeyManager.setApiKey('serpapi', serpApiKey);
@@ -37,6 +41,19 @@ export const ApiKeySettings: React.FC = () => {
         }
         if (searchEngineId) {
             apiKeyManager.setApiKey('google_custom_search_engine_id', searchEngineId);
+        }
+        if (chatworkToken.trim()) {
+            if (!supabase) {
+                alert('ChatWorkトークンの保存にはSupabase接続が必要です。');
+                return;
+            }
+            const { data, error } = await supabase.functions.invoke('chatwork-settings', { body: { action: 'save', apiToken: chatworkToken } });
+            if (error || data?.error) {
+                alert(data?.error || error?.message || 'ChatWorkトークンを保存できませんでした。ログイン状態を確認してください。');
+                return;
+            }
+            setChatworkConfigured(true);
+            setChatworkToken('');
         }
 
         // 検証状態を更新
@@ -196,6 +213,15 @@ export const ApiKeySettings: React.FC = () => {
                         で作成できます
                     </p>
                 </div>
+            </div>
+
+            <div className="bg-white rounded-lg border border-gray-200 p-4 space-y-3">
+                <div>
+                    <h4 className="font-semibold text-gray-900">ChatWork API Token</h4>
+                    <p className="text-sm text-gray-600 mt-1">予約投稿からの通知に共通で使用します。通知先ルームと担当者は、各予約投稿設定で指定します。</p>
+                </div>
+                <input type="password" value={chatworkToken} onChange={(e) => setChatworkToken(e.target.value)} placeholder={chatworkConfigured ? '設定済み（変更する場合のみ入力）' : 'ChatWork API Tokenを入力'} className="input-field w-full font-mono text-sm" />
+                <p className={`text-xs ${chatworkConfigured ? 'text-green-700' : 'text-amber-700'}`}>{chatworkConfigured ? 'ChatWork APIトークンは設定済みです。' : 'ChatWork APIトークンは未設定です。'}</p>
             </div>
 
             {/* 保存メッセージ */}

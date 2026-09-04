@@ -264,6 +264,15 @@ async function executeSchedule(
     status: 'success'
   });
 
+  // 予約投稿の生成物をレビュー対象として保存し、設定済みの担当者へ共有する。
+  // 通知失敗で投稿自体を失敗扱いにしないため、通知処理は内部でエラーを吸収する。
+  await createAndSendReviewNotification(schedule, wpConfig, supabase, {
+    title: articleTitle,
+    content: fullContent,
+    keyword,
+    postId: String(postId),
+  });
+
   return {
     wordpress_config_id: wpConfig.id,
     wordpress_config_name: wpConfig.name,
@@ -537,4 +546,66 @@ async function publishToWordPress(
 
   const data = await response.json();
   return data.id.toString();
+}
+
+async function createAndSendReviewNotification(
+  schedule: any,
+  wpConfig: WordPressConfig,
+  supabase: any,
+  article: { title: string; content: string; keyword: string; postId: string }
+) {
+  if (!schedule.chatwork_notify_on_review || !String(schedule.chatwork_room_id || '').trim()) return;
+
+  try {
+    const { data: savedArticle, error: articleError } = await supabase.from('articles').insert({
+      title: article.title,
+      content: article.content,
+      excerpt: article.content.slice(0, 200),
+      keywords: [article.keyword],
+      status: schedule.publish_status === 'publish' ? 'published' : 'draft',
+      wordpress_post_id: article.postId,
+      wordpress_config_id: wpConfig.id,
+      published_at: schedule.publish_status === 'publish' ? new Date().toISOString() : null,
+    }).select('id').single();
+    if (articleError || !savedArticle) throw articleError || new Error('レビュー対象の記事を保存できませんでした');
+
+    const rawToken = Array.from(crypto.getRandomValues(new Uint8Array(32))).map(byte => byte.toString(16).padStart(2, '0')).join('');
+    const tokenHash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(rawToken)))).map(byte => byte.toString(16).padStart(2, '0')).join('');
+    const expiryDays = Math.min(365, Math.max(1, Number(schedule.chatwork_review_expires_days || 30)));
+    const { error: linkError } = await supabase.from('article_review_links').insert({
+      article_id: savedArticle.id,
+      token_hash: tokenHash,
+      permission: ['view', 'comment', 'edit'].includes(schedule.chatwork_review_permission) ? schedule.chatwork_review_permission : 'comment',
+      expires_at: new Date(Date.now() + expiryDays * 24 * 60 * 60 * 1000).toISOString(),
+    });
+    if (linkError) throw linkError;
+
+    const { data: settings, error: settingsError } = await supabase.from('chatwork_settings').select('api_token').eq('id', true).maybeSingle();
+    if (settingsError || !settings?.api_token) {
+      console.warn('ChatWork API token is not configured; review link was created but not notified.');
+      return;
+    }
+
+    const appUrl = Deno.env.get('APP_URL') || Deno.env.get('PUBLIC_APP_URL');
+    if (!appUrl) {
+      console.warn('APP_URL is not configured; review link was created but not notified.');
+      return;
+    }
+    const recipients = Array.isArray(schedule.chatwork_recipients) ? schedule.chatwork_recipients : [];
+    const toLines = recipients
+      .filter((recipient: any) => String(recipient?.accountId || '').trim())
+      .map((recipient: any) => `[To:${String(recipient.accountId).trim()}]${String(recipient.name || '担当者').trim()}`)
+      .join('\n');
+    const reviewUrl = `${appUrl.replace(/\/$/, '')}/review/${rawToken}`;
+    const message = `[info][title]記事レビューのお願い[/title]\n${toLines ? `${toLines}\n\n` : ''}対象サイト: ${wpConfig.name}\nタイトル: ${article.title}\nキーワード: ${article.keyword}\n投稿状態: ${schedule.publish_status === 'publish' ? '公開' : '下書き'}\n\n以下のリンクから内容をご確認ください。\n${reviewUrl}\n\nリンク有効期限: ${expiryDays}日[/info]`;
+    const roomIds = String(schedule.chatwork_room_id).split(',').map((id: string) => id.trim()).filter(Boolean);
+    await Promise.all(roomIds.map(async (roomId: string) => {
+      const response = await fetch(`https://api.chatwork.com/v2/rooms/${roomId}/messages`, {
+        method: 'POST', headers: { 'X-ChatWorkToken': settings.api_token, 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' }, body: `body=${encodeURIComponent(message)}`
+      });
+      if (!response.ok) throw new Error(`ChatWork API error ${response.status}: ${await response.text()}`);
+    }));
+  } catch (error) {
+    console.error('Review notification failed:', error);
+  }
 }
