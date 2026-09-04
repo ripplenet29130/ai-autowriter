@@ -8,7 +8,7 @@ type SettingsState = {
   autoFixEnabled: boolean;
   perplexityApiKey: string;
   alertChatworkRoomId: string;
-  notifyMode: 'anomaly' | 'every';
+  notifyMode: 'off' | 'anomaly' | 'every';
 };
 
 const LOCAL_STORAGE_KEY = 'fact_check_settings_local';
@@ -42,7 +42,9 @@ export const FactCheckSettings: React.FC = () => {
           autoFixEnabled: Boolean(local.autoFixEnabled ?? prev.autoFixEnabled),
           perplexityApiKey: String(local.perplexityApiKey ?? prev.perplexityApiKey ?? ''),
           alertChatworkRoomId: String(local.alertChatworkRoomId ?? prev.alertChatworkRoomId ?? ''),
-          notifyMode: local.notifyMode === 'every' ? 'every' : 'anomaly',
+          notifyMode: ['off', 'anomaly', 'every'].includes(String(local.notifyMode))
+            ? local.notifyMode as SettingsState['notifyMode']
+            : 'anomaly',
         }));
       }
     } catch (error) {
@@ -101,7 +103,9 @@ export const FactCheckSettings: React.FC = () => {
         // 保存済みキーは表示できない。変更したい場合のみ入力してもらう
         perplexityApiKey: prev.perplexityApiKey,
         alertChatworkRoomId: map.get('fact_check_alert_chatwork_room_id') ?? '',
-        notifyMode: map.get('fact_check_notify_mode') === 'every' ? 'every' : 'anomaly',
+        notifyMode: ['off', 'anomaly', 'every'].includes(String(map.get('fact_check_notify_mode')))
+          ? map.get('fact_check_notify_mode') as SettingsState['notifyMode']
+          : 'anomaly',
       }));
     } catch (error) {
       console.error('Failed to load fact check settings:', error);
@@ -300,6 +304,16 @@ export const FactCheckSettings: React.FC = () => {
 
         <div className="space-y-2">
           <p className="text-xs font-medium text-gray-600">通知モード</p>
+          <label className="flex items-center gap-2 text-sm text-gray-700">
+            <input
+              type="radio"
+              name="fact_check_notify_mode"
+              checked={settings.notifyMode === 'off'}
+              onChange={() => setSettings({ ...settings, notifyMode: 'off' })}
+              className="h-4 w-4 text-blue-600"
+            />
+            <span>通知しない</span>
+          </label>
           <label className="flex items-center gap-2 text-sm text-gray-700">
             <input
               type="radio"

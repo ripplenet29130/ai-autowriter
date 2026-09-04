@@ -448,12 +448,18 @@ Deno.serve(async (req: Request) => {
             chatwork_room_id: scheduleSetting.chatwork_room_id || accountChatworkRoomId || '',
             chatwork_message_template: scheduleSetting.chatwork_message_template || accountChatworkMessageTemplate || '',
             fact_check_alert_chatwork_room_id: scheduleSetting.fact_check_alert_chatwork_room_id || accountFactCheckAlertChatworkRoomId || '',
-            fact_check_notify_on_every_run: typeof scheduleSetting.fact_check_notify_on_every_run === 'boolean'
-              ? scheduleSetting.fact_check_notify_on_every_run
-              : accountFactCheckNotifyMode === 'every',
-            fact_check_notify_on_anomaly: typeof scheduleSetting.fact_check_notify_on_anomaly === 'boolean'
-              ? scheduleSetting.fact_check_notify_on_anomaly
-              : accountFactCheckNotifyMode !== 'every',
+            // 「通知しない」はスケジュール個別の設定より優先する。停止操作を
+            // すべての予約投稿へ即時に反映するため。
+            fact_check_notify_on_every_run: accountFactCheckNotifyMode === 'off'
+              ? false
+              : typeof scheduleSetting.fact_check_notify_on_every_run === 'boolean'
+                ? scheduleSetting.fact_check_notify_on_every_run
+                : accountFactCheckNotifyMode === 'every',
+            fact_check_notify_on_anomaly: accountFactCheckNotifyMode === 'off'
+              ? false
+              : typeof scheduleSetting.fact_check_notify_on_anomaly === 'boolean'
+                ? scheduleSetting.fact_check_notify_on_anomaly
+                : accountFactCheckNotifyMode !== 'every',
             ...(accountImageGenerationAllowed
               ? {}
               : {
