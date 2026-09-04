@@ -162,6 +162,7 @@ export interface ScheduleSetting {
   start_date?: string;
   end_date?: string;
   chatwork_room_id?: string;
+  chatwork_room_name?: string;
   chatwork_message_template?: string;
   chatwork_recipients?: ChatworkRecipient[];
   chatwork_notify_on_review?: boolean;

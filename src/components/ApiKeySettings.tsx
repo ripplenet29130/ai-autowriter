@@ -20,6 +20,7 @@ type ApiKeySettingsState = {
   serpApiKey: string;
   chatworkApiToken: string;
   chatworkRoomId: string;
+  chatworkRoomName: string;
 };
 
 const useApiKeySettings = () => {
@@ -27,6 +28,7 @@ const useApiKeySettings = () => {
     serpApiKey: '',
     chatworkApiToken: '',
     chatworkRoomId: '',
+    chatworkRoomName: '',
   });
   const [saved, setSaved] = useState(false);
 
@@ -49,6 +51,7 @@ const useApiKeySettings = () => {
           'serpapi_key',
           'chatwork_api_token',
           'chatwork_room_id',
+          'chatwork_room_name',
         ]);
 
       const map = new Map<string, string>();
@@ -60,6 +63,7 @@ const useApiKeySettings = () => {
         serpApiKey: map.get('serpapi_key') || prev.serpApiKey,
         chatworkApiToken: map.get('chatwork_api_token') || prev.chatworkApiToken,
         chatworkRoomId: map.get('chatwork_room_id') || prev.chatworkRoomId,
+        chatworkRoomName: map.get('chatwork_room_name') || prev.chatworkRoomName,
       }));
 
       const accountSerpKey = map.get('serpapi_key');
@@ -102,6 +106,13 @@ const useApiKeySettings = () => {
             key: 'chatwork_room_id',
             value: normalizeChatworkRoomIds(values.chatworkRoomId).join(','),
             description: 'ChatWork room IDs for scheduled post failure notifications',
+          }
+        : null,
+      values.chatworkRoomName !== undefined
+        ? {
+            key: 'chatwork_room_name',
+            value: values.chatworkRoomName.trim(),
+            description: 'Display name for ChatWork scheduled post failure notification rooms',
           }
         : null,
     ].filter((setting): setting is { key: string; value: string; description: string } =>
@@ -267,6 +278,20 @@ export const ChatWorkNotificationSettings: React.FC = () => {
           </span>
         </label>
 
+        <label className="block">
+          <span className="mb-1 block text-sm font-medium text-gray-700">エラー通知先ルーム名（管理用）</span>
+          <input
+            type="text"
+            value={settings.chatworkRoomName}
+            onChange={(event) => updateSettings({ chatworkRoomName: event.target.value })}
+            placeholder="例: アマゴ工芸 運用連絡"
+            className="input-field w-full"
+          />
+          <span className="mt-1 block text-xs text-gray-500">
+            ChatWorkへは送信されず、アプリ内で通知先を判別するためだけに使います。
+          </span>
+        </label>
+
       </div>
 
       <button
@@ -274,6 +299,7 @@ export const ChatWorkNotificationSettings: React.FC = () => {
         onClick={() => saveSettings({
           chatworkApiToken: settings.chatworkApiToken,
           chatworkRoomId: settings.chatworkRoomId,
+          chatworkRoomName: settings.chatworkRoomName,
         })}
         className="btn-primary inline-flex items-center gap-2"
       >

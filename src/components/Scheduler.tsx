@@ -109,6 +109,7 @@ export const Scheduler: React.FC = () => {
     start_date: '',
     end_date: '',
     chatwork_room_id: '',
+    chatwork_room_name: '',
     chatwork_message_template: DEFAULT_CHATWORK_TEMPLATE,
     chatwork_recipients: [] as ChatworkRecipient[],
     chatwork_notify_on_review: true,
@@ -340,6 +341,7 @@ export const Scheduler: React.FC = () => {
       ai_model_override: useDefaultAiConfig ? '' : selectedAiModel,
       target_word_count: Math.min(Math.max(formData.target_word_count || 2000, 500), 3000),
       chatwork_room_id: normalizeChatworkRoomIds(formData.chatwork_room_id).join(','),
+      chatwork_room_name: formData.chatwork_room_name.trim(),
       chatwork_recipients: formData.chatwork_recipients
         .map((recipient) => ({ name: recipient.name.trim(), accountId: recipient.accountId.trim() }))
         .filter((recipient) => recipient.name || recipient.accountId),
@@ -460,6 +462,7 @@ export const Scheduler: React.FC = () => {
       start_date: schedule.start_date || '',
       end_date: schedule.end_date || '',
       chatwork_room_id: schedule.chatwork_room_id || '',
+      chatwork_room_name: schedule.chatwork_room_name || '',
       chatwork_message_template: schedule.chatwork_message_template || DEFAULT_CHATWORK_TEMPLATE,
       chatwork_recipients: schedule.chatwork_recipients || [],
       chatwork_notify_on_review: schedule.chatwork_notify_on_review ?? true,
@@ -564,6 +567,7 @@ export const Scheduler: React.FC = () => {
       start_date: '',
       end_date: '',
       chatwork_room_id: '',
+      chatwork_room_name: '',
       chatwork_message_template: DEFAULT_CHATWORK_TEMPLATE,
       chatwork_recipients: [],
       chatwork_notify_on_review: true,
@@ -1411,6 +1415,7 @@ export const Scheduler: React.FC = () => {
         <section className="bg-white rounded-xl shadow-sm border border-sky-200 p-6 space-y-4">
           <div><h3 className="text-lg font-semibold text-gray-900">ChatWorkレビュー通知</h3><p className="mt-1 text-sm text-gray-600">この予約投稿が完了したら、担当者へプレビュー共有リンクを送ります。</p></div>
           <div><label className="block text-sm font-medium text-gray-700 mb-1">通知先ルームIDまたはChatWorkルームURL</label><input value={formData.chatwork_room_id} onChange={(e) => setFormData({ ...formData, chatwork_room_id: e.target.value })} placeholder="例: https://www.chatwork.com/#!rid123456789" className="input-field" /><p className="mt-1 text-xs text-gray-500">複数の通知先はカンマまたは改行で区切れます。保存時にルームIDへ自動変換します。</p></div>
+          <div><label className="block text-sm font-medium text-gray-700 mb-1">通知先ルーム名（管理用）</label><input value={formData.chatwork_room_name} onChange={(e) => setFormData({ ...formData, chatwork_room_name: e.target.value })} placeholder="例: アマゴ工芸 レビュー用" className="input-field" /><p className="mt-1 text-xs text-gray-500">ChatWorkへは送信されず、アプリ内で通知先を判別するためだけに表示します。</p></div>
           <div className="space-y-2"><p className="text-sm font-medium text-gray-700">宛先担当者（複数可）</p>{formData.chatwork_recipients.map((recipient, index) => <div key={index} className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_1fr_auto]"><input value={recipient.name} onChange={(e) => setFormData({ ...formData, chatwork_recipients: formData.chatwork_recipients.map((item, itemIndex) => itemIndex === index ? { ...item, name: e.target.value } : item) })} placeholder="担当者名" className="input-field" /><input value={recipient.accountId} onChange={(e) => setFormData({ ...formData, chatwork_recipients: formData.chatwork_recipients.map((item, itemIndex) => itemIndex === index ? { ...item, accountId: e.target.value } : item) })} placeholder="ChatWorkアカウントID" className="input-field" /><button type="button" onClick={() => setFormData({ ...formData, chatwork_recipients: formData.chatwork_recipients.filter((_, itemIndex) => itemIndex !== index) })} className="btn-secondary text-red-600">削除</button></div>)}<button type="button" onClick={() => setFormData({ ...formData, chatwork_recipients: [...formData.chatwork_recipients, { name: '', accountId: '' }] })} className="text-sm font-medium text-blue-600">+ 担当者を追加</button></div>
           <label className="flex items-center gap-2 text-sm text-gray-700"><input type="checkbox" checked={formData.chatwork_notify_on_review} onChange={(e) => setFormData({ ...formData, chatwork_notify_on_review: e.target.checked })} />プレビュー共有リンクを送る</label>
           {formData.chatwork_notify_on_review && <div className="grid grid-cols-1 gap-3 sm:grid-cols-2"><label className="text-sm text-gray-700">共有権限<select value={formData.chatwork_review_permission} onChange={(e) => setFormData({ ...formData, chatwork_review_permission: e.target.value as 'view' | 'comment' | 'edit' })} className="input-field mt-1"><option value="view">閲覧のみ</option><option value="comment">コメント可</option><option value="edit">編集可</option></select></label><label className="text-sm text-gray-700">リンク有効日数<input type="number" min="1" max="365" value={formData.chatwork_review_expires_days} onChange={(e) => setFormData({ ...formData, chatwork_review_expires_days: Math.max(1, Number(e.target.value) || 1) })} className="input-field mt-1" /></label></div>}
@@ -1793,7 +1798,8 @@ export const Scheduler: React.FC = () => {
                         {schedule.chatwork_room_id && (
                           <div className="flex flex-wrap items-center gap-2 text-sm">
                             <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">ChatWork通知先:</span>
-                            <span className="font-mono text-xs bg-sky-50 text-sky-700 px-2 py-0.5 rounded border border-sky-100">ルーム {schedule.chatwork_room_id}</span>
+                            <span className="font-mono text-xs bg-sky-50 text-sky-700 px-2 py-0.5 rounded border border-sky-100">{schedule.chatwork_room_name || `ルーム ${schedule.chatwork_room_id}`}</span>
+                            {schedule.chatwork_room_name && <span className="text-[10px] text-gray-400">ID: {schedule.chatwork_room_id}</span>}
                             {schedule.chatwork_notify_on_review !== false && (
                               <span className="text-xs bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded border border-emerald-100">レビュー通知ON</span>
                             )}

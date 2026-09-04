@@ -12,6 +12,7 @@ class ScheduleService {
         'image_generation_enabled',
         'images_per_article',
         'chatwork_message_template',
+        'chatwork_room_name',
         'chatwork_recipients',
         'chatwork_notify_on_review',
         'chatwork_review_permission',
@@ -279,6 +280,7 @@ class ScheduleService {
             start_date: schedule.start_date || null,
             end_date: schedule.end_date || null,
             chatwork_room_id: schedule.chatwork_room_id || null,
+            chatwork_room_name: schedule.chatwork_room_name || null,
             chatwork_recipients: schedule.chatwork_recipients || [],
             chatwork_notify_on_review: schedule.chatwork_notify_on_review ?? true,
             chatwork_review_permission: schedule.chatwork_review_permission || 'comment',
@@ -423,6 +425,7 @@ class ScheduleService {
         if (cleanUpdates.end_date === '') cleanUpdates.end_date = null as any;
         if (cleanUpdates.prompt_set_id === '') cleanUpdates.prompt_set_id = null as any;
         if (cleanUpdates.chatwork_room_id === '') cleanUpdates.chatwork_room_id = null as any;
+        if (cleanUpdates.chatwork_room_name === '') cleanUpdates.chatwork_room_name = null as any;
         if (cleanUpdates.fact_check_alert_chatwork_room_id === '') cleanUpdates.fact_check_alert_chatwork_room_id = null as any;
         if (cleanUpdates.keyword_set_id === '') cleanUpdates.keyword_set_id = null as any;
         if (cleanUpdates.title_set_id === '') cleanUpdates.title_set_id = null as any;
