@@ -105,3 +105,10 @@ body {
     padding-bottom: 24rem;
   }
 }
+
+/* PCではコメント欄もページの高さに合わせて伸ばし、一覧を最後までスクロールできるようにする */
+@media (min-width: 1024px) {
+  main.min-h-screen.bg-slate-50 > .mx-auto.grid.max-w-7xl > aside {
+    position: static;
+  }
+}
