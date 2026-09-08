@@ -1698,7 +1698,7 @@ async function sendScheduledReviewRequest(params: {
     const recipients = Array.isArray(schedule.chatwork_recipients) ? schedule.chatwork_recipients : [];
     const toLines = recipients
       .filter((recipient: any) => String(recipient?.accountId || '').trim())
-      .map((recipient: any) => `[To:${String(recipient.accountId).trim()}]${String(recipient.name || '担当者').trim()}`)
+      .map((recipient: any) => { const name = String(recipient.name || '担当者').trim(); return `[To:${String(recipient.accountId).trim()}]${name.endsWith('さん') ? name : `${name}さん`}`; })
       .join('\n');
     const reviewUrl = `${appUrl.replace(/\/$/, '')}/review/${token}`;
     // 通知には、スケジュールで指定した入力だけを載せる。
