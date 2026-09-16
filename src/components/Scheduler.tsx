@@ -33,8 +33,8 @@ const DEFAULT_CHATWORK_TEMPLATE = `{recipients}
 
 以下の記事を作成しましたので、ご確認をお願いいたします。
 
-■ キーワード
-{keyword}
+■ タイトル
+{title}
 
 ■ 確認用リンク
 {url}
