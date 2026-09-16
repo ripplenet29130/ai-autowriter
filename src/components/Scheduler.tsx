@@ -27,24 +27,25 @@ type ExecutionHistoryRow = {
   } | null;
 };
 
-const DEFAULT_CHATWORK_TEMPLATE = `いつもお世話になっております。
-記事の投稿が完了しましたので、ご報告いたします。
+const DEFAULT_CHATWORK_TEMPLATE = `{recipients}
 
-■ 記事タイトル
-{title}
+いつもお世話になっております。
+
+以下の記事を作成しましたので、ご確認をお願いいたします。
 
 ■ キーワード
 {keyword}
 
-■ 投稿URL
+■ 確認用リンク
 {url}
 
-■ 投稿状態
-{status}
+恐れ入りますが、本通知から7日以内にご確認・ご返信をお願いいたします。
+期日までにご返信がない場合は、内容をご承認いただいたものとして公開いたします。
 
-問題などございましたら、お気軽にお知らせください。
+公開後も、気になる箇所や修正のご希望がございましたら対応可能です。
+お手数をおかけしますが、よろしくお願いいたします。
 
-今後ともよろしくお願いいたします。`;
+リンク有効期限: {expires_days}日`;
 
 const WEEKDAY_OPTIONS = [
   { value: 1, label: '月曜日', shortLabel: '月' },
@@ -113,7 +114,7 @@ export const Scheduler: React.FC = () => {
     chatwork_message_template: DEFAULT_CHATWORK_TEMPLATE,
     chatwork_recipients: [] as ChatworkRecipient[],
     chatwork_notify_on_review: true,
-    chatwork_review_permission: 'comment' as 'view' | 'comment' | 'edit',
+    chatwork_review_permission: 'edit' as 'view' | 'comment' | 'edit',
     chatwork_review_expires_days: 30,
     prompt_set_id: '',
     target_word_count: 2000,
@@ -466,7 +467,7 @@ export const Scheduler: React.FC = () => {
       chatwork_message_template: schedule.chatwork_message_template || DEFAULT_CHATWORK_TEMPLATE,
       chatwork_recipients: schedule.chatwork_recipients || [],
       chatwork_notify_on_review: schedule.chatwork_notify_on_review ?? true,
-      chatwork_review_permission: schedule.chatwork_review_permission || 'comment',
+      chatwork_review_permission: schedule.chatwork_review_permission || 'edit',
       chatwork_review_expires_days: schedule.chatwork_review_expires_days ?? 30,
       prompt_set_id: schedule.prompt_set_id || '',
       target_word_count: Math.min(schedule.target_word_count || 2000, 3000),
@@ -571,7 +572,7 @@ export const Scheduler: React.FC = () => {
       chatwork_message_template: DEFAULT_CHATWORK_TEMPLATE,
       chatwork_recipients: [],
       chatwork_notify_on_review: true,
-      chatwork_review_permission: 'comment',
+      chatwork_review_permission: 'edit',
       chatwork_review_expires_days: 30,
       prompt_set_id: '',
       target_word_count: 2000,
@@ -1417,6 +1418,7 @@ export const Scheduler: React.FC = () => {
           <div><label className="block text-sm font-medium text-gray-700 mb-1">通知先ルームIDまたはChatWorkルームURL</label><input value={formData.chatwork_room_id} onChange={(e) => setFormData({ ...formData, chatwork_room_id: e.target.value })} placeholder="例: https://www.chatwork.com/#!rid123456789" className="input-field" /><p className="mt-1 text-xs text-gray-500">複数の通知先はカンマまたは改行で区切れます。保存時にルームIDへ自動変換します。</p></div>
           <div><label className="block text-sm font-medium text-gray-700 mb-1">通知先ルーム名（管理用）</label><input value={formData.chatwork_room_name} onChange={(e) => setFormData({ ...formData, chatwork_room_name: e.target.value })} placeholder="例: アマゴ工芸 レビュー用" className="input-field" /><p className="mt-1 text-xs text-gray-500">ChatWorkへは送信されず、アプリ内で通知先を判別するためだけに表示します。</p></div>
           <div className="space-y-2"><p className="text-sm font-medium text-gray-700">宛先担当者（複数可）</p>{formData.chatwork_recipients.map((recipient, index) => <div key={index} className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_1fr_auto]"><input value={recipient.name} onChange={(e) => setFormData({ ...formData, chatwork_recipients: formData.chatwork_recipients.map((item, itemIndex) => itemIndex === index ? { ...item, name: e.target.value } : item) })} placeholder="担当者名" className="input-field" /><input value={recipient.accountId} onChange={(e) => setFormData({ ...formData, chatwork_recipients: formData.chatwork_recipients.map((item, itemIndex) => itemIndex === index ? { ...item, accountId: e.target.value } : item) })} placeholder="ChatWorkアカウントID" className="input-field" /><button type="button" onClick={() => setFormData({ ...formData, chatwork_recipients: formData.chatwork_recipients.filter((_, itemIndex) => itemIndex !== index) })} className="btn-secondary text-red-600">削除</button></div>)}<button type="button" onClick={() => setFormData({ ...formData, chatwork_recipients: [...formData.chatwork_recipients, { name: '', accountId: '' }] })} className="text-sm font-medium text-blue-600">+ 担当者を追加</button></div>
+          <div><label className="block text-sm font-medium text-gray-700 mb-1">通知本文テンプレート</label><textarea value={formData.chatwork_message_template} onChange={(e) => setFormData({ ...formData, chatwork_message_template: e.target.value })} rows={12} className="input-field font-mono text-xs" /><p className="mt-1 text-xs text-gray-500">使用できる差し込み項目: {'{title}'}（記事タイトル）、{'{keyword}'}（キーワード）、{'{url}'}（レビューURL）、{'{recipients}'}（宛先To）、{'{input}'}（設定済みのタイトル・キーワード）、{'{expires_days}'}（有効日数）。ChatWork記法も使用できます。</p></div>
           <label className="flex items-center gap-2 text-sm text-gray-700"><input type="checkbox" checked={formData.chatwork_notify_on_review} onChange={(e) => setFormData({ ...formData, chatwork_notify_on_review: e.target.checked })} />プレビュー共有リンクを送る</label>
           {formData.chatwork_notify_on_review && <div className="grid grid-cols-1 gap-3 sm:grid-cols-2"><label className="text-sm text-gray-700">共有権限<select value={formData.chatwork_review_permission} onChange={(e) => setFormData({ ...formData, chatwork_review_permission: e.target.value as 'view' | 'comment' | 'edit' })} className="input-field mt-1"><option value="view">確認のみ</option><option value="comment">コメント可</option><option value="edit">編集・投稿可</option></select></label><label className="text-sm text-gray-700">リンク有効日数<input type="number" min="1" max="365" value={formData.chatwork_review_expires_days} onChange={(e) => setFormData({ ...formData, chatwork_review_expires_days: Math.max(1, Number(e.target.value) || 1) })} className="input-field mt-1" /></label></div>}
         </section>

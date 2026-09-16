@@ -60,7 +60,7 @@ export async function sendChatworkNotifications(
     const replaced = line.replace(/{keyword}/g, keywordValue);
     if (!keywordValue) {
       const trimmed = replaced.trim();
-      if (/^(?:キーワード|Keyword)[:：]?\s*$/i.test(trimmed)) {
+      if (/^(?:■\s*)?(?:キーワード|Keyword)[:：]?\s*$/i.test(trimmed)) {
         continue;
       }
     }

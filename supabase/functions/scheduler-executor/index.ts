@@ -1690,7 +1690,7 @@ async function sendScheduledReviewRequest(params: {
     const { error } = await supabase.from('article_review_links').insert({
       article_id: articleId,
       token_hash: tokenHash,
-      permission: ['view', 'comment', 'edit'].includes(String(schedule.chatwork_review_permission)) ? schedule.chatwork_review_permission : 'comment',
+      permission: ['view', 'comment', 'edit'].includes(String(schedule.chatwork_review_permission)) ? schedule.chatwork_review_permission : 'edit',
       expires_at: new Date(Date.now() + expiresDays * 24 * 60 * 60 * 1000).toISOString(),
     });
     if (error) throw error;
@@ -1712,13 +1712,29 @@ async function sendScheduledReviewRequest(params: {
       hasConfiguredTitle ? 'タイトル: {title}' : '',
       hasConfiguredKeyword ? 'キーワード: {keyword}' : '',
     ].filter(Boolean).join('\n');
-    const template = `[info][title]記事レビューのお願い[/title]
-${toLines ? `${toLines}\n\n` : ''}${configuredInputLines ? `${configuredInputLines}\n\n` : ''}
+    const defaultTemplate = `{recipients}
 
-以下のリンクから内容をご確認ください。
+いつもお世話になっております。
+
+以下の記事を作成しましたので、ご確認をお願いいたします。
+
+■ キーワード
+{keyword}
+
+■ 確認用リンク
 {url}
 
-リンク有効期限: ${expiresDays}日[/info]`;
+恐れ入りますが、本通知から7日以内にご確認・ご返信をお願いいたします。
+期日までにご返信がない場合は、内容をご承認いただいたものとして公開いたします。
+
+公開後も、気になる箇所や修正のご希望がございましたら対応可能です。
+お手数をおかけしますが、よろしくお願いいたします。
+
+リンク有効期限: {expires_days}日`;
+    const template = String(schedule.chatwork_message_template || defaultTemplate)
+      .replace(/{recipients}/g, toLines)
+      .replace(/{input}/g, configuredInputLines)
+      .replace(/{expires_days}/g, String(expiresDays));
     await sendChatworkNotifications(apiToken, roomIds, template, title, reviewUrl, keyword, 'レビュー依頼');
   } catch (error) {
     console.error('ChatWork review notification failed:', error);
