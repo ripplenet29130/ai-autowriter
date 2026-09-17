@@ -106,9 +106,13 @@ body {
   }
 }
 
-/* PCではコメント欄もページの高さに合わせて伸ばし、一覧を最後までスクロールできるようにする */
+/* PCで右列に表示されるコメント欄は、本文をスクロールしても追従させる。 */
 @media (min-width: 1024px) {
   main.min-h-screen.bg-slate-50 > .mx-auto.grid.max-w-7xl > aside {
-    position: static;
+    position: sticky;
+    top: 1.25rem;
+    align-self: start;
+    max-height: calc(100vh - 2.5rem);
+    overflow-y: auto;
   }
 }
