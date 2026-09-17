@@ -1724,13 +1724,13 @@ async function sendScheduledReviewRequest(params: {
 ■ 確認用リンク
 {url}
 
+リンク有効期限: {expires_days}日
+
 恐れ入りますが、本通知から7日以内にご確認・ご返信をお願いいたします。
 期日までにご返信がない場合は、内容をご承認いただいたものとして公開いたします。
 
 公開後も、気になる箇所や修正のご希望がございましたら対応可能です。
-お手数をおかけしますが、よろしくお願いいたします。
-
-リンク有効期限: {expires_days}日`;
+お手数をおかけしますが、よろしくお願いいたします。`;
     const template = String(schedule.chatwork_message_template || defaultTemplate)
       .replace(/{recipients}/g, toLines)
       .replace(/{input}/g, configuredInputLines)
