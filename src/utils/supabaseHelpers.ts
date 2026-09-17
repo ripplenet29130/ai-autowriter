@@ -108,7 +108,9 @@ export class SupabaseHelpers {
             const client = this.getClient();
             const { data: result, error } = await client
                 .from(tableName)
-                .insert(data)
+                // テーブル名は呼び出し側で動的に指定されるため、Supabaseの
+                // スキーマ推論では行型を特定できない。
+                .insert(data as never)
                 .select()
                 .single();
 
@@ -136,7 +138,9 @@ export class SupabaseHelpers {
             const client = this.getClient();
             const { data, error } = await client
                 .from(tableName)
-                .update(updates)
+                // テーブル名は呼び出し側で動的に指定されるため、Supabaseの
+                // スキーマ推論では行型を特定できない。
+                .update(updates as never)
                 .eq('id', id)
                 .select()
                 .single();

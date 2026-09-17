@@ -18,6 +18,7 @@ export const articleReviewService = {
   revokeLink: (linkId: string) => invoke<void>('revoke-link', { linkId }),
   getReview: (token: string, password?: string) => invoke<ReviewArticlePayload>('get-review', { token, password }),
   createComment: (token: string, comment: Pick<ArticleComment, 'field' | 'selectedText' | 'startOffset' | 'endOffset' | 'body' | 'authorName'>) => invoke<{ comment: ArticleComment }>('create-comment', { token, comment }),
+  updateComment: (token: string, commentId: string, authorName: string, body: string) => invoke<{ comment: ArticleComment }>('update-comment', { token, commentId, authorName, body }),
   resolveComment: (token: string, commentId: string, authorName: string, status: 'open' | 'resolved') => invoke<{ comment: ArticleComment }>('resolve-comment', { token, commentId, authorName, status }),
   deleteComment: (token: string, commentId: string) => invoke<void>('delete-comment', { token, commentId }),
   updateArticle: (token: string, authorName: string, article: Pick<Article, 'title' | 'excerpt' | 'content'>, expectedUpdatedAt?: string) => invoke<{ article: ReviewArticlePayload['article'] }>('update-article', { token, authorName, article, expectedUpdatedAt }),
