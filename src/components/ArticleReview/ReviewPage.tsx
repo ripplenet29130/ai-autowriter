@@ -14,7 +14,13 @@ export function ReviewPage({ token }: { token: string }) {
   useEffect(() => {
     if (mode !== 'preview' || !review || !contentRef.current) return;
     // 解決済みコメントも本文との対応を確認できるよう、マーカーは残す。
-    const selectedTexts = [...new Set(review.comments.map(comment => comment.selectedText?.trim()).filter((text): text is string => Boolean(text)))];
+    // 同一箇所に未解決コメントがある場合は、未解決の黄色を優先する。
+    const markerStatuses = new Map<string, 'open' | 'resolved'>();
+    review.comments.forEach(comment => {
+      const text = comment.selectedText?.trim();
+      if (text && (comment.status === 'open' || !markerStatuses.has(text))) markerStatuses.set(text, comment.status);
+    });
+    const selectedTexts = [...markerStatuses.keys()];
     if (!selectedTexts.length) return;
     const pattern = new RegExp(selectedTexts.sort((a, b) => b.length - a.length).map(text => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'g');
     const walker = document.createTreeWalker(contentRef.current, NodeFilter.SHOW_TEXT, { acceptNode: node => node.parentElement?.closest('mark') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT });
@@ -23,7 +29,7 @@ export function ReviewPage({ token }: { token: string }) {
     textNodes.forEach(textNode => {
       const value = textNode.nodeValue || ''; if (!pattern.test(value)) { pattern.lastIndex = 0; return; } pattern.lastIndex = 0;
       const fragment = document.createDocumentFragment(); let lastIndex = 0;
-      value.replace(pattern, (match, offset: number) => { fragment.append(value.slice(lastIndex, offset)); const marker = document.createElement('mark'); marker.className = 'rounded bg-yellow-200 px-0.5 text-inherit'; marker.textContent = match; fragment.append(marker); lastIndex = offset + match.length; return match; });
+      value.replace(pattern, (match, offset: number) => { fragment.append(value.slice(lastIndex, offset)); const marker = document.createElement('mark'); marker.className = `rounded px-0.5 text-inherit ${markerStatuses.get(match) === 'resolved' ? 'bg-green-200' : 'bg-yellow-200'}`; marker.textContent = match; fragment.append(marker); lastIndex = offset + match.length; return match; });
       fragment.append(value.slice(lastIndex)); textNode.replaceWith(fragment); pattern.lastIndex = 0;
     });
   }, [mode, review]);
