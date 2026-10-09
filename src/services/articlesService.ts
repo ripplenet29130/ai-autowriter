@@ -1,4 +1,5 @@
-﻿import { supabase } from './supabaseClient';
+import { supabase } from './supabaseClient';
+import { buildArticleSearchFilter } from './articleSearch';
 import { Article } from '../types';
 import {
   getOwnershipInsertFields,
@@ -207,13 +208,10 @@ export const articlesService = {
 
       if (filters?.postState === 'failed') {
         query = query.eq('status', 'failed');
-      } else if (filters?.postState === 'published') {
-        query = query.or('is_published.eq.true,status.eq.published,wordpress_post_id.not.is.null,wordpress_url.not.is.null');
       } else if (filters?.postState === 'unpublished') {
         query = query
           .neq('status', 'published')
           .neq('status', 'failed')
-          .or('is_published.is.null,is_published.eq.false')
           .is('wordpress_post_id', null)
           .is('wordpress_url', null);
       }
@@ -238,9 +236,8 @@ export const articlesService = {
         query = query.lte('published_at', filters.publishedDateTo);
       }
 
-      if (filters?.searchTerm) {
-        query = query.or(`title.ilike.%${filters.searchTerm}%,content.ilike.%${filters.searchTerm}%`);
-      }
+      const searchFilter = buildArticleSearchFilter(filters?.searchTerm, filters?.postState);
+      if (searchFilter) query = query.or(searchFilter);
 
       if (sort) {
         query = query.order(sort.field, { ascending: sort.ascending ?? false });
@@ -279,13 +276,10 @@ export const articlesService = {
 
       if (filters?.postState === 'failed') {
         query = query.eq('status', 'failed');
-      } else if (filters?.postState === 'published') {
-        query = query.or('is_published.eq.true,status.eq.published,wordpress_post_id.not.is.null,wordpress_url.not.is.null');
       } else if (filters?.postState === 'unpublished') {
         query = query
           .neq('status', 'published')
           .neq('status', 'failed')
-          .or('is_published.is.null,is_published.eq.false')
           .is('wordpress_post_id', null)
           .is('wordpress_url', null);
       }
@@ -310,9 +304,8 @@ export const articlesService = {
         query = query.lte('published_at', filters.publishedDateTo);
       }
 
-      if (filters?.searchTerm) {
-        query = query.or(`title.ilike.%${filters.searchTerm}%,content.ilike.%${filters.searchTerm}%`);
-      }
+      const searchFilter = buildArticleSearchFilter(filters?.searchTerm, filters?.postState);
+      if (searchFilter) query = query.or(searchFilter);
 
       const { count, error } = await query;
 

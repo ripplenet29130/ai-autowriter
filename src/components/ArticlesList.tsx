@@ -1,4 +1,5 @@
 ﻿import React, { useState, useEffect } from 'react';
+import { useRef } from 'react';
 import { FileText, Search, Filter, Calendar, Tag, TrendingUp, Trash2, Edit, Eye, ExternalLink, RefreshCw, Save, X, User, Share2 } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
 import { Article } from '../types';
@@ -20,6 +21,8 @@ const ARTICLES_PAGE_SIZE = 100;
 export const ArticlesList: React.FC = () => {
   const { deleteArticle } = useAppStore();
   const [searchTerm, setSearchTerm] = useState('');
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
+  const articleRequestId = useRef(0);
   const [postStateFilter, setPostStateFilter] = useState<string>('all');
   const [sortField, setSortField] = useState<'created_at' | 'updated_at' | 'title'>('created_at');
   const [sortAscending, setSortAscending] = useState(false);
@@ -65,12 +68,21 @@ export const ArticlesList: React.FC = () => {
   }, [activeConfigs, selectedConfigId]);
 
   useEffect(() => {
-    loadArticles();
-  }, [postStateFilter, sortField, sortAscending, searchTerm, currentPage]);
+    const timer = window.setTimeout(() => {
+      setDebouncedSearchTerm(searchTerm.trim());
+      setCurrentPage(1);
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [searchTerm]);
+
+  useEffect(() => {
+    void loadArticles();
+    return () => { articleRequestId.current += 1; };
+  }, [postStateFilter, sortField, sortAscending, debouncedSearchTerm, currentPage]);
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [postStateFilter, sortField, sortAscending, searchTerm]);
+  }, [postStateFilter, sortField, sortAscending]);
 
   useEffect(() => {
     const loadFactCheckSettings = async () => {
@@ -113,8 +125,9 @@ export const ArticlesList: React.FC = () => {
       const filters: ArticleFilters = {};
       if (postStateFilter !== 'all') {
         filters.postState = postStateFilter as ArticleFilters['postState'];
+    const requestId = ++articleRequestId.current;
       }
-      if (searchTerm) filters.searchTerm = searchTerm;
+      if (debouncedSearchTerm) filters.searchTerm = debouncedSearchTerm;
 
       const sortOptions: ArticleSortOptions = {
         field: sortField,
@@ -133,9 +146,11 @@ export const ArticlesList: React.FC = () => {
       console.error('記事の読み込みエラー:', error);
       toast.error('記事の読み込みに失敗しました');
     } finally {
-      setIsLoading(false);
+      if (requestId !== articleRequestId.current) return;
+      if (requestId === articleRequestId.current) setIsLoading(false);
     }
   };
+      if (requestId !== articleRequestId.current) return;
 
   const isArticlePublished = (article: Article) => (
     article.isPublished === true ||
@@ -411,7 +426,7 @@ export const ArticlesList: React.FC = () => {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
             <input
               type="text"
-              placeholder="記事を検索..."
+              placeholder="タイトル・本文を検索"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
@@ -423,6 +438,7 @@ export const ArticlesList: React.FC = () => {
             <label className="block text-xs font-medium text-gray-500 mb-1">投稿状態</label>
             <select
               value={postStateFilter}
+            <p className="mt-1 text-xs text-gray-500">スペースで区切ると、すべてのキーワードを含む記事を検索します。</p>
               onChange={(e) => setPostStateFilter(e.target.value)}
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             >
