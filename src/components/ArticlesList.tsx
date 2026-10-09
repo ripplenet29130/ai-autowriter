@@ -22,6 +22,8 @@ export const ArticlesList: React.FC = () => {
   const { deleteArticle } = useAppStore();
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
+  const [wordPressConfigFilter, setWordPressConfigFilter] = useState('all');
+  const [loadError, setLoadError] = useState('');
   const articleRequestId = useRef(0);
   const [postStateFilter, setPostStateFilter] = useState<string>('all');
   const [sortField, setSortField] = useState<'created_at' | 'updated_at' | 'title'>('created_at');
@@ -78,11 +80,11 @@ export const ArticlesList: React.FC = () => {
   useEffect(() => {
     void loadArticles();
     return () => { articleRequestId.current += 1; };
-  }, [postStateFilter, sortField, sortAscending, debouncedSearchTerm, currentPage]);
+  }, [postStateFilter, sortField, sortAscending, debouncedSearchTerm, wordPressConfigFilter, currentPage]);
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [postStateFilter, sortField, sortAscending]);
+  }, [postStateFilter, sortField, sortAscending, wordPressConfigFilter]);
 
   useEffect(() => {
     const loadFactCheckSettings = async () => {
@@ -119,15 +121,17 @@ export const ArticlesList: React.FC = () => {
     });
   };
   const loadArticles = async () => {
+    const requestId = ++articleRequestId.current;
     try {
       setIsLoading(true);
+      setLoadError('');
 
       const filters: ArticleFilters = {};
       if (postStateFilter !== 'all') {
         filters.postState = postStateFilter as ArticleFilters['postState'];
-    const requestId = ++articleRequestId.current;
       }
       if (debouncedSearchTerm) filters.searchTerm = debouncedSearchTerm;
+      if (wordPressConfigFilter !== 'all') filters.wordPressConfigId = wordPressConfigFilter;
 
       const sortOptions: ArticleSortOptions = {
         field: sortField,
@@ -140,17 +144,17 @@ export const ArticlesList: React.FC = () => {
         articlesService.getArticleCount(filters),
       ]);
 
+      if (requestId !== articleRequestId.current) return;
       setLocalArticles(fetchedArticles);
       setTotalArticleCount(count);
     } catch (error) {
-      console.error('記事の読み込みエラー:', error);
-      toast.error('記事の読み込みに失敗しました');
-    } finally {
       if (requestId !== articleRequestId.current) return;
+      console.error('記事の読み込みエラー:', error);
+      setLoadError(error instanceof Error ? error.message : '記事の読み込みに失敗しました');
+    } finally {
       if (requestId === articleRequestId.current) setIsLoading(false);
     }
   };
-      if (requestId !== articleRequestId.current) return;
 
   const isArticlePublished = (article: Article) => (
     article.isPublished === true ||
@@ -419,7 +423,7 @@ export const ArticlesList: React.FC = () => {
       )}
 
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
           <div>
             <label className="block text-xs font-medium text-gray-500 mb-1">検索</label>
             <div className="relative">
@@ -432,13 +436,29 @@ export const ArticlesList: React.FC = () => {
               className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             />
             </div>
+            <p className="mt-1 text-xs text-gray-500">スペースで区切ると、すべてのキーワードを含む記事を検索します。</p>
+          </div>
+
+          <div>
+            <label htmlFor="article-company-filter" className="block text-xs font-medium text-gray-500 mb-1">企業・投稿先</label>
+            <select
+              id="article-company-filter"
+              value={wordPressConfigFilter}
+              onChange={(e) => setWordPressConfigFilter(e.target.value)}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            >
+              <option value="all">すべての企業・投稿先</option>
+              <option value="unassigned">投稿先未設定</option>
+              {[...configs].sort((a, b) => a.name.localeCompare(b.name, 'ja')).map(config => (
+                <option key={config.id} value={config.id}>{config.name}（{config.url}）</option>
+              ))}
+            </select>
           </div>
 
           <div>
             <label className="block text-xs font-medium text-gray-500 mb-1">投稿状態</label>
             <select
               value={postStateFilter}
-            <p className="mt-1 text-xs text-gray-500">スペースで区切ると、すべてのキーワードを含む記事を検索します。</p>
               onChange={(e) => setPostStateFilter(e.target.value)}
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             >
@@ -473,11 +493,16 @@ export const ArticlesList: React.FC = () => {
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
             <p className="mt-4 text-gray-600">記事を読み込み中...</p>
           </div>
+        ) : loadError ? (
+          <div role="alert" className="rounded-lg bg-red-50 p-6 text-center text-red-700">
+            <p>{loadError}</p>
+            <button onClick={() => void loadArticles()} className="mt-3 rounded border border-red-300 px-4 py-2">再読み込み</button>
+          </div>
         ) : localArticles.length === 0 ? (
           <div className="text-center py-12">
             <FileText className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-            <h3 className="text-lg font-semibold text-gray-900 mb-2">記事がありません</h3>
-            <p className="text-gray-600">AI記事生成から新しい記事を作成してください</p>
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">{debouncedSearchTerm || wordPressConfigFilter !== 'all' || postStateFilter !== 'all' ? '条件に一致する記事がありません' : '記事がありません'}</h3>
+            <p className="text-gray-600">{debouncedSearchTerm || wordPressConfigFilter !== 'all' || postStateFilter !== 'all' ? '検索キーワードや企業・投稿先、投稿状態を変更してください。' : 'AI記事生成から新しい記事を作成してください'}</p>
           </div>
         ) : (
           <>
@@ -517,6 +542,10 @@ export const ArticlesList: React.FC = () => {
                     </p>
 
                     <div className="flex flex-wrap items-center gap-4 text-sm text-gray-500">
+                      <div className="flex items-center gap-1">
+                        <Globe className="w-4 h-4" />
+                        <span>{configs.find(config => config.id === article.wordPressConfigId)?.name || (article.wordPressConfigId ? '投稿先の設定が見つかりません' : '投稿先未設定')}</span>
+                      </div>
                       {article.category && (
                         <div className="flex items-center gap-1">
                           <Tag className="w-4 h-4" />

@@ -17,6 +17,7 @@ export interface ArticleFilters {
   publishedDateFrom?: string;
   publishedDateTo?: string;
   searchTerm?: string;
+  wordPressConfigId?: string;
 }
 
 export interface ArticleSortOptions {
@@ -211,9 +212,7 @@ export const articlesService = {
       } else if (filters?.postState === 'unpublished') {
         query = query
           .neq('status', 'published')
-          .neq('status', 'failed')
-          .is('wordpress_post_id', null)
-          .is('wordpress_url', null);
+          .neq('status', 'failed');
       }
 
       if (filters?.category) {
@@ -238,6 +237,11 @@ export const articlesService = {
 
       const searchFilter = buildArticleSearchFilter(filters?.searchTerm, filters?.postState);
       if (searchFilter) query = query.or(searchFilter);
+      if (filters?.wordPressConfigId === 'unassigned') {
+        query = query.is('wordpress_config_id', null);
+      } else if (filters?.wordPressConfigId) {
+        query = query.eq('wordpress_config_id', filters.wordPressConfigId);
+      }
 
       if (sort) {
         query = query.order(sort.field, { ascending: sort.ascending ?? false });
@@ -251,13 +255,13 @@ export const articlesService = {
 
       if (error) {
         console.error('記事一覧の取得に失敗しました:', error);
-        return [];
+        throw new Error('記事の検索に失敗しました。時間をおいて再度お試しください。');
       }
 
       return this.enrichArticleOwners(data.map((item: any) => this.mapFromDatabase(item)));
     } catch (err) {
       console.error('記事一覧取得エラー:', err);
-      return [];
+      throw err;
     }
   },
 
@@ -279,9 +283,7 @@ export const articlesService = {
       } else if (filters?.postState === 'unpublished') {
         query = query
           .neq('status', 'published')
-          .neq('status', 'failed')
-          .is('wordpress_post_id', null)
-          .is('wordpress_url', null);
+          .neq('status', 'failed');
       }
 
       if (filters?.category) {
@@ -306,18 +308,23 @@ export const articlesService = {
 
       const searchFilter = buildArticleSearchFilter(filters?.searchTerm, filters?.postState);
       if (searchFilter) query = query.or(searchFilter);
+      if (filters?.wordPressConfigId === 'unassigned') {
+        query = query.is('wordpress_config_id', null);
+      } else if (filters?.wordPressConfigId) {
+        query = query.eq('wordpress_config_id', filters.wordPressConfigId);
+      }
 
       const { count, error } = await query;
 
       if (error) {
         console.error('記事数の取得に失敗しました:', error);
-        return 0;
+        throw new Error('記事の検索件数を取得できませんでした。時間をおいて再度お試しください。');
       }
 
       return count || 0;
     } catch (err) {
       console.error('記事数取得エラー:', err);
-      return 0;
+      throw err;
     }
   },
 
