@@ -43,7 +43,18 @@ serve(async (request) => {
       body: JSON.stringify({ title: article.title, content: article.content, status }),
     });
     const responseBody = await response.text();
-    if (!response.ok) return json({ error: `WordPress投稿に失敗しました (${response.status}): ${responseBody.slice(0, 500)}` }, 502);
+    if (!response.ok) {
+      let errorCode: string | undefined;
+      try {
+        errorCode = JSON.parse(responseBody)?.code;
+      } catch {
+        // WordPress以外のエラーレスポンスでも、投稿失敗として扱う。
+      }
+      if (response.status === 404 && errorCode === 'rest_post_invalid_id') {
+        return json({ error: 'WordPressに投稿先の記事（下書き）が見つかりません。削除されている可能性があります。管理者にWordPressの下書きと記事の連携を確認してもらってください。' }, 404);
+      }
+      return json({ error: `WordPress投稿に失敗しました (${response.status}): ${responseBody.slice(0, 500)}` }, 502);
+    }
     const post = JSON.parse(responseBody);
     const isPublished = status === 'publish';
     const { error: updateError } = await admin.from('articles').update({

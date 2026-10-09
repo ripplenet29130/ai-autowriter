@@ -25,6 +25,14 @@ export const articleReviewService = {
   publishToWordPress: (token: string, status: 'draft' | 'publish') => {
     if (!supabase) throw new Error('データベース接続が設定されていません');
     return supabase.functions.invoke<{ postId: string; url?: string | null; status: 'draft' | 'publish' }>('review-wordpress-publish', { body: { token, status } })
-      .then(({ data, error }) => { if (error) throw error; if (!data) throw new Error('WordPress投稿結果を取得できません'); return data; });
+      .then(async ({ data, error }) => {
+        if (error) {
+          const response = error.context as Response | undefined;
+          const detail = response ? await response.clone().json().catch(() => undefined) as { error?: string } | undefined : undefined;
+          throw new Error(detail?.error || 'WordPress投稿に失敗しました。時間をおいて再度お試しください。');
+        }
+        if (!data) throw new Error('WordPress投稿結果を取得できません');
+        return data;
+      });
   },
 };
