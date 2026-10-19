@@ -285,7 +285,7 @@ class ScheduleService {
             chatwork_recipients: schedule.chatwork_recipients || [],
             chatwork_notify_on_review: schedule.chatwork_notify_on_review ?? true,
             chatwork_review_permission: schedule.chatwork_review_permission || 'edit',
-            chatwork_review_expires_days: schedule.chatwork_review_expires_days ?? 30,
+            chatwork_review_expires_days: schedule.chatwork_review_expires_days ?? 0,
             prompt_set_id: schedule.prompt_set_id || null,
             target_word_count: schedule.target_word_count,
             writing_tone: schedule.writing_tone,

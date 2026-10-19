@@ -39,7 +39,7 @@ const DEFAULT_CHATWORK_TEMPLATE = `{recipients}
 ■ 確認用リンク
 {url}
 
-リンク有効期限: {expires_days}日
+リンク有効期限: {expires_days}
 
 恐れ入りますが、本通知から7日以内にご確認・ご返信をお願いいたします。
 期日までにご返信がない場合は、内容をご承認いただいたものとして公開いたします。
@@ -115,7 +115,7 @@ export const Scheduler: React.FC = () => {
     chatwork_recipients: [] as ChatworkRecipient[],
     chatwork_notify_on_review: true,
     chatwork_review_permission: 'edit' as 'view' | 'comment' | 'edit',
-    chatwork_review_expires_days: 30,
+    chatwork_review_expires_days: 0,
     prompt_set_id: '',
     target_word_count: 2000,
     writing_tone: 'professional',
@@ -468,7 +468,7 @@ export const Scheduler: React.FC = () => {
       chatwork_recipients: schedule.chatwork_recipients || [],
       chatwork_notify_on_review: schedule.chatwork_notify_on_review ?? true,
       chatwork_review_permission: schedule.chatwork_review_permission || 'edit',
-      chatwork_review_expires_days: schedule.chatwork_review_expires_days ?? 30,
+      chatwork_review_expires_days: schedule.chatwork_review_expires_days ?? 0,
       prompt_set_id: schedule.prompt_set_id || '',
       target_word_count: Math.min(schedule.target_word_count || 2000, 3000),
       writing_tone: normalizeSharedTone(schedule.writing_tone),
@@ -573,7 +573,7 @@ export const Scheduler: React.FC = () => {
       chatwork_recipients: [],
       chatwork_notify_on_review: true,
       chatwork_review_permission: 'edit',
-      chatwork_review_expires_days: 30,
+      chatwork_review_expires_days: 0,
       prompt_set_id: '',
       target_word_count: 2000,
       writing_tone: 'professional',
@@ -1420,7 +1420,7 @@ export const Scheduler: React.FC = () => {
           <div className="space-y-2"><p className="text-sm font-medium text-gray-700">宛先担当者（複数可）</p>{formData.chatwork_recipients.map((recipient, index) => <div key={index} className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_1fr_auto]"><input value={recipient.name} onChange={(e) => setFormData({ ...formData, chatwork_recipients: formData.chatwork_recipients.map((item, itemIndex) => itemIndex === index ? { ...item, name: e.target.value } : item) })} placeholder="担当者名" className="input-field" /><input value={recipient.accountId} onChange={(e) => setFormData({ ...formData, chatwork_recipients: formData.chatwork_recipients.map((item, itemIndex) => itemIndex === index ? { ...item, accountId: e.target.value } : item) })} placeholder="ChatWorkアカウントID" className="input-field" /><button type="button" onClick={() => setFormData({ ...formData, chatwork_recipients: formData.chatwork_recipients.filter((_, itemIndex) => itemIndex !== index) })} className="btn-secondary text-red-600">削除</button></div>)}<button type="button" onClick={() => setFormData({ ...formData, chatwork_recipients: [...formData.chatwork_recipients, { name: '', accountId: '' }] })} className="text-sm font-medium text-blue-600">+ 担当者を追加</button></div>
           <div><label className="block text-sm font-medium text-gray-700 mb-1">通知本文テンプレート</label><textarea value={formData.chatwork_message_template} onChange={(e) => setFormData({ ...formData, chatwork_message_template: e.target.value })} rows={12} className="input-field font-mono text-xs" /><p className="mt-1 text-xs text-gray-500">使用できる差し込み項目: {'{title}'}（記事タイトル）、{'{keyword}'}（キーワード）、{'{url}'}（レビューURL）、{'{recipients}'}（宛先To）、{'{input}'}（設定済みのタイトル・キーワード）、{'{expires_days}'}（有効日数）。ChatWork記法も使用できます。</p></div>
           <label className="flex items-center gap-2 text-sm text-gray-700"><input type="checkbox" checked={formData.chatwork_notify_on_review} onChange={(e) => setFormData({ ...formData, chatwork_notify_on_review: e.target.checked })} />プレビュー共有リンクを送る</label>
-          {formData.chatwork_notify_on_review && <div className="grid grid-cols-1 gap-3 sm:grid-cols-2"><label className="text-sm text-gray-700">共有権限<select value={formData.chatwork_review_permission} onChange={(e) => setFormData({ ...formData, chatwork_review_permission: e.target.value as 'view' | 'comment' | 'edit' })} className="input-field mt-1"><option value="view">確認のみ</option><option value="comment">コメント可</option><option value="edit">編集・投稿可</option></select></label><label className="text-sm text-gray-700">リンク有効日数<input type="number" min="1" max="365" value={formData.chatwork_review_expires_days} onChange={(e) => setFormData({ ...formData, chatwork_review_expires_days: Math.max(1, Number(e.target.value) || 1) })} className="input-field mt-1" /></label></div>}
+          {formData.chatwork_notify_on_review && <div className="grid grid-cols-1 gap-3 sm:grid-cols-2"><label className="text-sm text-gray-700">共有権限<select value={formData.chatwork_review_permission} onChange={(e) => setFormData({ ...formData, chatwork_review_permission: e.target.value as 'view' | 'comment' | 'edit' })} className="input-field mt-1"><option value="view">確認のみ</option><option value="comment">コメント可</option><option value="edit">編集・投稿可</option></select></label><label className="text-sm text-gray-700">リンク有効日数（0は期限なし）<input type="number" min="0" max="365" value={formData.chatwork_review_expires_days} onChange={(e) => setFormData({ ...formData, chatwork_review_expires_days: Math.min(365, Math.max(0, Math.trunc(Number(e.target.value) || 0))) })} className="input-field mt-1" /></label></div>}
         </section>
 
           {/* ボタン */}

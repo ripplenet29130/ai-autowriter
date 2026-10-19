@@ -1686,12 +1686,14 @@ async function sendScheduledReviewRequest(params: {
   try {
     const token = Array.from(crypto.getRandomValues(new Uint8Array(32))).map((byte) => byte.toString(16).padStart(2, '0')).join('');
     const tokenHash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token)))).map((byte) => byte.toString(16).padStart(2, '0')).join('');
-    const expiresDays = Math.min(365, Math.max(1, Number(schedule.chatwork_review_expires_days || 30)));
+    // Zero or an omitted value means the review link has no expiry.
+    const requestedDays = Number(schedule.chatwork_review_expires_days ?? 0);
+    const expiresDays = Number.isFinite(requestedDays) ? Math.min(365, Math.max(0, Math.trunc(requestedDays))) : 0;
     const { error } = await supabase.from('article_review_links').insert({
       article_id: articleId,
       token_hash: tokenHash,
       permission: ['view', 'comment', 'edit'].includes(String(schedule.chatwork_review_permission)) ? schedule.chatwork_review_permission : 'edit',
-      expires_at: new Date(Date.now() + expiresDays * 24 * 60 * 60 * 1000).toISOString(),
+      expires_at: expiresDays === 0 ? null : new Date(Date.now() + expiresDays * 24 * 60 * 60 * 1000).toISOString(),
     });
     if (error) throw error;
 
@@ -1724,7 +1726,7 @@ async function sendScheduledReviewRequest(params: {
 ■ 確認用リンク
 {url}
 
-リンク有効期限: {expires_days}日
+リンク有効期限: {expires_days}
 
 恐れ入りますが、本通知から7日以内にご確認・ご返信をお願いいたします。
 期日までにご返信がない場合は、内容をご承認いただいたものとして公開いたします。
@@ -1734,7 +1736,8 @@ async function sendScheduledReviewRequest(params: {
     const template = String(schedule.chatwork_message_template || defaultTemplate)
       .replace(/{recipients}/g, toLines)
       .replace(/{input}/g, configuredInputLines)
-      .replace(/{expires_days}/g, String(expiresDays));
+      .replace(/{expires_days}日/g, expiresDays === 0 ? '期限なし' : `${expiresDays}日`)
+      .replace(/{expires_days}/g, expiresDays === 0 ? '期限なし' : `${expiresDays}日`);
     await sendChatworkNotifications(apiToken, roomIds, template, title, reviewUrl, keyword, 'レビュー依頼');
   } catch (error) {
     console.error('ChatWork review notification failed:', error);

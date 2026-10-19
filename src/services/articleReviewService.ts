@@ -13,7 +13,7 @@ async function invoke<T>(action: string, payload: Record<string, unknown>): Prom
   return data as T;
 }
 export const articleReviewService = {
-  createLink: (articleId: string, permission: ReviewPermission, expiresAt?: string, password?: string) => invoke<{ token: string }>('create-link', { articleId, permission, expiresAt, password }),
+  createLink: (articleId: string, permission: ReviewPermission, expiresAt?: string | null, password?: string) => invoke<{ token: string }>('create-link', { articleId, permission, expiresAt, password }),
   listLinks: (articleId: string) => invoke<{ links: Array<{ id: string; permission: ReviewPermission; expiresAt?: string | null; revokedAt?: string | null; createdAt: string }> }>('list-links', { articleId }),
   revokeLink: (linkId: string) => invoke<void>('revoke-link', { linkId }),
   getReview: (token: string, password?: string) => invoke<ReviewArticlePayload>('get-review', { token, password }),
