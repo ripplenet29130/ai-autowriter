@@ -134,3 +134,31 @@ ${reason}
   }
 }
 
+
+export async function notifyScheduleAutoPaused(
+  schedule: Schedule,
+  wpConfig: WordPressConfig,
+  chatworkApiToken: string | null,
+  reason: string
+): Promise<void> {
+  const roomIds = String(schedule.chatwork_failure_room_id || '').trim();
+  if (!chatworkApiToken || !roomIds) return;
+  const template = `[info][title]予約投稿を自動停止しました[/title]
+サイト: ${wpConfig.name}
+URL: ${wpConfig.url}
+理由: ${reason}
+新しいタイトル（またはキーワード）を追加してから、予約投稿画面でスケジュールを再開してください。[/info]`;
+  try {
+    await sendChatworkNotifications(
+      chatworkApiToken,
+      roomIds,
+      template,
+      '予約投稿を自動停止しました',
+      wpConfig.url,
+      '',
+      '停止'
+    );
+  } catch (notifyError) {
+    console.error('Schedule auto-pause notification failed:', notifyError);
+  }
+}

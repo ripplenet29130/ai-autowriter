@@ -514,7 +514,32 @@ export const Scheduler: React.FC = () => {
     }
   };
 
+  // 予約投稿で次に使えるタイトル/キーワードの残数（scheduler-executor の選択ルールと同じ）
+  const getScheduleStock = (schedule: ScheduleSetting) => {
+    const mode = (schedule as any).generation_mode || 'keyword';
+    const keywords = schedule.keyword ? schedule.keyword.split(',').map(k => k.trim()).filter(k => k) : [];
+    const titleSetId = schedule.title_set_id || (schedule as any).title_set_id;
+    const usesTitleSet = Boolean(titleSetId && (mode === 'title' || mode === 'both' || keywords.length === 0));
+    if (usesTitleSet) {
+      const titleSet = titleSets.find(s => s.id === titleSetId);
+      if (!titleSet) return null;
+      const used = new Set((schedule.id ? usedTitlesMap[schedule.id] || [] : []).map(t => String(t).trim()));
+      const remaining = titleSet.titles.filter(t => String(t).trim() && !used.has(String(t).trim())).length;
+      return { kind: 'タイトル' as const, total: titleSet.titles.length, remaining };
+    }
+    if (keywords.length === 0) return null;
+    const used = new Set(schedule.id ? usedKeywordsMap[schedule.id] || [] : []);
+    return { kind: 'キーワード' as const, total: keywords.length, remaining: keywords.filter(k => !used.has(k)).length };
+  };
+
   const handleToggleStatus = async (schedule: ScheduleSetting) => {
+    if (!schedule.status) {
+      const stock = getScheduleStock(schedule);
+      if (stock && stock.remaining === 0) {
+        toast.error(`未使用の${stock.kind}がありません。${stock.kind}を追加するか、消化済みを解除してから有効にしてください。`);
+        return;
+      }
+    }
     try {
       await scheduleService.toggleScheduleStatus(schedule.id!);
       toast.success(schedule.status ? 'スケジュールを無効にしました' : 'スケジュールを有効にしました');
@@ -1632,6 +1657,9 @@ export const Scheduler: React.FC = () => {
                 const nextRunAt = schedule.status ? getNextExecutionDate(schedule) : null;
                 const showActiveHeader = schedule.status && index === 0;
                 const showInactiveHeader = !schedule.status && index === activeSchedules.length;
+                const stock = getScheduleStock(schedule);
+                const isExhausted = Boolean(stock && stock.remaining === 0);
+                const isRunningLow = Boolean(stock && stock.remaining > 0 && stock.remaining <= 3);
 
                 return (
                   <React.Fragment key={schedule.id}>
@@ -1684,7 +1712,7 @@ export const Scheduler: React.FC = () => {
                                 : 'bg-gray-50 text-gray-500 border-gray-200'
                                 }`}
                             >
-                              {schedule.status ? 'Active' : 'Stopped'}
+                              {schedule.status ? '稼働中' : '停止中'}
                             </span>
                             <span className="text-xs text-gray-400">
                               {schedule.post_status === 'publish' ? '公開' : '下書き'}
@@ -1693,7 +1721,7 @@ export const Scheduler: React.FC = () => {
                           {/* Last Execution Time */}
                           {schedule.id && lastExecutionMap[schedule.id] && (
                             <div className="mt-1 flex items-center text-[10px] text-gray-400">
-                              <span className="font-bold mr-1">Last:</span>
+                              <span className="font-bold mr-1">前回:</span>
                               <span>{new Date(lastExecutionMap[schedule.id]!).toLocaleString('ja-JP', {
                                 month: 'numeric',
                                 day: 'numeric',
@@ -1704,7 +1732,7 @@ export const Scheduler: React.FC = () => {
                           )}
                           {schedule.status && (
                             <div className="mt-0.5 flex items-center text-[10px] text-blue-600">
-                              <span className="font-bold mr-1">Next:</span>
+                              <span className="font-bold mr-1">次回:</span>
                               <span>
                                 {nextRunAt
                                   ? nextRunAt.toLocaleString('ja-JP', {
@@ -1757,6 +1785,22 @@ export const Scheduler: React.FC = () => {
                       </div>
                     </div>
 
+                    {stock && (isExhausted || isRunningLow) && (
+                      <div
+                        className={`mb-4 flex items-start gap-2 rounded-lg border px-3 py-2 text-sm ${isExhausted
+                          ? 'border-amber-300 bg-amber-50 text-amber-800'
+                          : 'border-sky-200 bg-sky-50 text-sky-800'
+                          }`}
+                      >
+                        <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                        <span>
+                          {isExhausted
+                            ? `${stock.kind}をすべて使い切りました。${schedule.status ? '次回の実行時に自動で停止します。' : '自動停止中です。'}${stock.kind}を追加するか消化済みを解除してから有効にしてください。`
+                            : `未使用の${stock.kind}は残り ${stock.remaining} 件です。なくなると予約投稿は自動で停止します。`}
+                        </span>
+                      </div>
+                    )}
+
                     {/* Row 2: Target Site & AI Model (2 lines) */}
                     <div className="space-y-3 pt-3 border-t border-gray-100">
                       {/* Target Site */}
@@ -1765,7 +1809,7 @@ export const Scheduler: React.FC = () => {
                           <Globe className="w-4 h-4 text-blue-500" />
                         </div>
                         <div className="min-w-0 flex-1">
-                          <div className="text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-0.5">Target Site</div>
+                          <div className="text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-0.5">投稿先サイト</div>
                           <div className="text-sm font-bold text-gray-900 leading-tight whitespace-nowrap overflow-hidden text-ellipsis" title={getWordPressName(schedule.wp_config_id)}>
                             {getWordPressName(schedule.wp_config_id)}
                           </div>
@@ -1778,7 +1822,7 @@ export const Scheduler: React.FC = () => {
                           <Tag className="w-4 h-4 text-purple-500" />
                         </div>
                         <div className="min-w-0 flex-1">
-                          <div className="text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-0.5">AI Model</div>
+                          <div className="text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-0.5">AIモデル</div>
                           <div
                             className="text-sm font-bold text-gray-900 leading-tight whitespace-nowrap truncate"
                             title={getScheduleAIName(schedule)}
@@ -1793,7 +1837,7 @@ export const Scheduler: React.FC = () => {
                     <div className="mb-4 pt-4 border-t border-gray-100 flex flex-wrap gap-6">
                         {schedule.start_date && (
                           <div className="flex items-center space-x-2 text-sm">
-                            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Start Date:</span>
+                            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">開始日:</span>
                             <span className="font-semibold text-gray-700 bg-gray-50 px-2 py-0.5 rounded border border-gray-100">{schedule.start_date}</span>
                           </div>
                         )}
@@ -1814,7 +1858,7 @@ export const Scheduler: React.FC = () => {
                         )}
                         {promptSetName && (
                           <div className="flex items-center space-x-2 text-sm">
-                            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Prompt Set:</span>
+                            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">プロンプト:</span>
                             <div className="flex items-center space-x-1 text-xs text-purple-700 bg-purple-50 px-2 py-0.5 rounded border border-purple-100">
                               <MessageSquare className="w-3 h-3" />
                               <span className="font-medium">{promptSetName}</span>
@@ -1824,7 +1868,7 @@ export const Scheduler: React.FC = () => {
 
                         {/* Tone & Word Count Badge */}
                         <div className="flex items-center space-x-2 text-sm">
-                          <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Tone:</span>
+                          <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">文体:</span>
                           <span className="font-mono text-xs bg-gray-50 text-gray-600 px-2 py-0.5 rounded border border-gray-200">
                             {formatSharedTone(schedule.writing_tone)}
                           </span>

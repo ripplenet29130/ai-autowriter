@@ -624,6 +624,39 @@ export async function markStaleRunningExecutionsFailed(supabase: any): Promise<v
 }
 
 
+/**
+ * タイトル/キーワードを使い切ったスケジュールを停止する。
+ * 実際に「稼働中→停止」に切り替えた場合のみ true を返す（通知の重複防止）。
+ */
+export async function pauseExhaustedSchedule(supabase: any, scheduleId: string): Promise<boolean> {
+  try {
+    const { data, error } = await supabase
+      .from('schedule_settings')
+      .update({ status: false })
+      .eq('id', scheduleId)
+      .eq('status', true)
+      .select('id');
+    if (error) {
+      console.error(`Failed to pause exhausted schedule ${scheduleId}:`, error);
+      return false;
+    }
+    // 旧スキーマの is_active 列が残っている場合も停止させる（列が無ければ無視）
+    const { error: legacyError } = await supabase
+      .from('schedule_settings')
+      .update({ is_active: false })
+      .eq('id', scheduleId);
+    if (legacyError && !isMissingColumnError(legacyError, 'is_active')) {
+      console.warn(`Failed to clear legacy is_active for ${scheduleId}:`, legacyError);
+    }
+    const paused = Array.isArray(data) && data.length > 0;
+    if (paused) console.log(`Schedule ${scheduleId} paused automatically (exhausted).`);
+    return paused;
+  } catch (error) {
+    console.error(`Unexpected error pausing schedule ${scheduleId}:`, error);
+    return false;
+  }
+}
+
 export async function clearScheduleExecutionState(
   supabase: any,
   scheduleId: string

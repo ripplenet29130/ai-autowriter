@@ -2537,7 +2537,8 @@ export async function generateOutlineWithSharedCore(
     if (parsedFromJson.sections.length > parsedSections.length) {
       parsedSections = parsedFromJson.sections;
     }
-    resolvedTitle = parsedFromJson.title || parseOutlineTitle(text, params.keyword, params.fixedTitle || null);
+    // 固定タイトル（タイトルセット等）がある場合は AI の提案タイトルで上書きしない
+    resolvedTitle = params.fixedTitle || parsedFromJson.title || parseOutlineTitle(text, params.keyword, null);
     if (parsedSections.length === 0) {
       attemptDiagnostics.push(`attempt${attempt + 1}: parsed=0`);
       continue;
@@ -2604,7 +2605,7 @@ export async function generateOutlineWithSharedCore(
       if (rescueJson.sections.length > rescueParsed.length) {
         rescueParsed = rescueJson.sections;
       }
-      if (rescueJson.title) {
+      if (rescueJson.title && !params.fixedTitle) {
         resolvedTitle = rescueJson.title;
       }
       if (rescueParsed.length > 0) {

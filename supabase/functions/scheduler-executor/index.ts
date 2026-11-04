@@ -25,13 +25,13 @@ import {
 
 import { corsHeaders, parseBoolean, fetchWithTimeout, AiOutputTruncatedError, KeywordExhaustedError, isKeywordExhaustedError, getCurrentJstDate, parseJstDate, isWithinScheduleDateRange, normalizeAiConfig, resolveWritingTone, normalizeWhitespace, trimForLog, getFirstScheduleKeyword, AI_REQUEST_TIMEOUT_MS, SCHEDULE_EXECUTION_LOCK_TTL_SECONDS, type AIConfig, type Schedule, type WordPressConfig, type ScheduleExecutionLock, type ArticleOutline, type OutlineSection, type WritingTone } from './_shared.ts';
 import { identifySchedulerCaller, authorizeSchedulerRequest, type SchedulerCaller } from './_auth.ts';
-import { acquireScheduleExecutionLock, releaseScheduleExecutionLock, acquireScheduleExecutionLockWithScheduleRow, createExecutionProgressHistory, updateExecutionProgressHistory, shouldExecuteNow, wasExecutedWithinMinutes, countExecutionsForWpConfigWithinMinutes, getLastAutomaticExecutionForCadence, markStaleRunningExecutionsFailed, clearScheduleExecutionState, recordScheduleExecutionFailure, recordForceExecutionSkippedByLock, formatScheduleFailureReason, isPublishFailureAlreadyRecorded, isMissingColumnError, isMissingUpdatedAtColumn } from './_execution-state.ts';
+import { pauseExhaustedSchedule, acquireScheduleExecutionLock, releaseScheduleExecutionLock, acquireScheduleExecutionLockWithScheduleRow, createExecutionProgressHistory, updateExecutionProgressHistory, shouldExecuteNow, wasExecutedWithinMinutes, countExecutionsForWpConfigWithinMinutes, getLastAutomaticExecutionForCadence, markStaleRunningExecutionsFailed, clearScheduleExecutionState, recordScheduleExecutionFailure, recordForceExecutionSkippedByLock, formatScheduleFailureReason, isPublishFailureAlreadyRecorded, isMissingColumnError, isMissingUpdatedAtColumn } from './_execution-state.ts';
 import { callAI, resolveAiModelRate, estimateExecutionCostBreakdown, fetchStyleReferenceSample, buildStyleReferenceInstructions, truncateForStyleReference, generateTitleWithAI } from './_ai.ts';
 import { conductCompetitorResearch, conductCompetitorResearchWithFallback, conductCompetitorResearchViaEdgeFunction, extractRelatedKeywordsFromCompetitorData, extractCompetitorHeadings, fetchRelatedKeywordsViaCustomSearch } from './_research.ts';
 import { formatContentForWordPress, normalizeGeneratedContentForPublishing, extractExcerpt, inferLengthCategory, countNonSummaryHeadings, findHeadingOnlySections, summarizeFactCheckContentChanges } from './_content-format.ts';
 import { publishToWordPress, publishViaXmlRpc, getTermIdBySlugOrName, getCategoryIdBySlugOrName, getTaxonomyCandidatesForPostType, resolveTermAssignmentForPostType, isPermissionRelatedWpError } from './_wordpress.ts';
 import { generateSchedulerArticleSectioned, generateSchedulerArticleSinglePass, formatOutlineForSinglePass, validateGeneratedArticleCompleteness, compactArticleToTargetLength } from './_generation.ts';
-import { sendChatworkNotifications, notifyScheduleExecutionFailure } from './_notifications.ts';
+import { sendChatworkNotifications, notifyScheduleExecutionFailure, notifyScheduleAutoPaused } from './_notifications.ts';
 
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
@@ -484,8 +484,17 @@ Deno.serve(async (req: Request) => {
             executedWpConfigIds.add(wpConfig.id);
           } catch (error: any) {
             if (isKeywordExhaustedError(error)) {
-              console.log(`Skipping schedule ${scheduleSetting.id}: ${error.message}`);
+              console.log(`Pausing schedule ${scheduleSetting.id}: ${error.message}`);
               stats.skipped += 1;
+              const paused = await pauseExhaustedSchedule(supabase, scheduleSetting.id);
+              if (paused) {
+                await notifyScheduleAutoPaused(
+                  effectiveScheduleSetting,
+                  wpConfig,
+                  accountChatworkApiToken,
+                  error.message
+                );
+              }
             } else {
               console.error(`Failed to execute schedule for ${wpConfig.name}:`, error);
               await recordScheduleExecutionFailure(
@@ -606,8 +615,10 @@ async function executeSchedule(
         keyword = selectedTitle; // 驛｢・ｧ繝ｻ・ｿ驛｢・ｧ繝ｻ・､驛｢譎冗樟・取刮・ｹ・ｧ陋幢ｽｵ・朱豪・ｹ・ｧ繝ｻ・､驛｢譎｢・ｽ・ｳ驛｢・ｧ繝ｻ・ｭ驛｢譎｢・ｽ・ｼ驛｢譎｢・ｽ・ｯ驛｢譎｢・ｽ・ｼ驛｢譎擾ｽｳ・ｨ遶雁､・ｸ・ｺ陷会ｽｱ遯ｶ・ｻ髫ｰ繝ｻ・ｽ・ｱ驍ｵ・ｺ郢晢ｽｻ
         console.log(`Title selected: ${fixedTitle}`);
       } else {
-        throw new Error('All titles in this title set have already been used.');
+        throw new KeywordExhaustedError('タイトルセットのタイトルをすべて使い切りました。');
       }
+    } else if (titleSet) {
+      throw new KeywordExhaustedError('タイトルセットにタイトルが登録されていません。');
     } else {
       throw new Error('Title set is empty or not found.');
     }
@@ -1022,7 +1033,8 @@ async function executeSchedule(
 
   let fullContent = generationResult.fullContent;
   const baseGeneratedContent = generationResult.fullContent;
-  const articleTitle = outline.title;
+  // タイトルセットの使用済み判定は execution_history.article_title で行うため、決定済みタイトルを優先する
+  const articleTitle = fixedTitle || outline.title;
 
   console.log('Word count check:', {
     target: targetWordCount,
@@ -1594,13 +1606,16 @@ async function selectUnusedTitle(
     .eq('schedule_id', scheduleId);
 
   // 髯橸ｽｳ隰疲ｺ倥・驍ｵ・ｺ繝ｻ・ｫ髣包ｽｳ・つ鬮｢・ｾ繝ｻ・ｴ驍ｵ・ｺ陷ｷ・ｶ繝ｻ迢暦ｽｹ・ｧ繝ｻ・ｿ驛｢・ｧ繝ｻ・､驛｢譎冗樟・取刮・ｹ・ｧ陝ｶ譎乗ｱる辨貅倥・
-  const usedTitles = new Set((history || []).map((h: any) => h.article_title));
-  const availableTitles = allTitles.filter(t => !usedTitles.has(t));
+  const normalize = (value: unknown) => String(value || '').trim();
+  const usedTitles = new Set((history || []).map((h: any) => normalize(h.article_title)));
+  const availableTitles = allTitles
+    .map(normalize)
+    .filter((t) => t && !usedTitles.has(t));
 
+  // 使い切ったら先頭に戻さず停止する（同じタイトルの重複投稿を防ぐ）
   if (availableTitles.length === 0) {
-    console.log('All titles used, resetting list');
-    if (allTitles.length === 0) return null;
-    return allTitles[0];
+    console.log(`All titles used for schedule ${scheduleId}. Schedule will be paused.`);
+    return null;
   }
 
   // 郢晢ｽｪ郢ｧ・ｹ郢晉｣ｯ・ｰ繝ｻ 隴幢ｽｪ闖ｴ・ｿ騾包ｽｨ邵ｺ・ｮ陷育｣ｯ・ｰ・ｭ郢ｧ蟶昶・邵ｺ・ｶ
