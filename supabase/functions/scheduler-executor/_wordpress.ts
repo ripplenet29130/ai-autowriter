@@ -1,6 +1,8 @@
 // WordPress への投稿（REST / XML-RPC）とタクソノミー解決
 import { fetchWithTimeout, type WordPressConfig } from './_shared.ts';
 import { extractExcerpt, formatContentForWordPress } from './_content-format.ts';
+import { resolveXmlRpcEndpoint } from '../_shared/wp-xmlrpc-endpoint.ts';
+import { wpBasicAuthHeaders } from '../_shared/wp-auth.ts';
 
 export async function getTermIdBySlugOrName(
   config: WordPressConfig,
@@ -13,7 +15,7 @@ export async function getTermIdBySlugOrName(
     // 驍ｵ・ｺ繝ｻ・ｾ驍ｵ・ｺ陞｢・ｹ邵ｺ蟶ｷ・ｹ譎｢・ｽ・ｩ驛｢譏ｴ繝ｻ邵ｺ蝣､・ｸ・ｺ繝ｻ・ｧ髫ｶﾂ隲帙・・ｽ・ｴ繝ｻ・｢
     let response = await fetch(
       `${config.url}/wp-json/wp/v2/${restBase}?slug=${encodeURIComponent(categoryIdentifier)}`,
-      { headers: { 'Authorization': `Basic ${auth}` } }
+      { headers: { ...wpBasicAuthHeaders(auth) } }
     );
 
     if (response.ok) {
@@ -27,7 +29,7 @@ export async function getTermIdBySlugOrName(
     // 驛｢・ｧ繝ｻ・ｹ驛｢譎｢・ｽ・ｩ驛｢譏ｴ繝ｻ邵ｺ蝣､・ｸ・ｺ繝ｻ・ｧ鬮ｫ遨ゑｽｹ譏ｶ蜻ｽ驍ｵ・ｺ闕ｵ譎｢・ｽ閾･・ｸ・ｺ繝ｻ・ｪ驍ｵ・ｺ闔会ｽ｣繝ｻ讙趣ｽｸ・ｺ繝ｻ・ｰ髯ｷ・ｷ隶朱｡披・驍ｵ・ｺ繝ｻ・ｧ髫ｶﾂ隲帙・・ｽ・ｴ繝ｻ・｢
     response = await fetch(
       `${config.url}/wp-json/wp/v2/${restBase}?search=${encodeURIComponent(categoryIdentifier)}`,
-      { headers: { 'Authorization': `Basic ${auth}` } }
+      { headers: { ...wpBasicAuthHeaders(auth) } }
     );
 
     if (response.ok) {
@@ -177,7 +179,7 @@ export async function publishViaXmlRpc(
   });
 
   try {
-    const response = await fetch(`${config.url}/xmlrpc.php`, {
+    const response = await fetch(await resolveXmlRpcEndpoint(config.url), {
       method: 'POST',
       headers: { 'Content-Type': 'text/xml' },
       body,
@@ -241,7 +243,7 @@ export async function publishToWordPress(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Basic ${auth}`
+        ...wpBasicAuthHeaders(auth)
       },
       body: requestBody
     });
@@ -308,7 +310,7 @@ export async function getTaxonomyCandidatesForPostType(
       `${config.url}/wp-json/wp/v2/${postType}`,
       {
         method: 'OPTIONS',
-        headers: { 'Authorization': `Basic ${auth}` }
+        headers: { ...wpBasicAuthHeaders(auth) }
       }
     );
     if (optionsResponse.ok) {
@@ -337,7 +339,7 @@ export async function getTaxonomyCandidatesForPostType(
   try {
     const response = await fetch(
       `${config.url}/wp-json/wp/v2/taxonomies?type=${encodeURIComponent(postType)}`,
-      { headers: { 'Authorization': `Basic ${auth}` } }
+      { headers: { ...wpBasicAuthHeaders(auth) } }
     );
     if (!response.ok) return candidates;
 
@@ -358,7 +360,7 @@ export async function getTaxonomyCandidatesForPostType(
   try {
     const response = await fetch(
       `${config.url}/wp-json/wp/v2/taxonomies`,
-      { headers: { 'Authorization': `Basic ${auth}` } }
+      { headers: { ...wpBasicAuthHeaders(auth) } }
     );
     if (response.ok) {
       const taxonomies = await response.json();

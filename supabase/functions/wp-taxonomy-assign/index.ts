@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { corsHeaders } from "../_shared/cors.ts";
+import { resolveXmlRpcEndpoint } from "../_shared/wp-xmlrpc-endpoint.ts";
 
 type AssignTaxonomyRequest = {
   url?: string;
@@ -120,7 +121,7 @@ serve(async (req) => {
       term,
     });
 
-    const endpoint = `${url}/xmlrpc.php`;
+    const endpoint = await resolveXmlRpcEndpoint(url);
     const upstream = await fetch(endpoint, {
       method: "POST",
       headers: { "Content-Type": "text/xml" },

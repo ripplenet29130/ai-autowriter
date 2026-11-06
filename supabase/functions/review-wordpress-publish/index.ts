@@ -1,5 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
+import { wpBasicAuthHeaders } from '../_shared/wp-auth.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -39,7 +40,7 @@ serve(async (request) => {
     const auth = btoa(`${config.username}:${config.password}`);
     const response = await fetch(endpoint, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Basic ${auth}` },
+      headers: { 'Content-Type': 'application/json', ...wpBasicAuthHeaders(auth) },
       body: JSON.stringify({ title: article.title, content: article.content, status }),
     });
     const responseBody = await response.text();

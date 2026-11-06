@@ -2,6 +2,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { corsHeaders } from "../_shared/cors.ts";
 import { checkCredentialsViaXmlRpc } from "./_xmlrpc.ts";
+import { wpBasicAuthHeaders } from "../_shared/wp-auth.ts";
 
 type ConnectionTestRequest = {
   wordpress_config_id?: string;
@@ -113,7 +114,7 @@ serve(async (req) => {
     const response = await fetch(endpoint, {
       method: "GET",
       headers: {
-        Authorization: `Basic ${encodeBasicAuth(`${wpConfig.username}:${wpConfig.password}`)}`,
+        ...wpBasicAuthHeaders(encodeBasicAuth(`${wpConfig.username}:${wpConfig.password}`)),
         Accept: "application/json",
         "User-Agent": "AutomaticWriter-WordPress-Connection-Test/1.0",
       },
@@ -156,9 +157,13 @@ serve(async (req) => {
           details: xmlRpc.message,
         });
       }
+      // 「ログインしていません」は認証情報がWordPressに届いていない（サーバーが捨てている）サイン
+      const headerHint = failure.code === "rest_not_logged_in"
+        ? " サーバーがログイン情報を捨てている可能性があります。WordPressの子テーマの functions.php に認証用の予備ヘッダー対応コードを追加してください。"
+        : "";
       return json({
         ...failure,
-        message: `${failure.message} XML-RPCでも確認できませんでした: ${stripHtml(xmlRpc.message)}`,
+        message: `${failure.message} XML-RPCでも確認できませんでした: ${stripHtml(xmlRpc.message)}${headerHint}`,
       });
     }
 

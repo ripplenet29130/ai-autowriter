@@ -2,6 +2,8 @@
 // サーバーが Authorization ヘッダーを捨てるサイトでは REST API で認証できないが、
 // 投稿処理（scheduler-executor）は XML-RPC に切り替えて投稿する。接続テストも同じ経路で確認する。
 
+import { resolveXmlRpcEndpoint } from "../_shared/wp-xmlrpc-endpoint.ts";
+
 export type XmlRpcCheckResult =
   | { ok: true }
   | { ok: false; reason: "auth_failed" | "disabled" | "unavailable" | "timeout" | "network_error"; message: string };
@@ -54,7 +56,8 @@ export async function checkCredentialsViaXmlRpc(
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const response = await fetchImpl(`${baseUrl.replace(/\/+$/, "")}/xmlrpc.php`, {
+    const endpoint = await resolveXmlRpcEndpoint(baseUrl, fetchImpl);
+    const response = await fetchImpl(endpoint, {
       method: "POST",
       headers: {
         "Content-Type": "text/xml; charset=UTF-8",
