@@ -40,25 +40,37 @@ export const WordPressConfigComponent: React.FC = () => {
     setIsSubmitting(true);
     try {
       const category = String(configData.category || configData.defaultCategory || '').trim();
-      const validationService = new WordPressService({
-        ...configData,
-        id: editingConfig?.id || 'wordpress-validation',
-        defaultCategory: category,
-      });
-      const validationResult = await validationService.validatePostTypeAndCategory(
-        category,
-        configData.postType || 'posts'
-      );
-      if (!validationResult.success) {
-        throw new Error(validationResult.message);
+      const postType = String(configData.postType || 'posts').trim() || 'posts';
+
+      // 編集時にURL・投稿タイプ・カテゴリーが変わっていなければ、REST APIでの確認は不要。
+      // REST APIに投稿タイプを公開していないサイト（XML-RPCで投稿しているサイト）でも、
+      // パスワードの変更などを保存できるようにする。
+      const isTargetUnchanged = Boolean(editingConfig) &&
+        String(editingConfig?.url || '').trim().replace(/\/+$/, '') === String(configData.url || '').trim().replace(/\/+$/, '') &&
+        (String(editingConfig?.postType || 'posts').trim() || 'posts') === postType &&
+        String(editingConfig?.category || editingConfig?.defaultCategory || '').trim() === category;
+
+      let validatedPostType = postType;
+      if (!isTargetUnchanged) {
+        const validationService = new WordPressService({
+          ...configData,
+          id: editingConfig?.id || 'wordpress-validation',
+          defaultCategory: category,
+        });
+        const validationResult = await validationService.validatePostTypeAndCategory(category, postType);
+        if (!validationResult.success) {
+          throw new Error(validationResult.message);
+        }
+        validatedPostType = validationResult.postTypeRestBase || postType;
+        toast.success(validationResult.message);
       }
+
       const validatedConfigData = {
         ...configData,
         category,
         defaultCategory: category,
-        postType: validationResult.postTypeRestBase || configData.postType || 'posts',
+        postType: validatedPostType,
       };
-      toast.success(validationResult.message);
 
       if (editingConfig) {
         await updateConfig(editingConfig.id, validatedConfigData);

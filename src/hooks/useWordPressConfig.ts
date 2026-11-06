@@ -28,7 +28,7 @@ export function useWordPressConfig() {
             const result = await service.testConnection();
 
             if (result.success) {
-                toast.success(`${config.name}への接続に成功しました`);
+                toast.success(result.message || `${config.name}への接続に成功しました`, { duration: 6000 });
                 wpLogger.info(`接続成功: ${config.name}`);
                 return true;
             } else {

@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { corsHeaders } from "../_shared/cors.ts";
+import { checkCredentialsViaXmlRpc } from "./_xmlrpc.ts";
 
 type ConnectionTestRequest = {
   wordpress_config_id?: string;
@@ -87,7 +88,11 @@ serve(async (req) => {
   const baseUrl = String(wpConfig.url ?? "").replace(/\/+$/, "");
   let endpoint: string;
   try {
-    const endpointUrl = new URL(`${baseUrl}/wp-json/wp/v2/posts?per_page=1`);
+    // `/wp/v2/posts` permits unauthenticated reads on normal WordPress sites,
+    // so it cannot prove that the saved application password is valid.
+    // `users/me` requires authentication and is therefore safe for a
+    // read-only credential check.
+    const endpointUrl = new URL(`${baseUrl}/wp-json/wp/v2/users/me?context=edit`);
     if (!["http:", "https:"].includes(endpointUrl.protocol)) {
       throw new Error("Unsupported protocol");
     }
@@ -123,11 +128,41 @@ serve(async (req) => {
       return json({
         success: true,
         status: response.status,
-        message: `${wpConfig.name}への接続に成功しました。`,
+        message: `${wpConfig.name}への認証と接続に成功しました。`,
       });
     }
 
-    return json(buildFailureResult(response.status, responseBody, responseText));
+    const failure = buildFailureResult(response.status, responseBody, responseText);
+
+    // サーバーが Authorization ヘッダーを捨てるサイトなどでは REST API で認証できないが、
+    // 投稿処理はこの場合 XML-RPC に切り替えて投稿する。接続テストも同じ経路で確認する。
+    if (shouldTryXmlRpc(response.status, failure.code)) {
+      const xmlRpc = await checkCredentialsViaXmlRpc(baseUrl, wpConfig.username, wpConfig.password);
+      if (xmlRpc.ok) {
+        return json({
+          success: true,
+          status: 200,
+          code: "xmlrpc_ok",
+          message: `${wpConfig.name}への認証と接続に成功しました（XML-RPC経由）。このサイトはREST APIで認証できない設定のため、投稿はXML-RPCで行われます。`,
+          details: failure.details,
+        });
+      }
+      if (xmlRpc.reason === "auth_failed") {
+        return json({
+          success: false,
+          status: response.status,
+          code: "xmlrpc_auth_failed",
+          message: "認証に失敗しました。WordPressのユーザー名とアプリケーションパスワードを確認してください。",
+          details: xmlRpc.message,
+        });
+      }
+      return json({
+        ...failure,
+        message: `${failure.message} XML-RPCでも確認できませんでした: ${stripHtml(xmlRpc.message)}`,
+      });
+    }
+
+    return json(failure);
   } catch (error) {
     const isTimeout = error instanceof DOMException && error.name === "AbortError";
     return json({
@@ -174,6 +209,11 @@ function buildFailureResult(status: number, body: WordPressErrorBody | null, raw
     message,
     details: remoteMessage || rawBody.slice(0, 500) || undefined,
   };
+}
+
+// scheduler-executor の XML-RPC 切り替え条件（isPermissionRelatedWpError）に合わせる
+function shouldTryXmlRpc(status: number, code: string): boolean {
+  return status === 401 || ["rest_not_logged_in", "rest_forbidden"].includes(code);
 }
 
 function parseWordPressBody(value: string): WordPressErrorBody | null {
