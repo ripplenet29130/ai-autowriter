@@ -1,6 +1,7 @@
 import { supabase } from './supabaseClient';
 import { ScheduleSetting } from '../types';
 import { getCurrentAccountId, getRequiredAccountId, getRequiredUserId, scopeMutationToCurrentUser, scopeQueryToCurrentUser } from './accountScope';
+import { summarizeTitleUsage, TITLE_USAGE_SELECT } from '../shared/titleUsage';
 
 class ScheduleService {
     private readonly maxSchemaRetryCount = 48;
@@ -25,6 +26,8 @@ class ScheduleService {
         'fact_check_alert_chatwork_room_id',
         'fact_check_notify_on_anomaly',
         'fact_check_notify_on_every_run',
+        'quality_mode',
+        'append_references',
     ] as const;
 
     private isMissingTableError(error: any, tableName: string): boolean {
@@ -300,6 +303,8 @@ class ScheduleService {
             fact_check_notify_on_every_run: schedule.fact_check_notify_on_every_run ?? false,
             image_generation_enabled: schedule.image_generation_enabled ?? false,
             images_per_article: schedule.images_per_article ?? 0,
+            quality_mode: schedule.quality_mode || 'high',
+            append_references: schedule.append_references ?? true,
         };
 
         const maxRetries = Math.max(this.maxSchemaRetryCount, Object.keys(insertPayload).length + 2);
@@ -633,7 +638,7 @@ class ScheduleService {
 
         const { data, error } = await scopeQueryToCurrentUser(supabase
             .from('execution_history')
-            .select('article_title')
+            .select(TITLE_USAGE_SELECT)
             .eq('schedule_id', scheduleId)
             .eq('account_id', getRequiredAccountId()));
 
@@ -642,7 +647,8 @@ class ScheduleService {
             return [];
         }
 
-        return (data || []).map((item: any) => item.article_title);
+        // 失敗した実行ではタイトルを消費しない（予約投稿の実行側と同じルール）
+        return Array.from(summarizeTitleUsage((data || []) as any[]).used);
     }
 
     async restoreTitle(scheduleId: string, title: string): Promise<void> {
@@ -681,6 +687,8 @@ class ScheduleService {
             .eq('schedule_id', scheduleId)
             .eq('account_id', accountId)
             .eq('article_title', normalized)
+            // 失敗履歴だけでは使用済みにならないので、それ以外の履歴があるかを見る
+            .neq('status', 'failed')
             .limit(1));
 
         if (existingError) {

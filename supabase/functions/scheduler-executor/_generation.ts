@@ -23,6 +23,17 @@ import {
 } from './_shared.ts';
 import { callAI } from './_ai.ts';
 import {
+  buildArticleFactInstructions,
+  buildSectionFactInstructions,
+  hasUsableFacts,
+  type FactSheet,
+} from '../../../src/shared/factSheetCore.ts';
+import { mapWithConcurrency } from '../../../src/shared/geminiCore.ts';
+
+// 執筆モデル（Pro）の思考上限
+export const WRITER_THINKING_BUDGET = 1024;
+const WRITER_OPTIONS = { role: 'writer' as const, thinkingBudget: WRITER_THINKING_BUDGET };
+import {
   countNonSummaryHeadings,
   extractHeadingText,
   findHeadingOnlySections,
@@ -180,10 +191,12 @@ export async function generateSchedulerArticleSinglePass(params: {
   targetWordCount: number;
   customInstructions?: string;
   aiConfig: AIConfig;
+  factSheet?: FactSheet | null;
 }): Promise<{ sectionsWithContent: any[]; fullContent: string; wordCount: number }> {
   const outlineText = formatOutlineForSinglePass(params.outline);
   const keywordLine = buildKeywordLine(params.keyword, params.keywords);
   const toneInstruction = buildToneInstruction(params.tone);
+  const factInstructions = buildArticleFactInstructions(params.factSheet);
   const hardMaxChars = Math.round(params.targetWordCount * 1.2);
   const hardMinChars = Math.round(params.targetWordCount * 0.85);
   const prompt = [
@@ -214,6 +227,7 @@ export async function generateSchedulerArticleSinglePass(params: {
     outlineText,
     '',
     params.customInstructions ? `Additional instructions:\n${params.customInstructions}` : '',
+    factInstructions ? `\n${factInstructions}` : '',
   ].filter(Boolean).join('\n');
 
   const maxTokens = Math.min(
@@ -223,14 +237,14 @@ export async function generateSchedulerArticleSinglePass(params: {
 
   let rawText: string;
   try {
-    rawText = await callAI(prompt, params.aiConfig, maxTokens);
+    rawText = await callAI(prompt, params.aiConfig, maxTokens, WRITER_OPTIONS);
   } catch (firstError: any) {
     if (firstError?.partialText && typeof firstError.partialText === 'string') {
       // Gemini hit maxOutputTokens — retry with a higher limit before giving up
       const retryMaxTokens = Math.min(16000, maxTokens * 2);
       console.warn(`[singlepass] Gemini hit maxOutputTokens (${maxTokens}), retrying with ${retryMaxTokens}`);
       try {
-        rawText = await callAI(prompt, params.aiConfig, retryMaxTokens);
+        rawText = await callAI(prompt, params.aiConfig, retryMaxTokens, WRITER_OPTIONS);
       } catch (retryError: any) {
         // Both attempts hit the limit — use whichever partial text is longer
         const partial1 = typeof firstError.partialText === 'string' ? firstError.partialText : '';
@@ -278,7 +292,7 @@ export async function generateSchedulerArticleSinglePass(params: {
     const retryMaxTokens = Math.min(16000, Math.ceil(maxTokens * 1.5));
     console.warn(`[singlepass] Article validation failed; retrying with stricter body instructions: ${message}`);
 
-    const retryText = await callAI(retryPrompt, params.aiConfig, retryMaxTokens);
+    const retryText = await callAI(retryPrompt, params.aiConfig, retryMaxTokens, WRITER_OPTIONS);
     fullContent = formatArticleBodyForReadability(String(retryText || '').trim());
     if (!fullContent) {
       throw validationError;
@@ -303,9 +317,10 @@ function stripModelHeadings(text: string): string {
     .trim();
 }
 
-// セクション分割生成。各セクションを個別の AI 呼び出しで書き、
-// 文脈は「アウトライン全体 + 執筆済み見出し一覧 + 直前セクションの末尾」に圧縮して渡す
-// （全文を毎回渡す方式に比べて入力トークンを大幅に抑える）。
+// セクション分割生成。各セクションを個別の AI 呼び出しで書く。
+// - H2 とその下の H3 を 1 つのグループにし、グループ単位で並列に書く（parallelism > 1 のとき）
+// - グループ内は順番に書き、直前セクションの末尾を渡してつながりを保つ
+// - 根拠メモがあれば、見出しごとに割り当てた事実だけを渡す
 export async function generateSchedulerArticleSectioned(params: {
   outline: ArticleOutline;
   keyword: string;
@@ -314,6 +329,10 @@ export async function generateSchedulerArticleSectioned(params: {
   targetWordCount: number;
   customInstructions?: string;
   aiConfig: AIConfig;
+  factSheet?: FactSheet | null;
+  // outline.sections と同じ並びの、見出しごとに使う根拠メモの番号
+  sectionFactIds?: string[][];
+  parallelism?: number;
 }): Promise<{ sectionsWithContent: any[]; fullContent: string; wordCount: number }> {
   const sections = params.outline.sections || [];
   if (sections.length === 0) {
@@ -323,6 +342,8 @@ export async function generateSchedulerArticleSectioned(params: {
   const outlineText = formatOutlineForSinglePass(params.outline);
   const keywordLine = buildKeywordLine(params.keyword, params.keywords);
   const toneInstruction = buildToneInstruction(params.tone);
+  const parallelism = Math.max(1, params.parallelism ?? 1);
+  const useFacts = hasUsableFacts(params.factSheet);
 
   // 文字数配分: アウトラインの estimatedWordCount 比率で配分し、無ければ均等割り
   const totalEstimated = sections.reduce((sum, s) => sum + (Number(s.estimatedWordCount) || 0), 0);
@@ -334,16 +355,20 @@ export async function generateSchedulerArticleSectioned(params: {
     return Math.min(900, Math.max(150, raw));
   };
 
-  const hasLead = sections.some((s) => s.isLead);
-  const steps: Array<{ section: OutlineSection | null; isLead: boolean }> = [];
-  if (!hasLead) steps.push({ section: null, isLead: true });
-  for (const section of sections) steps.push({ section, isLead: section.isLead });
+  type Step = { section: OutlineSection | null; isLead: boolean; sectionIndex: number };
+  const steps: Step[] = [];
+  if (!sections.some((s) => s.isLead)) steps.push({ section: null, isLead: true, sectionIndex: -1 });
+  sections.forEach((section, index) => steps.push({ section, isLead: section.isLead, sectionIndex: index }));
 
-  const parts: string[] = [];
-  const writtenHeadings: string[] = [];
-  let previousTail = '';
-
+  // グループ分け: リード（最初の H2 より前）/ H2 ごと（直後の H3 を含む）
+  const groups: Step[][] = [];
   for (const step of steps) {
+    const startsGroup = groups.length === 0 || (!step.isLead && step.section?.level !== 3);
+    if (startsGroup) groups.push([step]);
+    else groups[groups.length - 1].push(step);
+  }
+
+  const writeStep = async (step: Step, previousTail: string, writtenHeadings: string[]): Promise<string> => {
     const section = step.section;
     const budget = section
       ? budgetFor(section)
@@ -367,6 +392,9 @@ export async function generateSchedulerArticleSectioned(params: {
         : '',
     ].filter(Boolean).join('\n\n');
 
+    const factIds = step.sectionIndex >= 0 ? (params.sectionFactIds?.[step.sectionIndex] || []) : [];
+    const factInstructions = useFacts ? buildSectionFactInstructions(params.factSheet, factIds) : '';
+
     const prompt = [
       'You are writing ONE part of a longer Japanese article. The other parts are written separately.',
       '',
@@ -387,15 +415,17 @@ export async function generateSchedulerArticleSectioned(params: {
       '- 2-4 short sentences per paragraph. Separate paragraphs with one blank line.',
       '- Prefer clear, short Japanese sentences. Explain technical terms briefly for general readers.',
       '- Do not summarize the entire article here unless this section is the closing summary.',
+      '- Do not explain content that clearly belongs to another heading in the outline.',
       '- Avoid unfinished sentences and placeholder text.',
       params.customInstructions ? `\nAdditional instructions:\n${params.customInstructions}` : '',
+      factInstructions ? `\n${factInstructions}` : '',
     ].filter(Boolean).join('\n');
 
     const maxTokens = Math.min(4000, Math.max(600, Math.ceil(maxChars * 2.5)));
 
     let rawText: string;
     try {
-      rawText = await callAI(prompt, params.aiConfig, maxTokens);
+      rawText = await callAI(prompt, params.aiConfig, maxTokens, WRITER_OPTIONS);
     } catch (error: any) {
       const partial = typeof error?.partialText === 'string' ? error.partialText : '';
       if (countGeneratedChars(partial) >= Math.max(120, Math.round(minChars * 0.6))) {
@@ -403,7 +433,7 @@ export async function generateSchedulerArticleSectioned(params: {
         rawText = partial;
       } else {
         // 一度だけトークン上限を引き上げて再試行。ここで失敗すれば呼び出し元がシングルパスへフォールバックする
-        rawText = await callAI(prompt, params.aiConfig, Math.min(6000, maxTokens * 2));
+        rawText = await callAI(prompt, params.aiConfig, Math.min(6000, maxTokens * 2), WRITER_OPTIONS);
       }
     }
 
@@ -411,20 +441,32 @@ export async function generateSchedulerArticleSectioned(params: {
     if (!text) {
       throw new Error(`Sectioned generation returned empty content for "${section?.title ?? 'lead'}"`);
     }
+    return text;
+  };
 
-    if (step.isLead || !section) {
-      parts.push(text);
-      writtenHeadings.push('(リード文)');
-    } else {
-      const headingPrefix = section.level === 3 ? '###' : '##';
-      parts.push(`${headingPrefix} ${section.title}\n\n${text}`);
-      writtenHeadings.push(section.title);
+  // 並列のときは他グループの執筆済み見出しを共有できないため、グループ内の分だけ渡す。
+  // 並列でなければ全体を 1 グループとして、これまでどおり順番に書く。
+  const writingGroups = parallelism > 1 ? groups : [steps];
+  const groupOutputs = await mapWithConcurrency(writingGroups, parallelism, async (group) => {
+    const parts: string[] = [];
+    const writtenHeadings: string[] = [];
+    let previousTail = '';
+    for (const step of group) {
+      const text = await writeStep(step, previousTail, writtenHeadings);
+      if (step.isLead || !step.section) {
+        parts.push(text);
+        writtenHeadings.push('(リード文)');
+      } else {
+        const headingPrefix = step.section.level === 3 ? '###' : '##';
+        parts.push(`${headingPrefix} ${step.section.title}\n\n${text}`);
+        writtenHeadings.push(step.section.title);
+      }
+      previousTail = text.replace(/\s+/g, ' ').trim().slice(-160);
     }
+    return parts.join('\n\n');
+  });
 
-    previousTail = text.replace(/\s+/g, ' ').trim().slice(-160);
-  }
-
-  const fullContent = formatArticleBodyForReadability(parts.join('\n\n'));
+  const fullContent = formatArticleBodyForReadability(groupOutputs.join('\n\n'));
   if (!fullContent) {
     throw new Error('Sectioned article generation returned empty content');
   }

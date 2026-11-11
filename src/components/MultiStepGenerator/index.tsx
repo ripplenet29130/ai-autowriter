@@ -62,6 +62,9 @@ export const MultiStepGenerator: React.FC<MultiStepGeneratorProps> = ({
     keywordPreferences,
     toggleKeywordPreference,
     addKeywordPreference,
+    toggleFactExclusion,
+    rebuildFactSheet,
+    isRebuildingFactSheet,
   } = useMultiStepGeneration();
 
   const [hasStarted, setHasStarted] = useState(false);
@@ -185,6 +188,9 @@ export const MultiStepGenerator: React.FC<MultiStepGeneratorProps> = ({
             keywordPreferences={keywordPreferences}
             onKeywordToggle={toggleKeywordPreference}
             onAddKeyword={addKeywordPreference}
+            onToggleFact={toggleFactExclusion}
+            onRebuildFactSheet={() => void rebuildFactSheet()}
+            isRebuildingFactSheet={isRebuildingFactSheet}
           />
         );
       case 2:

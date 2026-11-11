@@ -61,6 +61,40 @@ export function useMultiStepGeneration() {
     }, []);
 
     /**
+     * 根拠メモで本文に使わない事実を切り替える
+     */
+    const toggleFactExclusion = useCallback((factId: string) => {
+        setState(prev => {
+            if (!prev.trendData) return prev;
+            const excluded = new Set(prev.trendData.excludedFactIds || []);
+            if (excluded.has(factId)) excluded.delete(factId);
+            else excluded.add(factId);
+            return { ...prev, trendData: { ...prev.trendData, excludedFactIds: Array.from(excluded) } };
+        });
+    }, []);
+
+    /**
+     * 根拠メモを作り直す
+     */
+    const [isRebuildingFactSheet, setIsRebuildingFactSheet] = useState(false);
+    const rebuildFactSheet = useCallback(async () => {
+        const current = state.trendData;
+        if (!current) return;
+        setIsRebuildingFactSheet(true);
+        try {
+            const updated = await multiStepGenerationService.attachFactSheet(current);
+            setState(prev => ({ ...prev, trendData: updated }));
+            if (updated.factSheet?.facts.length) {
+                toast.success(`根拠メモを作成しました（${updated.factSheet.facts.length}件）`);
+            } else if (updated.factSheetError) {
+                toast.error(updated.factSheetError);
+            }
+        } finally {
+            setIsRebuildingFactSheet(false);
+        }
+    }, [state.trendData]);
+
+    /**
      * Step 1: トレンド分析を実行
      */
     const executeStep1 = useCallback(async (keywords: string[]): Promise<TrendAnalysisResult | null> => {
@@ -492,7 +526,10 @@ export function useMultiStepGeneration() {
         goToStep,
         reset,
         toggleKeywordPreference,
-        addKeywordPreference
+        addKeywordPreference,
+        toggleFactExclusion,
+        rebuildFactSheet,
+        isRebuildingFactSheet
     };
 }
 

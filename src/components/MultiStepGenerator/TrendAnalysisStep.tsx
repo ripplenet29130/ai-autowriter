@@ -1,6 +1,7 @@
 import React from 'react';
 import { TrendingUp, Users, ArrowRight, Loader2, ChevronDown, List, ArrowLeft, ExternalLink, Sparkles } from 'lucide-react';
 import { TrendAnalysisResult } from '../../types';
+import { FactSheetPanel } from './FactSheetPanel';
 
 interface TrendAnalysisStepProps {
   trendData: TrendAnalysisResult | undefined;
@@ -11,6 +12,9 @@ interface TrendAnalysisStepProps {
   keywordPreferences: Record<string, import('../../types').KeywordPreference>;
   onKeywordToggle: (keyword: string) => void;
   onAddKeyword: (keyword: string, preference: import('../../types').KeywordPreference) => void;
+  onToggleFact?: (factId: string) => void;
+  onRebuildFactSheet?: () => void;
+  isRebuildingFactSheet?: boolean;
 }
 
 export const TrendAnalysisStep: React.FC<TrendAnalysisStepProps> = ({
@@ -22,6 +26,9 @@ export const TrendAnalysisStep: React.FC<TrendAnalysisStepProps> = ({
   keywordPreferences,
   onKeywordToggle,
   onAddKeyword,
+  onToggleFact,
+  onRebuildFactSheet,
+  isRebuildingFactSheet,
 }) => {
   const [expandedIndex, setExpandedIndex] = React.useState<number | null>(null);
   const [ngInput, setNgInput] = React.useState('');
@@ -46,7 +53,7 @@ export const TrendAnalysisStep: React.FC<TrendAnalysisStepProps> = ({
       <div className="flex flex-col items-center justify-center py-16">
         <Loader2 className="w-12 h-12 text-blue-600 animate-spin mb-4" />
             <p className="text-lg font-medium text-gray-900">キーワード検索中...</p>
-        <p className="text-sm text-gray-500 mt-2">競合記事・関連キーワード・トピックを収集中です</p>
+        <p className="text-sm text-gray-500 mt-2">競合記事・関連キーワードの収集と、Google 検索での根拠メモ作成をしています（1分ほどかかります）</p>
       </div>
     );
   }
@@ -236,6 +243,13 @@ export const TrendAnalysisStep: React.FC<TrendAnalysisStepProps> = ({
           重要は本文で使われやすく、NGは生成対象から除外されます。
         </p>
       </div>
+
+      <FactSheetPanel
+        trendData={trendData}
+        onToggleFact={onToggleFact}
+        onRebuild={onRebuildFactSheet}
+        isRebuilding={isRebuildingFactSheet}
+      />
 
       <div className="flex justify-between items-center pt-8 border-t border-gray-100 mt-8">
         <button onClick={onBack} className="group flex items-center space-x-2 text-gray-500 hover:text-gray-900 font-bold transition-all">

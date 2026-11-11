@@ -128,6 +128,8 @@ export const Scheduler: React.FC = () => {
     fact_check_notify_on_every_run: false,
     image_generation_enabled: false,
     images_per_article: 0,
+    quality_mode: 'high' as 'high' | 'standard',
+    append_references: true,
   });
 
   const timeOptions = useMemo(() => {
@@ -481,6 +483,8 @@ export const Scheduler: React.FC = () => {
       fact_check_notify_on_every_run: notifyMode === 'every',
       image_generation_enabled: schedule.image_generation_enabled ?? false,
       images_per_article: schedule.images_per_article ?? 0,
+      quality_mode: schedule.quality_mode === 'standard' ? 'standard' : 'high',
+      append_references: schedule.append_references ?? true,
     });
     // Scroll to top to show the form
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -611,6 +615,8 @@ export const Scheduler: React.FC = () => {
       fact_check_notify_on_every_run: false,
       image_generation_enabled: false,
       images_per_article: 0,
+      quality_mode: 'high',
+      append_references: true,
     });
     setEditingSchedule(null);
   };
@@ -1258,6 +1264,40 @@ export const Scheduler: React.FC = () => {
               </select>
               <p className="mt-2 text-xs leading-relaxed text-gray-500">
                 {getSharedToneDescription(formData.writing_tone)}
+              </p>
+            </div>
+
+            {/* 品質モード */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                品質モード
+              </label>
+              <select
+                value={formData.quality_mode}
+                onChange={(e) => setFormData({ ...formData, quality_mode: e.target.value === 'standard' ? 'standard' : 'high' })}
+                className="input-field"
+              >
+                <option value="high">高品質（本文と見直しに Gemini 3.1 Pro）</option>
+                <option value="standard">標準（すべて基本モデル）</option>
+              </select>
+              <p className="mt-2 text-xs leading-relaxed text-gray-500">
+                Gemini を使う場合に有効です。書く前に Google 検索で根拠を集め、高品質では本文の執筆と見直しに上位モデルを使います。無料キーでは Pro を使えないため、自動で基本モデルに切り替わります。
+              </p>
+            </div>
+
+            {/* 参考資料 */}
+            <div>
+              <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+                <input
+                  type="checkbox"
+                  checked={formData.append_references}
+                  onChange={(e) => setFormData({ ...formData, append_references: e.target.checked })}
+                  className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                />
+                記事末に参考資料を付ける
+              </label>
+              <p className="mt-2 text-xs leading-relaxed text-gray-500">
+                根拠として使った出典（最大5件）を「参考資料」としてリンク付きで記事の最後に載せます。
               </p>
             </div>
 

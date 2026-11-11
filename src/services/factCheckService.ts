@@ -1,31 +1,21 @@
 import { supabase } from './supabaseClient';
 import { IS_CLIENT_DEPLOYMENT } from '@aw/config';
 import { getCurrentUserId } from './accountScope';
-import { callAiProxy } from './aiProxyClient';
 import {
-  applyFallbackFactCheckFixes,
-  buildFactCheckCorrectionPrompt,
-  buildFactCheckPrompt,
-  buildFactCheckResponseFormat,
-  cleanFactCheckModelText,
-  DEFAULT_FACT_CHECK_BATCH_SIZE,
-  DEFAULT_FACT_CHECK_MAX_ITEMS,
-  DEFAULT_FACT_CHECK_MODEL_NAME,
   extractFactsFromContent,
   FactCheckItem,
   FactCheckResult,
-  getFixableFactCheckIssues,
   hasFixableFactCheckIssues,
-  parseFactCheckBatchResults,
-  runWithFactCheckRetries,
-  selectFactCheckItems,
 } from '../shared/factCheckCore';
+import { applyGeminiFactCheckFixes, runGeminiFactCheck } from '../shared/geminiFactCheck';
+import { appendReferencesSection, splitReferencesSection, type FactSheet } from '../shared/factSheetCore';
+import { createGeminiSession } from './geminiSession';
+
+// ファクトチェックは Gemini の Google 検索で行う（Perplexity は廃止）。
+// Gemini のキーは ai-proxy がサーバー側で解決する（AI設定の Gemini キー）。
 
 type FactCheckSettingsRow = {
   enabled: boolean;
-  perplexity_api_key?: string | null;
-  max_items_to_check?: number | null;
-  model_name?: string | null;
   auto_fix_enabled?: boolean | null;
 };
 
@@ -34,40 +24,10 @@ type FactCheckProgress = {
   processed: number;
 };
 
-const LOCAL_STORAGE_KEY = 'fact_check_settings_local';
-const DEFAULT_MAX_ITEMS = DEFAULT_FACT_CHECK_MAX_ITEMS;
-const DEFAULT_BATCH_SIZE = DEFAULT_FACT_CHECK_BATCH_SIZE;
-const DEFAULT_MODEL_NAME = DEFAULT_FACT_CHECK_MODEL_NAME;
-
 const parseBoolean = (value: string | null | undefined, fallback = false): boolean => {
   if (value == null || value === '') return fallback;
   const normalized = String(value).trim().toLowerCase();
   return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on';
-};
-
-const getLocalSettings = (): FactCheckSettingsRow | null => {
-  if (typeof window === 'undefined') return null;
-  try {
-    const raw = window.localStorage.getItem(LOCAL_STORAGE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as {
-      enabled?: unknown;
-      perplexityApiKey?: unknown;
-      autoFixEnabled?: unknown;
-      modelName?: unknown;
-    };
-    const key = String(parsed.perplexityApiKey ?? '').trim();
-    if (!key) return null;
-    return {
-      enabled: Boolean(parsed.enabled ?? true),
-      perplexity_api_key: key,
-      max_items_to_check: DEFAULT_MAX_ITEMS,
-      model_name: String(parsed.modelName ?? DEFAULT_MODEL_NAME),
-      auto_fix_enabled: Boolean(parsed.autoFixEnabled ?? false),
-    };
-  } catch {
-    return null;
-  }
 };
 
 export const factCheckService = {
@@ -75,180 +35,137 @@ export const factCheckService = {
     return IS_CLIENT_DEPLOYMENT;
   },
 
-  enforceSettings(settings: FactCheckSettingsRow | null): FactCheckSettingsRow | null {
-    if (!settings) return null;
-
-    return {
-      ...settings,
-      enabled: this.isClientMode() ? true : settings.enabled,
-      max_items_to_check: DEFAULT_MAX_ITEMS,
-      model_name: settings.model_name || DEFAULT_MODEL_NAME,
-      auto_fix_enabled: Boolean(settings.auto_fix_enabled ?? false),
-    };
-  },
-
-  async resolveSettings(): Promise<FactCheckSettingsRow | null> {
-    const localSettings = getLocalSettings();
-    if (localSettings?.perplexity_api_key) return this.enforceSettings(localSettings);
-
-    if (!supabase) return null;
+  async resolveSettings(): Promise<FactCheckSettingsRow> {
+    const defaults: FactCheckSettingsRow = { enabled: true, auto_fix_enabled: false };
+    if (!supabase) return defaults;
     const userId = getCurrentUserId();
-    if (!userId) return null;
+    if (!userId) return defaults;
 
-    // perplexity_api_key はクライアントから SELECT 不可（ai-proxy がサーバー側で解決する）
     const { data } = await supabase
       .from('fact_check_settings')
-      .select('enabled, max_items_to_check, model_name, auto_fix_enabled')
+      .select('enabled, auto_fix_enabled')
       .eq('user_id', userId)
       .order('updated_at', { ascending: false })
       .limit(1)
       .maybeSingle();
 
     if (data) {
-      return this.enforceSettings((data as FactCheckSettingsRow) ?? null);
+      return {
+        enabled: this.isClientMode() ? true : data.enabled !== false,
+        auto_fix_enabled: Boolean(data.auto_fix_enabled),
+      };
     }
 
-    const { data: globalRows, error: globalError } = await supabase
+    const { data: globalRows } = await supabase
       .from('app_settings')
       .select('key, value')
       .eq('user_id', userId)
-      .in('key', [
-        'perplexity_api_key',
-        'fact_check_enabled',
-        'fact_check_model_name',
-        'fact_check_auto_fix_enabled',
-      ]);
-
-    if (globalError || !globalRows || globalRows.length === 0) {
-      return null;
-    }
+      .in('key', ['fact_check_enabled', 'fact_check_auto_fix_enabled']);
 
     const map = new Map<string, string>();
-    globalRows.forEach((row: any) => {
+    (globalRows || []).forEach((row: any) => {
       map.set(String(row.key), String(row.value ?? ''));
     });
-
-    const globalApiKey = map.get('perplexity_api_key');
-    if (!globalApiKey) return null;
-
-    return this.enforceSettings({
-      enabled: parseBoolean(map.get('fact_check_enabled'), true),
-      perplexity_api_key: globalApiKey,
-      model_name: map.get('fact_check_model_name') || DEFAULT_MODEL_NAME,
-      max_items_to_check: DEFAULT_MAX_ITEMS,
+    return {
+      enabled: this.isClientMode() ? true : parseBoolean(map.get('fact_check_enabled'), true),
       auto_fix_enabled: parseBoolean(map.get('fact_check_auto_fix_enabled'), false),
-    });
+    };
   },
 
+  async getSettings(): Promise<FactCheckSettingsRow> {
+    return this.resolveSettings();
+  },
+
+  // 従来の機械的な抽出（AI 抽出に失敗したときの予備として共通部品側でも使う）
   extractFacts(content: string, userMarkedText?: string): FactCheckItem[] {
     return extractFactsFromContent(content, userMarkedText);
   },
 
-  async verifyFacts(
-    items: FactCheckItem[],
+  /**
+   * 記事全体のファクトチェック（AI が主張を選ぶ → 根拠メモと照合 → 残りを Google 検索で確認）
+   */
+  async checkArticle(
+    content: string,
     keyword: string,
-    modelName?: string,
-    onProgress?: (progress: FactCheckProgress) => void
+    options?: {
+      factSheet?: FactSheet | null;
+      userMarkedText?: string;
+      onProgress?: (progress: FactCheckProgress) => void;
+    }
   ): Promise<FactCheckResult[]> {
-    if (items.length === 0) return [];
-
     const settings = await this.resolveSettings();
-
-    // キーの有無はサーバー側で判定される（未設定なら ai-proxy がエラーを返す）
-    if (!settings?.enabled) {
+    if (!settings.enabled) {
       console.warn('Fact check is not enabled for this user');
       return [];
     }
+    const session = await createGeminiSession();
+    const run = await runGeminiFactCheck({
+      // 記事末の参考資料はチェック対象にしない
+      content: splitReferencesSection(content).body,
+      keyword,
+      userMarkedText: options?.userMarkedText,
+      factSheet: options?.factSheet,
+      call: session.call,
+      resolveUrls: session.resolveUrls,
+      concurrency: 1,
+      onProgress: options?.onProgress,
+    });
+    return run.results;
+  },
 
-    const localApiKey = getLocalSettings()?.perplexity_api_key || undefined;
-    const results: FactCheckResult[] = [];
-    const batchSize = DEFAULT_BATCH_SIZE;
-    const maxItems = settings.max_items_to_check;
-    const itemsToCheck = selectFactCheckItems(items, maxItems);
-    const selectedModel = modelName || settings.model_name || DEFAULT_MODEL_NAME;
-    const waitMs = selectedModel.includes('sonar-pro') ? 500 : 800;
-    onProgress?.({ total: itemsToCheck.length, processed: 0 });
-
-    for (let i = 0; i < itemsToCheck.length; i += batchSize) {
-      const batch = itemsToCheck.slice(i, i + batchSize);
-
-      const prompt = buildFactCheckPrompt(batch, keyword);
-
-      try {
-        // ai-proxy 経由で呼び出す。DB 保存キーはサーバー側で解決されるため送らない。
-        // localStorage にのみ保存されたキーを使っている場合だけ明示的に渡す。
-        // 429/5xx/タイムアウトは指数バックオフでリトライする。
-        const data = await runWithFactCheckRetries(() => callAiProxy({
-          provider: 'perplexity',
-          ...(localApiKey ? { apiKey: localApiKey } : {}),
-          model: selectedModel,
-          messages: [
-            { role: 'system', content: 'You are a precise fact-checking assistant. Return JSON only.' },
-            { role: 'user', content: prompt },
-          ],
-          temperature: 0.1,
-          response_format: buildFactCheckResponseFormat(),
-        }));
-
-        const content: string = data?.choices?.[0]?.message?.content ?? '[]';
-
-        results.push(...parseFactCheckBatchResults(batch, content));
-
-        if (i + batchSize < itemsToCheck.length) {
-          await new Promise((resolve) => setTimeout(resolve, waitMs));
-        }
-      } catch (error) {
-        console.error('Batch verification error:', error);
-      }
-      onProgress?.({ total: itemsToCheck.length, processed: Math.min(i + batchSize, itemsToCheck.length) });
-    }
-
-    return results;
+  /**
+   * 指定した主張だけを確認する（従来の呼び出し方との互換用）
+   */
+  async verifyFacts(
+    items: FactCheckItem[],
+    keyword: string,
+    _modelName?: string,
+    onProgress?: (progress: FactCheckProgress) => void
+  ): Promise<FactCheckResult[]> {
+    if (items.length === 0) return [];
+    const settings = await this.resolveSettings();
+    if (!settings.enabled) return [];
+    const session = await createGeminiSession();
+    const run = await runGeminiFactCheck({
+      content: items.map((item) => item.context).join('\n\n'),
+      keyword,
+      call: session.call,
+      resolveUrls: session.resolveUrls,
+      concurrency: 1,
+      onlyClaims: items,
+      onProgress,
+    });
+    return run.results;
   },
 
   hasFixableIssues(results: FactCheckResult[]): boolean {
     return hasFixableFactCheckIssues(results);
   },
 
-  async getSettings(): Promise<FactCheckSettingsRow | null> {
-    return this.resolveSettings();
-  },
-
   async applyFactCheckFixes(
     originalContent: string,
     results: FactCheckResult[],
     keyword: string,
-    modelName?: string
+    _modelName?: string
   ): Promise<string | null> {
     const settings = await this.getSettings();
-    if (!settings?.enabled) return null;
-
-    const issues = getFixableFactCheckIssues(results);
-    if (issues.length === 0) return originalContent;
-
-    const prompt = buildFactCheckCorrectionPrompt(originalContent, results, keyword);
-    if (!prompt) return originalContent;
+    if (!settings.enabled) return null;
+    if (!hasFixableFactCheckIssues(results)) return originalContent;
 
     try {
-      const localApiKey = getLocalSettings()?.perplexity_api_key || undefined;
-      // 修正結果は本文テキストなので structured output は使わない
-      const data = await runWithFactCheckRetries(() => callAiProxy({
-        provider: 'perplexity',
-        ...(localApiKey ? { apiKey: localApiKey } : {}),
-        model: modelName || settings.model_name || DEFAULT_MODEL_NAME,
-        messages: [
-          { role: 'system', content: 'You edit Japanese articles to fix factual mistakes while preserving style.' },
-          { role: 'user', content: prompt },
-        ],
-        temperature: 0.2,
-      }));
-
-      const content: string = data?.choices?.[0]?.message?.content ?? '';
-      const cleaned = cleanFactCheckModelText(content);
-      return cleaned || applyFallbackFactCheckFixes(originalContent, issues);
+      const session = await createGeminiSession();
+      // 参考資料は修正対象から外し、修正後に付け直す
+      const { body, references } = splitReferencesSection(originalContent);
+      const fixed = await applyGeminiFactCheckFixes({
+        content: body,
+        results,
+        keyword,
+        call: session.call,
+      });
+      return references ? appendReferencesSection(fixed.content, references) : fixed.content;
     } catch (error) {
       console.error('Fact check auto-fix failed:', error);
-      return applyFallbackFactCheckFixes(originalContent, issues);
+      return null;
     }
   },
 };

@@ -9,6 +9,10 @@ import {
     normalizeAiModel,
     supportsTemperature,
 } from "../../../src/shared/aiModelCatalog.ts";
+import {
+    buildGeminiRequestBody,
+    resolveRedirectUrls,
+} from "../../../src/shared/geminiCore.ts";
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
@@ -86,38 +90,24 @@ const resolveConfigApiKey = async (configId: string, userId: string): Promise<st
     return config.api_key;
 };
 
-// Perplexity キーをサーバー側で解決する。
-// クライアントの従来の解決順（fact_check_settings → app_settings）を踏襲し、最後に環境変数を見る。
-const resolvePerplexityApiKey = async (userId: string): Promise<string> => {
+// configId が無い Gemini 呼び出し（Gemini 以外で生成しているユーザーのファクトチェックなど）で、
+// ログインユーザー自身の Gemini 設定のキーを使う。
+const resolveUserGeminiApiKey = async (userId: string): Promise<string> => {
     const supabaseUrl = Deno.env.get('SUPABASE_URL');
     const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
-    if (!supabaseUrl || !serviceRoleKey) {
-        throw new Error('Server configuration is missing for API key resolution');
-    }
+    if (!supabaseUrl || !serviceRoleKey) return '';
 
     const admin = createClient(supabaseUrl, serviceRoleKey);
-
-    const { data: settings } = await admin
-        .from('fact_check_settings')
-        .select('perplexity_api_key')
+    const { data } = await admin
+        .from('ai_configs')
+        .select('api_key')
         .eq('user_id', userId)
-        .order('updated_at', { ascending: false })
+        .eq('provider', 'gemini')
+        .order('is_active', { ascending: false })
+        .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle();
-    if (settings?.perplexity_api_key) return settings.perplexity_api_key;
-
-    const { data: appSetting } = await admin
-        .from('app_settings')
-        .select('value')
-        .eq('user_id', userId)
-        .eq('key', 'perplexity_api_key')
-        .maybeSingle();
-    if (appSetting?.value) return String(appSetting.value);
-
-    const envKey = Deno.env.get('PERPLEXITY_API_KEY');
-    if (envKey) return envKey;
-
-    throw new Error('Perplexity API key is not configured');
+    return String(data?.api_key || '');
 };
 
 serve(async (req) => {
@@ -145,6 +135,9 @@ serve(async (req) => {
         if (configId) {
             targetApiKey = await resolveConfigApiKey(String(configId), authResult.userId);
         }
+        if (!targetApiKey && (provider === 'gemini' || type === 'gemini')) {
+            targetApiKey = await resolveUserGeminiApiKey(authResult.userId);
+        }
         if (!targetApiKey) {
             if (provider === 'openai') targetApiKey = Deno.env.get('OPENAI_API_KEY');
             if (provider === 'claude') targetApiKey = Deno.env.get('ANTHROPIC_API_KEY');
@@ -171,19 +164,19 @@ serve(async (req) => {
                 responseData = await callClaude(targetApiKey, model, temperature, maxTokens, messages || [{ role: "user", content: prompt }]);
                 break;
             case 'gemini':
-                responseData = await callGemini(targetApiKey, model, temperature, maxTokens, prompt);
+                responseData = await callGemini(targetApiKey, model, temperature, maxTokens, prompt, {
+                    useSearch: otherParams.useSearch === true,
+                    jsonOutput: otherParams.jsonOutput === true,
+                    thinkingBudget: typeof otherParams.thinkingBudget === 'number' ? otherParams.thinkingBudget : undefined,
+                });
                 break;
 
-            case 'perplexity': {
-                // apiKey 未指定時はログインユーザーの設定からサーバー側で解決する
-                const perplexityKey = targetApiKey || await resolvePerplexityApiKey(authResult.userId);
-                responseData = await callPerplexity(
-                    perplexityKey,
-                    model,
-                    temperature,
-                    messages || [{ role: "user", content: prompt }],
-                    otherParams.response_format,
-                );
+            // Google 検索の出典（転送用 URL）を元の URL に変換する（ブラウザからは取得できないため）
+            case 'resolve-urls': {
+                const urls = Array.isArray(otherParams.urls)
+                    ? otherParams.urls.map((url: unknown) => String(url || '')).filter(Boolean).slice(0, 40)
+                    : [];
+                responseData = { resolved: await resolveRedirectUrls(urls, 5000) };
                 break;
             }
 
@@ -280,63 +273,43 @@ async function callClaude(apiKey: string, model: string, temperature: number, ma
     return data;
 }
 
-async function callGemini(apiKey: string, model: string, temperature: number, maxTokens: number, prompt: string) {
+async function callGemini(
+    apiKey: string,
+    model: string,
+    temperature: number,
+    maxTokens: number,
+    prompt: string,
+    options: { useSearch?: boolean; jsonOutput?: boolean; thinkingBudget?: number } = {},
+) {
     if (!apiKey) throw new Error("Gemini API Key is missing");
 
     const modelName = normalizeAiModel('gemini', model);
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
 
-    const response = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: {
+    const send = async (thinkingBudget: number | undefined) => {
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(buildGeminiRequestBody({
+                prompt,
                 temperature: temperature ?? 0.7,
                 maxOutputTokens: maxTokens ?? 16384,
-            },
-        }),
-    });
-
-    const data = await response.json();
-    if (!response.ok) {
-        throw new Error(`Gemini API error (${response.status}): ${JSON.stringify(data)}`);
-    }
-    return data;
-}
-
-async function callPerplexity(apiKey: string, model: string, temperature: number, messages: any[], responseFormat?: unknown) {
-    if (!apiKey) throw new Error("Perplexity API Key is missing");
-
-    const doCall = async (includeFormat: boolean) => {
-        const response = await fetch("https://api.perplexity.ai/chat/completions", {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                "Authorization": `Bearer ${apiKey}`,
-            },
-            body: JSON.stringify({
-                model: model,
-                messages: messages,
-                temperature: temperature ?? 0.1,
-                ...(includeFormat && responseFormat ? { response_format: responseFormat } : {}),
-            }),
-            signal: AbortSignal.timeout(90 * 1000),
+                thinkingBudget,
+                useSearch: options.useSearch,
+                jsonOutput: options.jsonOutput,
+            })),
         });
         const data = await response.json();
         return { response, data };
     };
 
-    let { response, data } = await doCall(true);
-
-    // structured output 未対応モデルの 400 は、構造化出力なしで一度だけ再試行する
-    if (!response.ok && response.status === 400 && responseFormat) {
-        console.warn('Perplexity rejected response_format; retrying without structured output');
-        ({ response, data } = await doCall(false));
+    let { response, data } = await send(options.thinkingBudget);
+    // 思考設定に対応していないモデルでは、指定を外して一度だけ再試行する
+    if (!response.ok && response.status === 400 && typeof options.thinkingBudget === 'number' && /thinking/i.test(JSON.stringify(data))) {
+        ({ response, data } = await send(undefined));
     }
-
     if (!response.ok) {
-        throw new Error(`Perplexity API error (${response.status}): ${JSON.stringify(data)}`);
+        throw new Error(`Gemini API error (${response.status}): ${JSON.stringify(data)}`);
     }
     return data;
 }

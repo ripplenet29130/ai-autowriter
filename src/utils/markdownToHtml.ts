@@ -1,3 +1,5 @@
+import { convertMarkdownLinksToHtml } from '../shared/markdownLinks';
+
 /**
  * Convert Markdown/HTML content to Gutenberg block format
  * Gutenberg uses HTML comments to define blocks
@@ -56,7 +58,7 @@ export function convertToGutenbergBlocks(content: string): string {
         const listMatch = line.match(/^[-*]\s+(.+)$/);
         if (listMatch) {
             inList = true;
-            listItems.push(listMatch[1]);
+            listItems.push(convertMarkdownLinksToHtml(listMatch[1]));
             continue;
         }
 
@@ -115,6 +117,7 @@ export function convertToGutenbergBlocks(content: string): string {
         // Process markdown formatting
         processedLine = processedLine.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
         processedLine = processedLine.replace(/\*(.+?)\*/g, '<em>$1</em>');
+        processedLine = convertMarkdownLinksToHtml(processedLine);
 
         if (processedLine) {
             result += createParagraphBlock(processedLine);

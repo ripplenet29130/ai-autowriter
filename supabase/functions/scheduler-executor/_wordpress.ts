@@ -69,6 +69,15 @@ export function escapeXmlRpcValue(value: string | number): string {
 }
 
 
+// REST APIはエンドポイント名として複数形（posts/pages）を使うが、XML-RPCの
+// wp.newPostは実際に登録されたpost_typeキー（post/page、単数形）を要求する。
+// カスタム投稿タイプは通常REST名=実名なのでそのまま渡してよい。
+function toXmlRpcPostType(postType: string): string {
+  if (postType === 'posts') return 'post';
+  if (postType === 'pages') return 'page';
+  return postType;
+}
+
 export function isPermissionRelatedWpError(status: number, text: string): boolean {
   if (status === 401) return true;
   const normalized = text.toLowerCase();
@@ -169,7 +178,7 @@ export async function publishViaXmlRpc(
   const body = buildXmlRpcNewPostBody({
     username: config.username,
     password: config.password,
-    postType,
+    postType: toXmlRpcPostType(postType),
     title,
     content: formatContentForWordPress(content),
     excerpt: extractExcerpt(content),

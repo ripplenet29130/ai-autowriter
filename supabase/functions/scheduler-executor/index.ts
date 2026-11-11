@@ -13,14 +13,46 @@ import {
   compactAutoModeInstructions,
   evaluateAutoOutlineQuality,
 } from '../../../src/shared/autoModeQuality.ts';
-import { DEFAULT_FACT_CHECK_MAX_ITEMS, selectFactCheckItems } from '../../../src/shared/factCheckCore.ts';
+import { getFixableFactCheckIssues, type FactCheckResult } from '../../../src/shared/factCheckCore.ts';
 import { generateTitleSuggestionsWithSharedCore } from '../../../src/shared/titleGenerationCore.ts';
-import { normalizeAiModel, supportsTemperature } from '../../../src/shared/aiModelCatalog.ts';
+import { pickNextTitle, TITLE_USAGE_SELECT } from '../../../src/shared/titleUsage.ts';
 import {
-  applyFactCheckCorrections,
-  extractFactsFromContent,
-  verifyFactsBatch,
-} from './_fact-check-helpers.ts';
+  getDefaultAiModel,
+  normalizeAiModel,
+  normalizeQualityMode,
+  resolveWritingModel,
+  supportsTemperature,
+} from '../../../src/shared/aiModelCatalog.ts';
+import {
+  appendReferencesSection,
+  assignFactsByOverlap,
+  assignFactsToSections,
+  buildFactSheet,
+  buildFactSheetOutlineInstructions,
+  buildReferencesMarkdown,
+  hasUsableFacts,
+  selectReferenceSources,
+  type FactSheet,
+} from '../../../src/shared/factSheetCore.ts';
+import { runEditorialReview } from '../../../src/shared/editorialReviewCore.ts';
+import {
+  applyGeminiFactCheckFixes,
+  claimsForRecheck,
+  countCriticalIssues,
+  countMinorIssues,
+  countUnverified,
+  hasCorrectionArtifacts,
+  runGeminiFactCheck,
+  UNVERIFIED_WARNING_THRESHOLD,
+} from '../../../src/shared/geminiFactCheck.ts';
+import { USD_TO_JPY } from '../../../src/shared/aiUsage.ts';
+import {
+  GenerationRun,
+  readGeminiMaxParallel,
+  readSchedulerTimeBudgetMs,
+  SearchUnavailableError,
+  withDeadline,
+} from './_run.ts';
 
 
 import { corsHeaders, parseBoolean, fetchWithTimeout, AiOutputTruncatedError, KeywordExhaustedError, isKeywordExhaustedError, getCurrentJstDate, parseJstDate, isWithinScheduleDateRange, normalizeAiConfig, resolveWritingTone, normalizeWhitespace, trimForLog, getFirstScheduleKeyword, AI_REQUEST_TIMEOUT_MS, SCHEDULE_EXECUTION_LOCK_TTL_SECONDS, type AIConfig, type Schedule, type WordPressConfig, type ScheduleExecutionLock, type ArticleOutline, type OutlineSection, type WritingTone } from './_shared.ts';
@@ -478,7 +510,11 @@ Deno.serve(async (req: Request) => {
               accountSearchEngineId,
               accountImageCostUsdPerImage,
               schedulerStartTime,
-              forceExecute ? 'manual' : 'automatic'
+              forceExecute ? 'manual' : 'automatic',
+              // Gemini 以外で生成する場合も、ファクトチェックは同じユーザーの Gemini キーで行う
+              accountAiConfigs.find((config) =>
+                String(config.provider || '').toLowerCase() === 'gemini' && String(config.api_key || '').trim()
+              )?.api_key || null
             );
             stats.executed += 1;
             executedWpConfigIds.add(wpConfig.id);
@@ -586,7 +622,8 @@ async function executeSchedule(
   searchEngineId: string | null,
   imageCostUsdPerImage: number,
   schedulerStartTime: number,
-  triggerType: 'manual' | 'automatic' = 'automatic'
+  triggerType: 'manual' | 'automatic' = 'automatic',
+  geminiApiKeyFallback: string | null = null
 ) {
   // 1. 鬨ｾ蠅難ｽｻ阮吶・驛｢譎｢・ｽ・｢驛｢譎｢・ｽ・ｼ驛｢譎擾ｽｳ・ｨ遶頑･｢謳上・・ｺ驍ｵ・ｺ繝ｻ・･驍ｵ・ｺ郢晢ｽｻ遯ｶ・ｻ驛｢・ｧ繝ｻ・ｿ驛｢譎｢・ｽ・ｼ驛｢・ｧ繝ｻ・ｲ驛｢譏ｴ繝ｻ郢晢ｽｨ郢晢ｽｻ陋ｹ・ｻ邵ｺ蜀暦ｽｹ譎｢・ｽ・ｼ驛｢譎｢・ｽ・ｯ驛｢譎｢・ｽ・ｼ驛｢譎擾ｽｳ・ｨ遶擾ｽｪ驍ｵ・ｺ雋・･繝ｻ驛｢・ｧ繝ｻ・ｿ驛｢・ｧ繝ｻ・､驛｢譎冗樟・取亢繝ｻ陝ｲ・ｨ繝ｻ螳夲ｽｱ雜｣・ｽ・ｺ髯橸ｽｳ郢晢ｽｻ
   let keyword = '';
@@ -712,6 +749,60 @@ async function executeSchedule(
   });
 
   // 2. 鬩包ｽｶ繝ｻ・ｶ髯ｷ・ｷ鬩帙・・ｽ・ｪ繝ｻ・ｿ髫ｴ貊ゑｽｽ・ｻ驍ｵ・ｺ繝ｻ・ｮ髯橸ｽｳ雋・ｽｯ繝ｻ・｡鬲・ｼ夲ｽｽ・ｼ郢晢ｽｻuto Mode驍ｵ・ｺ繝ｻ・ｨ髯ｷ・ｷ陟募具ｽｧ驛｢譎｢・ｽ・ｭ驛｢・ｧ繝ｻ・ｸ驛｢譏ｴ繝ｻ邵ｺ莉｣繝ｻ郢晢ｽｻ
+  // 1.8 Gemini 呼び出しの実行管理（品質モード・残り時間・利用量）
+  const qualityMode = normalizeQualityMode(schedule.quality_mode);
+  const isGeminiProvider = String(aiConfig.provider || '').toLowerCase() === 'gemini';
+  const geminiApiKey = isGeminiProvider ? String(aiConfig.api_key || '') : String(geminiApiKeyFallback || '');
+  const geminiBaseModel = isGeminiProvider ? aiConfig.model : getDefaultAiModel('gemini');
+  const run: GenerationRun | null = geminiApiKey
+    ? new GenerationRun(
+      schedulerStartTime,
+      readSchedulerTimeBudgetMs(),
+      geminiApiKey,
+      geminiBaseModel,
+      // 高品質モードでも Gemini 以外で書く場合は執筆モデルを切り替えない
+      isGeminiProvider ? resolveWritingModel('gemini', geminiBaseModel, qualityMode) : geminiBaseModel,
+    )
+    : null;
+  if (isGeminiProvider && run) {
+    aiConfig = { ...aiConfig, run };
+  }
+  console.log(`Quality mode: ${qualityMode}; writer model: ${run?.writerModel || aiConfig.model}; time budget: ${run ? Math.round(run.budgetMs / 1000) : '-'}s`);
+
+  // 根拠メモ（Google 検索で集めた事実と出典）は競合調査と同時に作る
+  let factSheetError = '';
+  const factSheetPromise: Promise<FactSheet | null> = isGeminiProvider && run
+    ? withDeadline(
+      buildFactSheet({
+        keyword,
+        title: fixedTitle,
+        call: run.call,
+        resolveUrls: run.resolveUrls,
+        includeLatest: () => run.hasTime(110_000),
+      }),
+      40_000,
+    )
+      .then((sheet) => {
+        if (!sheet) {
+          factSheetError = '時間内に作成できませんでした';
+          return null;
+        }
+        // 検索せずに作られたメモは AI の知識だけなので、根拠としては使わない
+        if (!sheet.searchUsed) {
+          factSheetError = 'Google 検索が使われませんでした';
+          return null;
+        }
+        return sheet;
+      })
+      .catch((error) => {
+        factSheetError = error instanceof SearchUnavailableError
+          ? 'このキーでは Google 検索を使えません'
+          : formatScheduleFailureReason(error);
+        console.warn('Fact sheet creation failed; continuing without it:', error);
+        return null;
+      })
+    : Promise.resolve(null);
+
   console.log(`Conducting competitor research for: ${keyword}`);
   let competitorData: any = null;
   if (serpApiKey) {
@@ -729,6 +820,17 @@ async function executeSchedule(
     message: competitorData ? `競合調査が完了しました（${competitorData.articles?.length || 0}件）` : '競合調査はスキップしました',
     progress: 35,
   });
+
+  const factSheet: FactSheet | null = await factSheetPromise;
+  if (isGeminiProvider) {
+    await updateExecutionProgressHistory(supabase, progressHistoryId, {
+      stage: 'fact_sheet_done',
+      message: hasUsableFacts(factSheet)
+        ? `根拠メモを作成しました（事実${factSheet.facts.length}件・出典${factSheet.sources.length}件）`
+        : `根拠メモなしで続けます（${factSheetError || '事実が見つかりませんでした'}）`,
+      progress: 40,
+    });
+  }
 
   // === 隰ｾ・ｹ闖ｫ・ｮ2: 郢晏現ﾎ樒ｹ晢ｽｳ郢晉甥繝ｻ隴ｫ謦ｰ・ｼ逎ｯ譛ｪ鬨ｾ・｣郢ｧ・ｭ郢晢ｽｼ郢晢ｽｯ郢晢ｽｼ郢晉甥蜿呵墓圜・ｼ繝ｻ===
   console.log(`Enriching keywords for: ${keyword}`);
@@ -823,11 +925,13 @@ async function executeSchedule(
       title: fixedTitle || '',
     });
 
+    // 構成案にだけ根拠メモの全体を渡す（本文では見出しごとに割り当てた分だけ渡す）
+    const outlineFactInstructions = buildFactSheetOutlineInstructions(factSheet);
     let outline = await generateOutlineWithAutoModeStyle({
       keyword,
       targetWordCount,
       fixedTitle,
-      customInstructions: effectiveCustomInstructions,
+      customInstructions: compactAutoModeInstructions([effectiveCustomInstructions, outlineFactInstructions]),
       competitorHeadings,
       relatedKeywords,
       tone: writingTone,
@@ -853,6 +957,7 @@ async function executeSchedule(
         fixedTitle,
         customInstructions: compactAutoModeInstructions([
           effectiveCustomInstructions,
+          outlineFactInstructions,
           buildAutoOutlineRetryInstructions(outlineQuality.issues),
         ]),
         competitorHeadings,
@@ -883,6 +988,15 @@ async function executeSchedule(
       progress: 82,
       title: fixedTitle || '',
     });
+    // 見出しごとに使う根拠を割り当てる（時間が少なければ AI を使わず語の重なりで割り当てる）
+    let sectionFactIds: string[][] | undefined;
+    if (hasUsableFacts(factSheet)) {
+      const sectionsForFacts = outline.sections.map((section) => ({ title: section.title, description: section.description }));
+      sectionFactIds = run && run.hasTime(100_000)
+        ? await assignFactsToSections({ sheet: factSheet, sections: sectionsForFacts, call: run.call })
+        : assignFactsByOverlap(factSheet, sectionsForFacts);
+    }
+
     const generationParams = {
       outline,
       keyword,
@@ -891,6 +1005,10 @@ async function executeSchedule(
       targetWordCount,
       customInstructions: effectiveCustomInstructions,
       aiConfig,
+      factSheet,
+      sectionFactIds,
+      // Gemini では H2 単位で並列に書く（時間短縮）。それ以外はこれまでどおり順番に書く
+      parallelism: isGeminiProvider && run ? readGeminiMaxParallel() : 1,
     };
 
     // セクション分割生成を優先し、失敗時は従来のシングルパスへフォールバックする
@@ -1099,6 +1217,43 @@ async function executeSchedule(
   // === Step 4: Clean up generated content before publishing ===
   fullContent = cleanupContentArtifacts(fullContent, articleTitle);
 
+  // 4.5 編集見直し（執筆モデルで読み直し、重複・根拠のない断定・つながりを整える）
+  let editorialReviewStatus = isGeminiProvider ? '未実行' : '対象外（Gemini以外）';
+  if (isGeminiProvider && run) {
+    if (run.hasTime(80_000)) {
+      await updateExecutionProgressHistory(supabase, progressHistoryId, {
+        stage: 'editorial_review',
+        message: '記事を見直しています',
+        progress: 90,
+        title: articleTitle,
+      });
+      try {
+        const decision = await runEditorialReview({
+          title: articleTitle,
+          keyword,
+          content: fullContent,
+          factSheet,
+          toneInstruction: writingTone === 'casual'
+            ? 'やわらかく親しみやすい です・ます調'
+            : 'ビジネス読者向けの自然な です・ます調',
+          customInstructions: customInstructions.trim() || undefined,
+          call: run.call,
+        });
+        if (decision.accepted) {
+          fullContent = cleanupContentArtifacts(decision.content, articleTitle);
+        }
+        editorialReviewStatus = decision.accepted ? '採用' : `不採用（${decision.reason}）`;
+        console.log(`Editorial review: ${editorialReviewStatus}`);
+      } catch (reviewError) {
+        editorialReviewStatus = `失敗（${formatScheduleFailureReason(reviewError)}）`;
+        console.warn('Editorial review failed; keeping the original article:', reviewError);
+      }
+    } else {
+      run.skip('編集見直し');
+      editorialReviewStatus = '時間切れで省略';
+    }
+  }
+
   // 4.6 Run fact-check as a pre-publish safety step.
   let finalPostStatus = schedule.post_status || 'draft';
   let factCheckReport = null;
@@ -1107,8 +1262,16 @@ async function executeSchedule(
   let factCheckExecuted = false;
   let factCheckCriticalIssues = 0;
   let factCheckMinorIssues = 0;
+  let factCheckUnverified = 0;
   let factCheckChangeSummaries: string[] = [];
   let factCheckAutoFixApplied = false;
+  const forceDraft = (reason: string) => {
+    if (finalPostStatus !== 'draft') {
+      console.log(`Forcing draft status: ${reason}`);
+    }
+    finalPostStatus = 'draft';
+    factCheckAlerts.push(`${reason}下書きに変更しました。`);
+  };
 
   const shouldRunFactCheck = true;
   if (shouldRunFactCheck) {
@@ -1118,14 +1281,14 @@ async function executeSchedule(
       // Prefer user-scoped settings, then fall back to legacy account app_settings.
       const scheduleUserId = (schedule as any).user_id;
       const scheduleAccountId = (schedule as any).account_id;
-      let factCheckSettings: any = null;
+      let factCheckSettings: { enabled: boolean; auto_fix_enabled: boolean } | null = null;
 
       if (!scheduleUserId) {
         console.warn(`Schedule ${schedule.id} has no user_id. Falling back to app_settings for fact-check.`);
       } else {
         let userFactCheckQuery = supabase
           .from('fact_check_settings')
-          .select('*')
+          .select('enabled, auto_fix_enabled')
           .eq('user_id', scheduleUserId)
           .order('updated_at', { ascending: false })
           .limit(1);
@@ -1135,19 +1298,19 @@ async function executeSchedule(
         }
 
         const { data: userFactCheckSettings } = await userFactCheckQuery.maybeSingle();
-        factCheckSettings = userFactCheckSettings;
+        if (userFactCheckSettings) {
+          factCheckSettings = {
+            enabled: userFactCheckSettings.enabled !== false,
+            auto_fix_enabled: Boolean(userFactCheckSettings.auto_fix_enabled),
+          };
+        }
       }
 
       if (!factCheckSettings) {
         let appSettingsQuery = supabase
           .from('app_settings')
           .select('key, value')
-          .in('key', [
-            'perplexity_api_key',
-            'fact_check_enabled',
-            'fact_check_model_name',
-            'fact_check_auto_fix_enabled',
-          ]);
+          .in('key', ['fact_check_enabled', 'fact_check_auto_fix_enabled']);
 
         if (scheduleUserId) {
           appSettingsQuery = appSettingsQuery.eq('user_id', scheduleUserId);
@@ -1156,76 +1319,71 @@ async function executeSchedule(
         }
 
         const { data: globalRows } = await appSettingsQuery;
-
-        if (globalRows && globalRows.length > 0) {
-          const map = new Map<string, string>();
-          globalRows.forEach((row: any) => {
-            map.set(String(row.key), String(row.value ?? ''));
-          });
-
-          const apiKey = map.get('perplexity_api_key');
-          if (apiKey) {
-            factCheckSettings = {
-              enabled: true,
-              perplexity_api_key: apiKey,
-              model_name: map.get('fact_check_model_name') || 'sonar',
-              max_items_to_check: DEFAULT_FACT_CHECK_MAX_ITEMS,
-              auto_fix_enabled: parseBoolean(map.get('fact_check_auto_fix_enabled'), false),
-            } as any;
-          }
-        }
+        const map = new Map<string, string>();
+        (globalRows || []).forEach((row: any) => {
+          map.set(String(row.key), String(row.value ?? ''));
+        });
+        // 設定が無い場合も実行する（Perplexity キーは不要になった）
+        factCheckSettings = {
+          enabled: parseBoolean(map.get('fact_check_enabled'), true),
+          auto_fix_enabled: parseBoolean(map.get('fact_check_auto_fix_enabled'), false),
+        };
       }
 
-      if (factCheckSettings?.enabled && factCheckSettings?.perplexity_api_key) {
+      if (!factCheckSettings.enabled) {
+        console.log('Fact-check is disabled in settings');
+      } else if (!run) {
+        forceDraft('Gemini の APIキーが見つからないため、ファクトチェックを実行できませんでした。');
+      } else {
         factCheckExecuted = true;
-        // Extract likely factual claims from the generated article.
-        const factsToCheck = await extractFactsFromContent(fullContent, (schedule as any).fact_check_note);
-        const maxItems = DEFAULT_FACT_CHECK_MAX_ITEMS;
-        const itemsToCheck = selectFactCheckItems(factsToCheck, maxItems);
-        factCheckItemsChecked = itemsToCheck.length;
+        await updateExecutionProgressHistory(supabase, progressHistoryId, {
+          stage: 'fact_checking',
+          message: 'ファクトチェックをしています',
+          progress: 93,
+          title: articleTitle,
+        });
 
-        console.log(`Found ${factsToCheck.length} facts, checking top ${itemsToCheck.length} in batches`);
-
-        // Verify claims in batches.
-        let factCheckResults = await verifyFactsBatch(
-          itemsToCheck,
-          factCheckSettings.perplexity_api_key,
+        const userMarkedText = (schedule as any).fact_check_note || null;
+        const searchConcurrency = readGeminiMaxParallel();
+        const firstRun = await runGeminiFactCheck({
+          content: fullContent,
           keyword,
-          factCheckSettings.model_name || 'sonar',
-          5
-        );
+          userMarkedText,
+          factSheet,
+          call: run.call,
+          resolveUrls: run.resolveUrls,
+          canSearch: () => run.hasTime(45_000),
+          concurrency: searchConcurrency,
+        });
+        let factCheckResults: FactCheckResult[] = firstRun.results;
+        factCheckItemsChecked = firstRun.itemsChecked;
+        let searchSkipped = firstRun.skippedSearchClaims > 0;
+        if (firstRun.usedRuleBasedExtraction) {
+          console.warn('AI claim extraction failed; used rule-based extraction instead');
+        }
 
-        // Count critical and minor issues before optional auto-fix.
-        const criticalIssues = factCheckResults.filter(r =>
-          r.verdict === 'incorrect' && r.confidence >= 70
-        ).length;
-        const minorIssues = factCheckResults.filter(r =>
-          r.verdict === 'partially_correct' ||
-          (r.verdict === 'incorrect' && r.confidence < 70)
-        ).length;
-        factCheckCriticalIssues = criticalIssues;
-        factCheckMinorIssues = minorIssues;
+        let criticalIssues = countCriticalIssues(factCheckResults);
+        let minorIssues = countMinorIssues(factCheckResults);
         const scheduleAutoFixValue = (schedule as any).fact_check_auto_fix_enabled;
         const autoFixEnabled = typeof scheduleAutoFixValue === 'boolean'
           ? scheduleAutoFixValue
           : Boolean(factCheckSettings.auto_fix_enabled);
 
-        console.log(`Fact-check completed: ${criticalIssues} critical, ${minorIssues} minor issues`);
+        console.log(`Fact-check completed: ${criticalIssues} critical, ${minorIssues} minor issues (searched ${firstRun.searchedClaims}, skipped ${firstRun.skippedSearchClaims})`);
 
         if (autoFixEnabled && (criticalIssues > 0 || minorIssues > 0)) {
           console.log('Auto-fix mode enabled. Applying AI corrections...');
           const headingCountBeforeAutoFix = countNonSummaryHeadings(fullContent);
           const contentBeforeAutoFix = fullContent;
-          const fixedContent = await applyFactCheckCorrections(
-            fullContent,
-            factCheckResults,
-            factCheckSettings.perplexity_api_key,
+          const fix = await applyGeminiFactCheckFixes({
+            content: fullContent,
+            results: factCheckResults,
             keyword,
-            factCheckSettings.model_name || 'sonar'
-          );
+            call: run.call,
+          });
 
-          if (fixedContent && fixedContent.trim().length > 0) {
-            const normalizedFixedContent = normalizeGeneratedContentForPublishing(fixedContent, articleTitle);
+          if (fix.content && fix.content.trim().length > 0) {
+            const normalizedFixedContent = normalizeGeneratedContentForPublishing(fix.content, articleTitle);
             const headingCountAfterAutoFix = countNonSummaryHeadings(normalizedFixedContent);
             if (
               headingCountBeforeAutoFix >= 2 &&
@@ -1241,47 +1399,53 @@ async function executeSchedule(
                 factCheckAutoFixApplied = true;
                 factCheckAlerts.push(`ファクトチェックの自動修正を適用しました（${factCheckChangeSummaries.length}件）`);
               }
-            }
-            const recheckFacts = await extractFactsFromContent(fullContent, (schedule as any).fact_check_note);
-            const recheckItems = selectFactCheckItems(recheckFacts, maxItems);
-            factCheckResults = await verifyFactsBatch(
-              recheckItems,
-              factCheckSettings.perplexity_api_key,
-              keyword,
-              factCheckSettings.model_name || 'sonar',
-              5
-            );
 
-            const reCritical = factCheckResults.filter(r =>
-              r.verdict === 'incorrect' && r.confidence >= 70
-            ).length;
-            const reMinor = factCheckResults.filter(r =>
-              r.verdict === 'partially_correct' ||
-              (r.verdict === 'incorrect' && r.confidence < 70)
-            ).length;
-            factCheckCriticalIssues = reCritical;
-            factCheckMinorIssues = reMinor;
-            console.log(`Re-check after auto-fix: ${reCritical} critical, ${reMinor} minor issues`);
+              // 修正した主張だけを再確認する
+              if (run.hasTime(30_000)) {
+                const recheckClaims = claimsForRecheck(factCheckResults, fullContent);
+                const recheck = await runGeminiFactCheck({
+                  content: fullContent,
+                  keyword,
+                  factSheet,
+                  call: run.call,
+                  resolveUrls: run.resolveUrls,
+                  canSearch: () => run.hasTime(30_000),
+                  concurrency: searchConcurrency,
+                  onlyClaims: recheckClaims,
+                });
+                const fixable = new Set(getFixableFactCheckIssues(factCheckResults).map((r) => r.claim));
+                factCheckResults = [
+                  ...factCheckResults.filter((r) => !fixable.has(r.claim)),
+                  ...recheck.results,
+                ];
+                searchSkipped = searchSkipped || recheck.skippedSearchClaims > 0;
+              } else {
+                run.skip('自動修正後の再確認');
+                searchSkipped = true;
+              }
+            }
           } else {
             console.warn('Auto-fix returned empty content. Keeping original content.');
           }
+
+          criticalIssues = countCriticalIssues(factCheckResults);
+          minorIssues = countMinorIssues(factCheckResults);
+          console.log(`After auto-fix: ${criticalIssues} critical, ${minorIssues} minor issues`);
         }
 
-        // Recalculate issue counts after optional auto-fix.
-        const criticalIssuesAfterFix = factCheckResults.filter(r =>
-          r.verdict === 'incorrect' && r.confidence >= 70
-        ).length;
-        const minorIssuesAfterFix = factCheckResults.filter(r =>
-          r.verdict === 'partially_correct' ||
-          (r.verdict === 'incorrect' && r.confidence < 70)
-        ).length;
-        factCheckCriticalIssues = criticalIssuesAfterFix;
-        factCheckMinorIssues = minorIssuesAfterFix;
+        factCheckCriticalIssues = criticalIssues;
+        factCheckMinorIssues = minorIssues;
+        factCheckUnverified = countUnverified(factCheckResults);
 
-        if (criticalIssuesAfterFix > 0) {
-          console.log(`Critical errors found (${criticalIssuesAfterFix}). Forcing draft status.`);
-          finalPostStatus = 'draft';
-          factCheckAlerts.push(`重大なファクトチェック指摘が残っています（${criticalIssuesAfterFix}件）。下書きに変更しました。`);
+        if (criticalIssues > 0) {
+          forceDraft(`重大なファクトチェック指摘が残っています（${criticalIssues}件）。`);
+        }
+        if (searchSkipped) {
+          run.skip('ファクトチェックの検索確認');
+          forceDraft('一部の主張を検索で確認できませんでした（時間不足、または検索が使われなかったため）。');
+        }
+        if (factCheckUnverified >= UNVERIFIED_WARNING_THRESHOLD) {
+          factCheckAlerts.push(`確認できなかった主張が${factCheckUnverified}件あります。投稿前に内容を確認してください。`);
         }
 
         // Save the fact-check report for execution history and alerts.
@@ -1290,21 +1454,17 @@ async function executeSchedule(
           user_id: scheduleUserId || null,
           schedule_id: schedule.id,
           checked_items: factCheckResults,
-          total_checked: itemsToCheck.length,
-          issues_found: criticalIssuesAfterFix + minorIssuesAfterFix,
-          critical_issues: criticalIssuesAfterFix
+          total_checked: factCheckItemsChecked,
+          issues_found: criticalIssues + minorIssues,
+          critical_issues: criticalIssues
         }).select().single();
 
         factCheckReport = savedReport;
-      } else {
-        console.log('Fact-check settings not configured or API key missing');
-        factCheckAlerts.push('ファクトチェック設定またはPerplexity APIキーが未設定です。');
       }
     } catch (factCheckError) {
       console.error('Fact-check failed:', factCheckError);
       const errorText = factCheckError instanceof Error ? factCheckError.message : String(factCheckError || '');
-      factCheckAlerts.push(`ファクトチェックに失敗しました: ${errorText}`);
-      // Keep the generated article and notify through the configured alert flow.
+      forceDraft(`ファクトチェックに失敗しました: ${errorText.slice(0, 200)}。`);
     }
   }
 
@@ -1338,6 +1498,21 @@ async function executeSchedule(
   }
 
   validateGeneratedArticleCompleteness(fullContent, outline, targetWordCount);
+
+  // 自動修正で直しきれず「（修正: …）」などが残った記事は公開しない
+  if (hasCorrectionArtifacts(fullContent)) {
+    forceDraft('自動修正の注記（「修正:」など）が本文に残っています。');
+  }
+
+  // 4.8 参考資料（根拠メモの出典）を記事末に付ける。文字数調整・見出し検査の後に付ける
+  let referencesCount = 0;
+  if (schedule.append_references !== false && hasUsableFacts(factSheet)) {
+    const referencesMarkdown = buildReferencesMarkdown(factSheet);
+    if (referencesMarkdown) {
+      fullContent = appendReferencesSection(fullContent, referencesMarkdown);
+      referencesCount = selectReferenceSources(factSheet).length;
+    }
+  }
 
   // 5. Create the WordPress post after cleanup and fact-check.
   let postId: string | null = null;
@@ -1393,6 +1568,47 @@ async function executeSchedule(
     });
   }
 
+  // 品質まわりの実行結果（通知と実行履歴に使う）
+  const aiUsageSummary = run?.tracker.hasData ? run.tracker.summarize() : null;
+  const qualityReport = {
+    quality_mode: qualityMode,
+    writer_model: run ? run.effectiveWriterModel : aiConfig.model,
+    pro_fallback: Boolean(run?.proUnavailable),
+    fact_sheet: factSheet
+      ? {
+        facts: factSheet.facts,
+        sources: factSheet.sources.map(({ id, title, url }) => ({ id, title, url })),
+        cautions: factSheet.cautions,
+        search_queries: factSheet.searchQueries,
+        warnings: factSheet.warnings,
+      }
+      : null,
+    fact_sheet_error: factSheet ? '' : factSheetError,
+    editorial_review: editorialReviewStatus,
+    references_count: referencesCount,
+    skipped_steps: run?.skippedSteps || [],
+    notes: run?.notes || [],
+    unverified_claims: factCheckUnverified,
+    elapsed_seconds: run ? Math.round(run.elapsedMs() / 1000) : null,
+    time_budget_seconds: run ? Math.round(run.budgetMs / 1000) : null,
+  };
+  const qualityBlock = isGeminiProvider
+    ? [
+      '',
+      '【品質】',
+      `品質モード: ${qualityMode === 'high' ? '高品質' : '標準'}`,
+      `執筆モデル: ${qualityReport.writer_model}${qualityReport.pro_fallback ? '（Proが使えずFlashで代替）' : ''}`,
+      `根拠メモ: ${factSheet ? `事実${factSheet.facts.length}件・出典${factSheet.sources.length}件` : `なし（${factSheetError || '作成できませんでした'}）`}`,
+      `Google検索: ${aiUsageSummary?.grounded_requests ?? 0}回`,
+      `見直し: ${editorialReviewStatus}`,
+      `参考資料: ${referencesCount > 0 ? `${referencesCount}件` : 'なし'}`,
+      qualityReport.skipped_steps.length > 0 ? `時間切れで省略: ${qualityReport.skipped_steps.join('、')}` : '',
+      ...(qualityReport.notes.map((note) => `メモ: ${note}`)),
+      aiUsageSummary ? `推定費用: 約${Math.max(1, Math.round(aiUsageSummary.total_estimated_usd * USD_TO_JPY))}円（有料キー換算）` : '',
+      qualityReport.elapsed_seconds !== null ? `処理時間: ${qualityReport.elapsed_seconds}秒（上限${qualityReport.time_budget_seconds}秒）` : '',
+    ].filter((line) => line !== '').join('\n')
+    : '';
+
   const rawNotifyEveryRun = (schedule as any).fact_check_notify_on_every_run === true;
   const rawNotifyOnAnomaly = (schedule as any).fact_check_notify_on_anomaly ?? true;
   const factCheckNotifyOnEveryRun = rawNotifyEveryRun;
@@ -1421,7 +1637,8 @@ async function executeSchedule(
 実行状態: ${factCheckExecuted ? '実行済み' : '未実行'}
 チェック件数: ${factCheckItemsChecked}件
 重大な指摘: ${factCheckCriticalIssues}件
-軽微な指摘: ${factCheckMinorIssues}件${factCheckChangeBlock}`;
+軽微な指摘: ${factCheckMinorIssues}件
+確認できなかった主張: ${factCheckUnverified}件${factCheckChangeBlock}${qualityBlock ? `\n${qualityBlock}` : ''}`;
 
         await sendChatworkNotifications(
           chatworkApiToken,
@@ -1448,7 +1665,7 @@ async function executeSchedule(
 投稿状態: {status}
 
 警告内容:
-${factCheckAlerts.map((item, index) => `${index + 1}. ${item}`).join('\n')}${factCheckChangeBlock}`;
+${factCheckAlerts.map((item, index) => `${index + 1}. ${item}`).join('\n')}${factCheckChangeBlock}${qualityBlock ? `\n${qualityBlock}` : ''}`;
 
         await sendChatworkNotifications(
           chatworkApiToken,
@@ -1474,8 +1691,10 @@ ${factCheckAlerts.map((item, index) => `${index + 1}. ${item}`).join('\n')}${fac
     factCheckItemsChecked,
     imagesGenerated: scheduleImageGenerationEnabled && aiConfig.image_enabled ? scheduleImagesPerArticle : 0,
     imageUnitCostUsd: imageCostUsdPerImage,
+    aiUsage: aiUsageSummary,
   });
   (costBreakdown as any).trigger_type = triggerType;
+  (costBreakdown as any).quality = qualityReport;
   (costBreakdown as any).generation_debug = buildGenerationDebug({
     outline,
     title: articleTitle,
@@ -1600,26 +1819,23 @@ async function selectUnusedTitle(
   allTitles: string[],
   supabase: any
 ): Promise<string | null> {
-  const { data: history } = await supabase
+  const { data: history, error } = await supabase
     .from('execution_history')
-    .select('article_title')
+    .select(TITLE_USAGE_SELECT)
     .eq('schedule_id', scheduleId);
 
-  // 髯橸ｽｳ隰疲ｺ倥・驍ｵ・ｺ繝ｻ・ｫ髣包ｽｳ・つ鬮｢・ｾ繝ｻ・ｴ驍ｵ・ｺ陷ｷ・ｶ繝ｻ迢暦ｽｹ・ｧ繝ｻ・ｿ驛｢・ｧ繝ｻ・､驛｢譎冗樟・取刮・ｹ・ｧ陝ｶ譎乗ｱる辨貅倥・
-  const normalize = (value: unknown) => String(value || '').trim();
-  const usedTitles = new Set((history || []).map((h: any) => normalize(h.article_title)));
-  const availableTitles = allTitles
-    .map(normalize)
-    .filter((t) => t && !usedTitles.has(t));
-
-  // 使い切ったら先頭に戻さず停止する（同じタイトルの重複投稿を防ぐ）
-  if (availableTitles.length === 0) {
-    console.log(`All titles used for schedule ${scheduleId}. Schedule will be paused.`);
-    return null;
+  if (error) {
+    // 履歴が読めないまま選ぶと同じタイトルを重複投稿しかねないため、実行を中止する
+    throw new Error(`Failed to load title usage history: ${error.message}`);
   }
 
-  // 郢晢ｽｪ郢ｧ・ｹ郢晉｣ｯ・ｰ繝ｻ 隴幢ｽｪ闖ｴ・ｿ騾包ｽｨ邵ｺ・ｮ陷育｣ｯ・ｰ・ｭ郢ｧ蟶昶・邵ｺ・ｶ
-  return availableTitles[0];
+  // 失敗した実行ではタイトルを消費しない（3回失敗したタイトルは飛ばす）。
+  // 使い切ったら先頭に戻さず null を返し、スケジュールを停止させる。
+  const nextTitle = pickNextTitle(allTitles, history || []);
+  if (!nextTitle) {
+    console.log(`All titles used for schedule ${scheduleId}. Schedule will be paused.`);
+  }
+  return nextTitle;
 }
 
 

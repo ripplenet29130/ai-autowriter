@@ -71,6 +71,8 @@ export interface GenerateArticleWithSharedCoreParams {
   defaultMaxTokens?: number;
   qualityRetryCount?: number;
   finalPolish?: boolean;
+  // 見出しごとに追加する指示（根拠メモの割り当てなど）
+  getSectionInstructions?: (section: SharedOutlineSection, index: number) => string | undefined;
   sectionTimeoutMs?: number;
   onSectionStart?: (payload: {
     index: number;
@@ -2667,6 +2669,7 @@ export async function generateOutlineWithSharedCore(
         if (h3Supplement.added === 0) break;
       } catch (error) {
         attemptDiagnostics.push(`h3Supplement:error=${error instanceof Error ? error.message : String(error)}`);
+    const sectionInstructions = params.getSectionInstructions?.(section, index);
         break;
       }
     }
@@ -2712,7 +2715,10 @@ export async function generateArticleFromOutlineWithSharedCore(
     const contentPromise = generateSectionWithQualityGate(section, params.outline, accumulatedContent, {
       keywords: params.keywords,
       tone,
-      customInstructions: params.customInstructions,
+      customInstructions: [params.customInstructions, sectionInstructions]
+        .map((text) => String(text || '').trim())
+        .filter(Boolean)
+        .join('\n\n') || undefined,
       callAI: params.callAI,
       maxTokens,
       qualityRetryCount

@@ -1,6 +1,7 @@
 // 生成テキストの整形・見出し正規化・WordPress 用フォーマット（純粋関数群）
 import { countGeneratedChars } from '../../../src/shared/articleGenerationCore.ts';
 import { trimForLog } from './_shared.ts';
+import { convertMarkdownLinksToHtml } from '../../../src/shared/markdownLinks.ts';
 
 export function splitLongParagraphForReadability(text: string): string[] {
   const normalized = String(text || '').replace(/\s+/g, ' ').trim();
@@ -132,6 +133,9 @@ export function formatContentForWordPress(rawContent: string): string {
   text = text.replace(/\*\*/g, '');
 
   // 隴幢ｽｬ隴√・・定ｰｿ・ｵ髣懶ｽｽ陋ｹ謔ｶ・邵ｺ・ｦ邵ｲ竏ｬ・ｩ・ｰ邵ｺ・ｾ邵ｺ・｣邵ｺ・ｦ髫穂ｹ昶斡郢ｧ蜿･謦ｫ鬯伜ｾ鯉ｽ帝ｫｦ・ｲ邵ｺ繝ｻ
+  // Markdown links -> HTML links（参考資料など）
+  text = convertMarkdownLinksToHtml(text);
+
   return wrapPlainTextBlocksWithParagraphs(text);
 }
 

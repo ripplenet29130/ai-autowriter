@@ -11,7 +11,7 @@ export interface AiModelOption {
 export const DEFAULT_AI_MODELS: Record<AiProvider, string> = {
   openai: 'gpt-5.4',
   claude: 'claude-sonnet-4-6',
-  gemini: 'gemini-3.5-flash',
+  gemini: 'gemini-3.8-flash',
 };
 
 export const AI_MODEL_OPTIONS: Record<AiProvider, readonly AiModelOption[]> = {
@@ -26,7 +26,7 @@ export const AI_MODEL_OPTIONS: Record<AiProvider, readonly AiModelOption[]> = {
     { value: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5', tier: '低価格・高速' },
   ],
   gemini: [
-    { value: 'gemini-3.5-flash', label: 'Google Gemini 3.5 Flash', tier: 'バランス' },
+    { value: 'gemini-3.8-flash', label: 'Google Gemini 3.8 Flash', tier: 'バランス' },
     { value: 'gemini-3.1-pro-preview', label: 'Google Gemini 3.1 Pro Preview', tier: '高品質・プレビュー' },
     { value: 'gemini-3.1-flash-lite', label: 'Google Gemini 3.1 Flash-Lite', tier: '低価格・高速' },
   ],
@@ -51,9 +51,26 @@ const MODEL_REPLACEMENTS: Partial<Record<AiProvider, Record<string, string>>> = 
     'gemini-2.0-flash-001': DEFAULT_AI_MODELS.gemini,
     'gemini-3.0-pro': DEFAULT_AI_MODELS.gemini,
     'gemini-3.0-flash': DEFAULT_AI_MODELS.gemini,
+    // 3.5 Flash は Google の料金表から外れたため 3.8 Flash へ読み替える
+    'gemini-3.5-flash': DEFAULT_AI_MODELS.gemini,
     'gemini-pro': DEFAULT_AI_MODELS.gemini,
   },
 };
+
+// 品質モード: high = 本文執筆と編集見直しに上位モデル（Pro）を使う / standard = すべて基本モデル
+export type QualityMode = 'high' | 'standard';
+export const DEFAULT_QUALITY_MODE: QualityMode = 'high';
+export const GEMINI_WRITING_MODEL = 'gemini-3.1-pro-preview';
+
+export function normalizeQualityMode(value: unknown): QualityMode {
+  return value === 'standard' ? 'standard' : DEFAULT_QUALITY_MODE;
+}
+
+// 本文執筆・見直しに使う Gemini モデル。standard や Gemini 以外では基本モデルのまま。
+export function resolveWritingModel(provider: string, baseModel: string, qualityMode: QualityMode): string {
+  if (provider !== 'gemini' || qualityMode !== 'high') return baseModel;
+  return GEMINI_WRITING_MODEL;
+}
 
 export function isAiProvider(provider: string): provider is AiProvider {
   return provider === 'openai' || provider === 'claude' || provider === 'gemini';

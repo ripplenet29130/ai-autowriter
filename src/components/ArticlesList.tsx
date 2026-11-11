@@ -56,6 +56,12 @@ export const ArticlesList: React.FC = () => {
   const { publishToWordPress, isPublishing } = useWordPressPublish();
   const { configs } = useWordPressConfig();
   const activeConfigs = configs.filter(c => c.isActive);
+  const isRetryingScheduledFailure = Boolean(
+    publishingArticle?.status === 'failed' && publishingArticle.wordPressConfigId
+  );
+  const lockedConfig = isRetryingScheduledFailure
+    ? configs.find(config => config.id === publishingArticle?.wordPressConfigId)
+    : undefined;
   const markdownUrlTransform = (url: string, key?: string) => {
     if (key === 'src' && /^data:image\/[a-zA-Z0-9.+-]+;base64,/i.test(url)) {
       return url;
@@ -601,6 +607,11 @@ export const ArticlesList: React.FC = () => {
                           onClick={(e) => {
                             e.stopPropagation();
                             setPublishingArticle(article);
+                            setSelectedConfigId(
+                              article.status === 'failed' && article.wordPressConfigId
+                                ? article.wordPressConfigId
+                                : activeConfigs[0]?.id || ''
+                            );
                             setPublishStatus('publish');
                             setScheduledDate('');
                           }}
@@ -890,7 +901,25 @@ export const ArticlesList: React.FC = () => {
                   「{publishingArticle.title}」を以下のサイトに投稿します。
                 </p>
 
-                {activeConfigs.length > 0 ? (
+                {isRetryingScheduledFailure ? (
+                  lockedConfig ? (
+                    <div>
+                      <label className="block text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">
+                        WordPressサイト
+                      </label>
+                      <div className="w-full px-4 py-2 border border-gray-200 rounded-lg bg-gray-50 text-gray-700">
+                        {lockedConfig.name} ({lockedConfig.url})
+                      </div>
+                      <p className="text-xs text-gray-500 mt-1">
+                        予約投稿時に指定されたサイトへ投稿します。
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="p-4 bg-yellow-50 border border-yellow-100 rounded-lg text-sm text-yellow-800">
+                      予約投稿時のWordPress設定が見つかりません。設定を確認してください。
+                    </div>
+                  )
+                ) : activeConfigs.length > 0 ? (
                   <div>
                     <label className="block text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">
                       WordPressサイト
@@ -981,8 +1010,16 @@ export const ArticlesList: React.FC = () => {
                 </button>
                 <button
                   onClick={async () => {
-                    if (!selectedConfigId) {
+                    const targetConfigId = isRetryingScheduledFailure
+                      ? publishingArticle.wordPressConfigId
+                      : selectedConfigId;
+
+                    if (!targetConfigId) {
                       toast.error('投稿先を選択してください');
+                      return;
+                    }
+                    if (isRetryingScheduledFailure && !lockedConfig) {
+                      toast.error('予約投稿時のWordPress設定が見つかりません');
                       return;
                     }
                     if (publishStatus === 'future' && !scheduledDate) {
@@ -991,7 +1028,7 @@ export const ArticlesList: React.FC = () => {
                     }
 
                     const date = publishStatus === 'future' ? new Date(scheduledDate) : undefined;
-                    const publishedArticle = await publishToWordPress(publishingArticle, selectedConfigId, undefined, publishStatus, date);
+                    const publishedArticle = await publishToWordPress(publishingArticle, targetConfigId, undefined, publishStatus, date);
 
                     if (publishedArticle && typeof publishedArticle !== 'boolean') {
                       setLocalArticles(prev => prev.map(article =>
@@ -1006,7 +1043,7 @@ export const ArticlesList: React.FC = () => {
                       loadArticles();
                     }
                   }}
-                  disabled={isPublishing || activeConfigs.length === 0}
+                  disabled={isPublishing || (isRetryingScheduledFailure ? !lockedConfig : activeConfigs.length === 0)}
                   className="btn-primary px-6 py-2 flex items-center gap-2"
                 >
                   {isPublishing ? (

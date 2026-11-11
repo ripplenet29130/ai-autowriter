@@ -1,5 +1,6 @@
 // scheduler-executor 全体で共有する型・定数・汎用ユーティリティ
 import { normalizeAiModel } from '../../../src/shared/aiModelCatalog.ts';
+import type { GenerationRun } from './_run.ts';
 
 export function getFirstScheduleKeyword(schedule: Schedule): string {
   return String(schedule.keyword || '')
@@ -123,6 +124,10 @@ export interface Schedule {
   fact_check_notify_on_every_run?: boolean;
   image_generation_enabled?: boolean;
   images_per_article?: number;
+  // 品質モード（high: 本文・見直しに Pro / standard: すべて基本モデル）
+  quality_mode?: 'high' | 'standard' | null;
+  // 記事末に参考資料（根拠メモの出典）を付けるか
+  append_references?: boolean | null;
 }
 
 
@@ -186,6 +191,8 @@ export interface AIConfig {
   is_active?: boolean;
   image_enabled?: boolean;
   images_per_article?: number;
+  // 実行中の Gemini 呼び出し管理（DB の列ではない）
+  run?: GenerationRun;
 }
 
 

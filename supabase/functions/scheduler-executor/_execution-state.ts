@@ -754,6 +754,8 @@ export async function recordScheduleExecutionFailure(
 
     if (!insertResult.error && insertResult.data?.id) {
       runningHistoryId = insertResult.data.id;
+      // 実行中の行に入っているタイトルは残す（失敗回数をタイトル単位で数えるため）
+      delete failureHistoryPayload.article_title;
       insertResult = await supabase
         .from('execution_history')
         .update(failureHistoryPayload)

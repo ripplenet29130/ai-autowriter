@@ -1,5 +1,22 @@
 import { FactCheckResult } from './factCheck';
+import type { FactSheet } from '../shared/factSheetCore';
 export type { FactCheckResult };
+export type { FactSheet };
+
+// 手動生成での品質まわりの結果（見直し・根拠メモ・使用モデル）
+export interface ArticleQualityInfo {
+  qualityMode: 'high' | 'standard';
+  writerModel: string;
+  proFallback: boolean;
+  editorialReview?: {
+    status: string;
+    accepted: boolean;
+    before?: string;
+  };
+  referencesCount: number;
+  notes: string[];
+  estimatedCostJpy?: number;
+}
 
 export interface Article {
   id: string;
@@ -30,6 +47,7 @@ export interface Article {
   articleStructureType?: ArticleStructureType;
   trendData?: TrendAnalysisResult;
   factCheckResults?: FactCheckResult[];
+  qualityInfo?: ArticleQualityInfo;
   userId?: string;
   accountId?: string;
   ownerEmail?: string;
@@ -185,6 +203,10 @@ export interface ScheduleSetting {
   fact_check_notify_on_every_run?: boolean;
   image_generation_enabled?: boolean;
   images_per_article?: number;
+  // 品質モード（high: 本文・見直しに Gemini 3.1 Pro / standard: すべて基本モデル）
+  quality_mode?: 'high' | 'standard';
+  // 記事末に参考資料（根拠メモの出典）を付けるか
+  append_references?: boolean;
 }
 
 export interface ChatworkRecipient {
@@ -254,6 +276,11 @@ export interface TrendAnalysisResult {
     geographicData: GeographicTrend[];
   };
   timestamp: Date;
+  // 根拠メモ（Google 検索で集めた事実と出典）。Gemini を使える場合だけ作る
+  factSheet?: FactSheet | null;
+  factSheetError?: string;
+  // 画面でチェックを外した（本文に使わない）事実の番号
+  excludedFactIds?: string[];
 }
 
 export interface CompetitorArticle {

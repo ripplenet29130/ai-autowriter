@@ -1,56 +1,43 @@
 import React, { useEffect, useState } from 'react';
-import { ExternalLink, Info, Key, Save, ShieldCheck } from 'lucide-react';
+import { Info, Save, ShieldCheck } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { supabase } from '../services/supabaseClient';
 import { getCurrentUserId, getOwnershipInsertFields } from '../services/accountScope';
 
 type SettingsState = {
+  enabled: boolean;
   autoFixEnabled: boolean;
-  perplexityApiKey: string;
   alertChatworkRoomId: string;
   notifyMode: 'off' | 'anomaly' | 'every';
 };
 
-const LOCAL_STORAGE_KEY = 'fact_check_settings_local';
+// 旧 Perplexity 方式でブラウザに保存していた設定（APIキーを含む）。今は使わないので削除する
+const LEGACY_LOCAL_STORAGE_KEY = 'fact_check_settings_local';
 const parseBoolean = (value: string | null | undefined, fallback = false) => {
-  if (value == null) return fallback;
+  if (value == null || value === '') return fallback;
   return ['1', 'true', 'yes', 'on'].includes(String(value).toLowerCase());
 };
 
 export const FactCheckSettings: React.FC = () => {
   const [settings, setSettings] = useState<SettingsState>({
+    enabled: true,
     autoFixEnabled: false,
-    perplexityApiKey: '',
     alertChatworkRoomId: '',
     notifyMode: 'anomaly',
   });
   const [loading, setLoading] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
-  // perplexity_api_key はクライアントから読めないため、保存済みかどうかは設定行の有無で判定する
-  const [hasStoredApiKey, setHasStoredApiKey] = useState(false);
 
   useEffect(() => {
+    try {
+      window.localStorage.removeItem(LEGACY_LOCAL_STORAGE_KEY);
+    } catch {
+      // ignore
+    }
     void loadSettings();
   }, []);
 
   const loadSettings = async () => {
-    try {
-      const localRaw = window.localStorage.getItem(LOCAL_STORAGE_KEY);
-      if (localRaw) {
-        const local = JSON.parse(localRaw) as Partial<SettingsState>;
-        setSettings((prev) => ({
-          autoFixEnabled: Boolean(local.autoFixEnabled ?? prev.autoFixEnabled),
-          perplexityApiKey: String(local.perplexityApiKey ?? prev.perplexityApiKey ?? ''),
-          alertChatworkRoomId: String(local.alertChatworkRoomId ?? prev.alertChatworkRoomId ?? ''),
-          notifyMode: ['off', 'anomaly', 'every'].includes(String(local.notifyMode))
-            ? local.notifyMode as SettingsState['notifyMode']
-            : 'anomaly',
-        }));
-      }
-    } catch (error) {
-      console.warn('Failed to load local fact-check settings:', error);
-    }
-
     if (!supabase) {
       setInitialLoading(false);
       return;
@@ -63,8 +50,7 @@ export const FactCheckSettings: React.FC = () => {
     }
 
     try {
-      let userSettings: any = null;
-      const { data, error } = await supabase
+      const { data: userSettings, error } = await supabase
         .from('fact_check_settings')
         .select('id, enabled, auto_fix_enabled')
         .eq('user_id', userId)
@@ -76,14 +62,12 @@ export const FactCheckSettings: React.FC = () => {
         console.error('Initial load error details:', error);
       }
 
-      userSettings = data;
-      setHasStoredApiKey(Boolean(userSettings));
-
       const { data: globalRows, error: globalError } = await supabase
         .from('app_settings')
         .select('key, value')
         .eq('user_id', userId)
         .in('key', [
+          'fact_check_enabled',
           'fact_check_auto_fix_enabled',
           'fact_check_alert_chatwork_room_id',
           'fact_check_notify_mode',
@@ -98,15 +82,14 @@ export const FactCheckSettings: React.FC = () => {
         map.set(String(row.key), String(row.value ?? ''));
       });
 
-      setSettings((prev) => ({
+      setSettings({
+        enabled: userSettings ? userSettings.enabled !== false : parseBoolean(map.get('fact_check_enabled'), true),
         autoFixEnabled: Boolean(userSettings?.auto_fix_enabled ?? parseBoolean(map.get('fact_check_auto_fix_enabled'))),
-        // 保存済みキーは表示できない。変更したい場合のみ入力してもらう
-        perplexityApiKey: prev.perplexityApiKey,
         alertChatworkRoomId: map.get('fact_check_alert_chatwork_room_id') ?? '',
         notifyMode: ['off', 'anomaly', 'every'].includes(String(map.get('fact_check_notify_mode')))
           ? map.get('fact_check_notify_mode') as SettingsState['notifyMode']
           : 'anomaly',
-      }));
+      });
     } catch (error) {
       console.error('Failed to load fact check settings:', error);
     } finally {
@@ -117,25 +100,8 @@ export const FactCheckSettings: React.FC = () => {
   const handleSave = async () => {
     setLoading(true);
     try {
-      const enteredApiKey = settings.perplexityApiKey.trim();
-
-      // キーが入力された場合のみローカル保存を更新する（空文字で既存の値を消さない）
-      if (enteredApiKey) {
-        window.localStorage.setItem(
-          LOCAL_STORAGE_KEY,
-          JSON.stringify({
-            enabled: true,
-            autoFixEnabled: settings.autoFixEnabled,
-            perplexityApiKey: enteredApiKey,
-            alertChatworkRoomId: settings.alertChatworkRoomId,
-            notifyMode: settings.notifyMode,
-            modelName: 'sonar',
-          })
-        );
-      }
-
       if (!supabase) {
-        toast.success('ファクトチェック設定を保存しました（ローカル設定）');
+        toast.error('Supabase に接続できないため保存できませんでした');
         return;
       }
 
@@ -149,22 +115,12 @@ export const FactCheckSettings: React.FC = () => {
         .limit(1)
         .maybeSingle();
 
-      if (!enteredApiKey && !existingSettings) {
-        toast.error('Perplexity APIキーを入力してください');
-        return;
-      }
-
       const payload: Record<string, unknown> = {
         ...ownership,
-        enabled: true,
+        enabled: settings.enabled,
         auto_fix_enabled: settings.autoFixEnabled,
         updated_at: new Date().toISOString(),
       };
-
-      // 空のまま保存しても既存のキーを消さない（キーは書き込み専用）
-      if (enteredApiKey) {
-        payload.perplexity_api_key = enteredApiKey;
-      }
 
       const result = existingSettings
         ? await supabase.from('fact_check_settings').update(payload).eq('id', existingSettings.id)
@@ -174,12 +130,8 @@ export const FactCheckSettings: React.FC = () => {
         throw result.error;
       }
 
-      setHasStoredApiKey(true);
-      setSettings((prev) => ({ ...prev, perplexityApiKey: '' }));
-
       const globalSettingsToSave = [
-        // perplexity_api_key は app_settings に平文コピーしない（fact_check_settings のみが正）
-        { key: 'fact_check_enabled', value: 'true', description: 'Enable fact check' },
+        { key: 'fact_check_enabled', value: String(settings.enabled), description: 'Enable fact check' },
         {
           key: 'fact_check_auto_fix_enabled',
           value: String(settings.autoFixEnabled),
@@ -233,52 +185,34 @@ export const FactCheckSettings: React.FC = () => {
         <div className="flex items-center gap-3">
           <ShieldCheck className="h-6 w-6 text-green-600" />
           <div>
-            <div className="flex items-center gap-2">
-              <h3 className="text-lg font-semibold text-gray-900">Perplexity ファクトチェック設定</h3>
-              <span className="rounded-full bg-gray-100 px-2.5 py-1 text-xs font-semibold text-gray-600">任意</span>
-            </div>
+            <h3 className="text-lg font-semibold text-gray-900">ファクトチェック設定</h3>
             <p className="mt-1 text-sm text-gray-600">
-              事実確認、ファクトチェック後の自動修正、結果通知を設定します。
+              Gemini の Google 検索で記事の事実を確認します。AI設定の Gemini APIキーを使うため、別のキーは不要です。
             </p>
           </div>
         </div>
       </div>
 
       <label className="flex items-center justify-between rounded-lg border p-3">
-        <span className="text-sm font-medium text-gray-700">問題があればAIで自動修正する</span>
+        <span className="text-sm font-medium text-gray-700">ファクトチェックを実行する</span>
         <input
           type="checkbox"
-          checked={settings.autoFixEnabled}
-          onChange={(e) => setSettings({ ...settings, autoFixEnabled: e.target.checked })}
+          checked={settings.enabled}
+          onChange={(e) => setSettings({ ...settings, enabled: e.target.checked })}
           className="h-4 w-4"
         />
       </label>
 
-      <div className="space-y-2">
-        <div className="flex items-center justify-between">
-          <label className="flex items-center text-sm font-medium text-gray-700">
-            <Key className="mr-1.5 h-4 w-4 text-gray-400" />
-            Perplexity API Key
-          </label>
-          <a
-            href="https://www.perplexity.ai/settings/api"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center text-xs text-blue-600 hover:text-blue-500"
-          >
-            APIキーを取得
-            <ExternalLink className="ml-1 h-3 w-3" />
-          </a>
-        </div>
+      <label className="flex items-center justify-between rounded-lg border p-3">
+        <span className="text-sm font-medium text-gray-700">問題があればAIで自動修正する</span>
         <input
-          type="password"
-          value={settings.perplexityApiKey}
-          onChange={(e) => setSettings({ ...settings, perplexityApiKey: e.target.value })}
-          placeholder={hasStoredApiKey ? '保存済みです。変更する場合のみ入力してください' : 'pplx-...'}
-          className="w-full rounded-lg border border-gray-300 px-4 py-2 font-mono text-sm focus:border-transparent focus:ring-2 focus:ring-blue-500"
-          autoComplete="new-password"
+          type="checkbox"
+          checked={settings.autoFixEnabled}
+          disabled={!settings.enabled}
+          onChange={(e) => setSettings({ ...settings, autoFixEnabled: e.target.checked })}
+          className="h-4 w-4"
         />
-      </div>
+      </label>
 
       <div className="space-y-3 border-t border-gray-200 pt-4">
         <div>
@@ -342,8 +276,9 @@ export const FactCheckSettings: React.FC = () => {
         <div className="text-sm text-blue-800">
           <p className="mb-1 font-semibold text-blue-900">補足</p>
           <ul className="list-inside list-disc space-y-1">
-            <li>APIキー未設定時はファクトチェックを実行しません。</li>
-            <li>自動修正をONにすると、誤り検出後に本文の修正まで実行します。</li>
+            <li>確認の流れ: AI が確認の必要な主張を選ぶ → 根拠メモと照合 → 根拠メモにない主張だけ Google 検索で確認します。</li>
+            <li>自動投稿では、重大な誤りが残った記事・確認を最後までできなかった記事は下書きで保存します。</li>
+            <li>自動修正をONにすると、誤り検出後に本文の修正と、修正箇所の再確認まで実行します。</li>
             <li>ChatWork通知には、通知設定タブのAPIトークンが必要です。</li>
           </ul>
         </div>

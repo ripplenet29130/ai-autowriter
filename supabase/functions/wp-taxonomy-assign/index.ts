@@ -25,6 +25,14 @@ function normalizeBaseUrl(value: string): string {
   return String(value || "").replace(/\/+$/, "");
 }
 
+// REST APIはエンドポイント名として複数形（posts/pages）を使うが、XML-RPCの
+// wp.editPostは実際に登録されたpost_typeキー（post/page、単数形）を要求する。
+function toXmlRpcPostType(postType: string): string {
+  if (postType === "posts") return "post";
+  if (postType === "pages") return "page";
+  return postType;
+}
+
 function buildXmlRpcBody(params: Required<AssignTaxonomyRequest>): string {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <methodCall>
@@ -116,7 +124,7 @@ serve(async (req) => {
       username,
       password,
       postId,
-      postType,
+      postType: toXmlRpcPostType(postType),
       taxonomy,
       term,
     });

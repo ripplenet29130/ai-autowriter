@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { Send, Save, Globe } from 'lucide-react';
+import { Send, Save, Globe, AlertTriangle } from 'lucide-react';
 import { Article, WordPressConfig } from '../../types';
 import toast from 'react-hot-toast';
+import { countCriticalIssues, countUnverified, hasCorrectionArtifacts, UNVERIFIED_WARNING_THRESHOLD } from '../../shared/geminiFactCheck';
 
 interface PublishControlProps {
     article: Article;
@@ -45,6 +46,24 @@ export const PublishControl: React.FC<PublishControlProps> = ({
         }
     }, [defaultConfigId, selectedConfig]);
 
+    // 投稿前の注意（手動投稿では止めずに警告だけ出す）
+    const publishWarnings: string[] = [];
+    const factResults = article.factCheckResults || [];
+    const criticalCount = countCriticalIssues(factResults);
+    if (criticalCount > 0) {
+        publishWarnings.push(`ファクトチェックで重大な誤りが${criticalCount}件残っています。`);
+    }
+    if (hasCorrectionArtifacts(article.content)) {
+        publishWarnings.push('本文に自動修正の注記（「修正:」「AI修正サマリー」）が残っています。');
+    }
+    const unverifiedCount = countUnverified(factResults);
+    if (unverifiedCount >= UNVERIFIED_WARNING_THRESHOLD) {
+        publishWarnings.push(`確認できなかった主張が${unverifiedCount}件あります。`);
+    }
+    if (factResults.length === 0) {
+        publishWarnings.push('ファクトチェックをまだ実行していません。');
+    }
+
     const handlePublish = () => {
         if (selectedConfig) {
             const date = publishStatus === 'future' ? new Date(scheduledDate) : undefined;
@@ -59,6 +78,21 @@ export const PublishControl: React.FC<PublishControlProps> = ({
     return (
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 space-y-4">
             <h3 className="text-lg font-semibold text-gray-900">投稿設定</h3>
+
+            {publishWarnings.length > 0 && (
+                <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                    <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0" />
+                    <div>
+                        <p className="font-semibold">投稿前に確認してください</p>
+                        <ul className="mt-1 list-inside list-disc space-y-0.5 text-xs">
+                            {publishWarnings.map((warning) => <li key={warning}>{warning}</li>)}
+                        </ul>
+                        {(criticalCount > 0 || hasCorrectionArtifacts(article.content)) && (
+                            <p className="mt-1 text-xs">公開ではなく下書きで保存することをおすすめします。</p>
+                        )}
+                    </div>
+                </div>
+            )}
 
             {/* WordPress Config Selection */}
             <div>

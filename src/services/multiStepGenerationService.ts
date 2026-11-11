@@ -15,6 +15,21 @@ import { titleGenerationService } from './titleGenerationService';
 import { aiService } from './aiService';
 import { generateArticleFromOutlineWithSharedCore } from '../shared/articleGenerationCore';
 import {
+    appendReferencesSection,
+    assignFactsToSections,
+    buildFactSheet,
+    buildFactSheetOutlineInstructions,
+    buildReferencesMarkdown,
+    buildSectionFactInstructions,
+    excludeFacts,
+    hasUsableFacts,
+    selectReferenceSources,
+    type FactSheet,
+} from '../shared/factSheetCore';
+import { runEditorialReview } from '../shared/editorialReviewCore';
+import { USD_TO_JPY } from '../shared/aiUsage';
+import { createGeminiSession, getGenerationQualityPrefs, isGeminiActiveProvider } from './geminiSession';
+import {
     buildAutoModeQualityInstructions as buildSharedAutoModeQualityInstructions,
     buildAutoOutlineRetryInstructions as buildSharedAutoOutlineRetryInstructions,
     compactAutoModeInstructions,
@@ -294,6 +309,52 @@ export class MultiStepGenerationService {
     }
 
     /**
+     * 根拠メモ（Google 検索で集めた事実と出典）を作ってトレンド分析結果に付ける。
+     * Gemini で生成する場合だけ作る。失敗しても生成は続けられる。
+     */
+    async attachFactSheet(trendData: TrendAnalysisResult, title?: string): Promise<TrendAnalysisResult> {
+        try {
+            await aiService.loadActiveConfig();
+            if (!isGeminiActiveProvider()) {
+                return { ...trendData, factSheet: null, factSheetError: undefined };
+            }
+            const session = await createGeminiSession();
+            const competitorHeadings = (trendData.competitorAnalysis?.topArticles || [])
+                .flatMap((article) => article.headings || [])
+                .filter(Boolean)
+                .slice(0, 15);
+            const sheet = await buildFactSheet({
+                keyword: trendData.keyword,
+                title,
+                relatedKeywords: trendData.relatedKeywords,
+                competitorHeadings,
+                call: session.call,
+                resolveUrls: session.resolveUrls,
+            });
+            return {
+                ...trendData,
+                factSheet: sheet,
+                excludedFactIds: [],
+                factSheetError: sheet.searchUsed
+                    ? (sheet.facts.length === 0 ? '検索結果から使える事実が見つかりませんでした' : undefined)
+                    : 'Google 検索が使われなかったため、根拠としては使いません（AIの知識だけのメモです）',
+            };
+        } catch (error) {
+            console.warn('Fact sheet creation failed:', error);
+            const message = error instanceof Error ? error.message : String(error || '');
+            return { ...trendData, factSheet: null, factSheetError: `根拠メモを作成できませんでした: ${message.slice(0, 160)}` };
+        }
+    }
+
+    // 画面でチェックを外した事実を除き、検索で作られたメモだけを根拠として使う
+    getEffectiveFactSheet(trendData?: TrendAnalysisResult | null): FactSheet | null {
+        const sheet = trendData?.factSheet;
+        if (!sheet || !sheet.searchUsed) return null;
+        const effective = excludeFacts(sheet, trendData?.excludedFactIds || []);
+        return hasUsableFacts(effective) ? effective : null;
+    }
+
+    /**
      * Step 1: トレンド分析
      */
     async analyzeTrends(keywords: string[]): Promise<TrendAnalysisResult> {
@@ -301,18 +362,18 @@ export class MultiStepGenerationService {
             console.log('Step 1: トレンド分析開始', keywords);
             const keyword = keywords[0];
 
+            let trendData: TrendAnalysisResult;
             try {
-                const trendData = await realTrendAnalysisService.analyzeTrends(keyword, {
+                trendData = await realTrendAnalysisService.analyzeTrends(keyword, {
                     region: 'JP',
                     timeframe: 'today 12-m'
                 });
                 console.log('Step 1: トレンド分析結果', trendData);
-                return trendData;
             } catch (apiError) {
                 console.warn('Trend API failed. Falling back to mock trend data.', apiError);
-                const mockTrendData = await trendAnalysisService.analyzeTrends(keyword);
-                return mockTrendData;
+                trendData = await trendAnalysisService.analyzeTrends(keyword);
             }
+            return await this.attachFactSheet(trendData);
         } catch (error) {
             console.error('Trend analysis failed:', error);
             throw new Error('トレンド分析に失敗しました');
@@ -364,7 +425,11 @@ export class MultiStepGenerationService {
                 focusTopics: options?.focusTopics,
                 selectedTitle: options?.selectedTitle, // 縺薙ｌ繧定ｿｽ蜉
                 keywordPreferences: options?.keywordPreferences,
-                customInstructions: options?.customInstructions,
+                // 構成案にだけ根拠メモの全体を渡す（本文では見出しごとに割り当てた分だけ渡す）
+                customInstructions: this.compactInstructions([
+                    options?.customInstructions,
+                    buildFactSheetOutlineInstructions(this.getEffectiveFactSheet(trendData)),
+                ]),
                 targetWordCount: options?.targetWordCount, // 霑ｽ蜉
                 articleStructureType: options?.articleStructureType
             };
@@ -692,6 +757,7 @@ export class MultiStepGenerationService {
             targetWordCount?: number;
             customInstructions?: string;
             onProgress?: (section: OutlineSection, progress: number) => void;
+            onStatus?: (message: string) => void;
         }
     ): Promise<Article> {
         await aiService.loadActiveConfig();
@@ -710,6 +776,19 @@ export class MultiStepGenerationService {
             options?.targetWordCount
         );
 
+        // Gemini では品質モードに従い、本文と見直しを執筆モデル（高品質なら Pro）で行い、
+        // 根拠メモを見出しごとに割り当てて渡す
+        const prefs = getGenerationQualityPrefs();
+        const session = activeAIConfig.provider === 'gemini' ? await createGeminiSession(prefs.qualityMode) : null;
+        const factSheet = session ? this.getEffectiveFactSheet(outline.trendData) : null;
+        const sectionFactIds: string[][] = factSheet && session
+            ? await assignFactsToSections({
+                sheet: factSheet,
+                sections: outline.sections.map((section) => ({ title: section.title, description: section.description })),
+                call: session.call,
+            })
+            : [];
+
         const sharedResult = await generateArticleFromOutlineWithSharedCore({
             outline: {
                 title: outline.title,
@@ -727,7 +806,12 @@ export class MultiStepGenerationService {
             customInstructions: options?.customInstructions,
             defaultMaxTokens: activeAIConfig.maxTokens || 2000,
             qualityRetryCount: 3,
-            callAI: (prompt, maxTokens) => aiService.generateRawText(prompt, maxTokens),
+            callAI: session
+                ? (prompt, maxTokens) => session.callText(prompt, { role: 'writer', maxOutputTokens: maxTokens, thinkingBudget: 1024 })
+                : (prompt, maxTokens) => aiService.generateRawText(prompt, maxTokens),
+            getSectionInstructions: factSheet
+                ? (_section, index) => buildSectionFactInstructions(factSheet, sectionFactIds[index] || [])
+                : undefined,
             onSectionComplete: ({ index, total, section: completed }) => {
                 const target = outline.sections[index];
                 if (!target) return;
@@ -766,6 +850,58 @@ export class MultiStepGenerationService {
         article.tone = options?.tone || 'professional';
         article.targetWordCount = targetWordCount;
         article.length = this.estimateLengthCategory(targetWordCount);
+
+        if (session) {
+            // 編集見直し（採用時は見直し前の本文も残し、画面で差分を確認できるようにする）
+            let reviewStatus = '未実行';
+            let reviewAccepted = false;
+            let contentBeforeReview: string | undefined;
+            options?.onStatus?.('記事を見直しています');
+            try {
+                const decision = await runEditorialReview({
+                    title: outline.title,
+                    keyword: outline.keyword,
+                    content: article.content,
+                    factSheet,
+                    toneInstruction: options?.tone === 'casual'
+                        ? 'やわらかく親しみやすい です・ます調'
+                        : 'ビジネス読者向けの自然な です・ます調',
+                    call: session.call,
+                });
+                reviewAccepted = decision.accepted;
+                reviewStatus = decision.accepted ? '採用' : `不採用（${decision.reason}）`;
+                if (decision.accepted) {
+                    contentBeforeReview = article.content;
+                    article.content = decision.content;
+                }
+            } catch (error) {
+                const message = error instanceof Error ? error.message : String(error || '');
+                reviewStatus = `失敗（${message.slice(0, 120)}）`;
+                console.warn('Editorial review failed; keeping the original article:', error);
+            }
+
+            // 参考資料（根拠メモの出典）を記事末に付ける
+            let referencesCount = 0;
+            if (prefs.appendReferences && factSheet) {
+                const referencesMarkdown = buildReferencesMarkdown(factSheet);
+                if (referencesMarkdown) {
+                    article.content = appendReferencesSection(article.content, referencesMarkdown);
+                    referencesCount = selectReferenceSources(factSheet).length;
+                }
+            }
+
+            article.excerpt = this.generateExcerpt(article.content);
+            const usage = session.tracker.summarize();
+            article.qualityInfo = {
+                qualityMode: prefs.qualityMode,
+                writerModel: session.effectiveWriterModel,
+                proFallback: session.proUnavailable,
+                editorialReview: { status: reviewStatus, accepted: reviewAccepted, before: contentBeforeReview },
+                referencesCount,
+                notes: [...session.notes],
+                estimatedCostJpy: Math.round(usage.total_estimated_usd * USD_TO_JPY),
+            };
+        }
         return article;
     }
 

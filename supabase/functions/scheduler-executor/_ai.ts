@@ -15,6 +15,8 @@ import {
 } from './_shared.ts';
 import { extractCompetitorHeadings } from './_research.ts';
 import { formatScheduleFailureReason } from './_execution-state.ts';
+import { resolveGeminiRate, type AiUsageSummary } from '../../../src/shared/aiUsage.ts';
+import type { GeminiRole } from '../../../src/shared/geminiCore.ts';
 
 export function truncateForStyleReference(value: string, minLength = 500, maxLength = 800): string {
   const text = normalizeWhitespace(value);
@@ -119,12 +121,7 @@ export function resolveAiModelRate(provider: string, model: string): ModelRate {
     return { input: 0.30, output: 2.50 };
   }
   if (p === 'gemini') {
-    if (m.includes('3.5-flash')) return { input: 1.50, output: 9.00 };
-    if (m.includes('3.1-pro')) return { input: 2.00, output: 12.00 };
-    if (m.includes('3.1-flash-lite')) return { input: 0.25, output: 1.50 };
-    if (m.includes('2.5-pro')) return { input: 1.25, output: 10.00 };
-    if (m.includes('2.5-flash')) return { input: 0.30, output: 2.50 };
-    return { input: 0.30, output: 2.50 };
+    return resolveGeminiRate(m);
   }
   if (p === 'claude') {
     if (m.includes('opus-4-8')) return { input: 5.00, output: 25.00 };
@@ -145,6 +142,8 @@ export function estimateExecutionCostBreakdown(params: {
   factCheckItemsChecked: number;
   imagesGenerated: number;
   imageUnitCostUsd: number;
+  // Gemini の実際のトークン数・検索回数（ある場合は文字数からの推定より優先する）
+  aiUsage?: AiUsageSummary | null;
 }) {
   const rate = resolveAiModelRate(params.provider, params.model);
   const generationMultiplier = 1;
@@ -153,9 +152,10 @@ export function estimateExecutionCostBreakdown(params: {
   // 1000 chars ~= input 300 tokens + output 700 tokens.
   const inputTokens = Math.ceil((params.generatedChars / 1000) * 300 * generationMultiplier);
   const outputTokens = Math.ceil((params.generatedChars / 1000) * 700 * generationMultiplier);
-  const aiCostUsd =
-    (inputTokens / 1_000_000) * rate.input +
-    (outputTokens / 1_000_000) * rate.output;
+  const hasActualUsage = Boolean(params.aiUsage && params.aiUsage.models.length > 0);
+  const aiCostUsd = hasActualUsage
+    ? params.aiUsage!.total_estimated_usd
+    : (inputTokens / 1_000_000) * rate.input + (outputTokens / 1_000_000) * rate.output;
 
   // SerpAPI pricing varies by plan; this is an estimate for budgeting.
   const researchCostUsd = params.competitorResearchUsed ? 0.005 : 0;
@@ -178,6 +178,8 @@ export function estimateExecutionCostBreakdown(params: {
       },
       rate_usd_per_1m_tokens: rate,
       estimated_usd: Number(aiCostUsd.toFixed(6)),
+      source: hasActualUsage ? 'actual_usage' : 'char_estimate',
+      usage: params.aiUsage ?? null,
     },
     research: {
       serpapi_used: params.competitorResearchUsed,
@@ -185,7 +187,8 @@ export function estimateExecutionCostBreakdown(params: {
     },
     fact_check: {
       items_checked: params.factCheckItemsChecked,
-      estimated_usd: factCheckCostUsd,
+      // Gemini 方式では AI 費用（ai.usage）に含まれる
+      estimated_usd: hasActualUsage ? 0 : factCheckCostUsd,
     },
     images: {
       generated_count_estimated: params.imagesGenerated,
@@ -193,8 +196,8 @@ export function estimateExecutionCostBreakdown(params: {
       estimated_usd: Number(imageCostUsd.toFixed(6)),
     },
     assumptions: {
-      char_to_token: '1000 chars ~= input 300 + output 700 tokens',
-      excludes_unknown_services: ['fact_check'],
+      char_to_token: hasActualUsage ? 'actual Gemini usageMetadata' : '1000 chars ~= input 300 + output 700 tokens',
+      excludes_unknown_services: hasActualUsage ? [] : ['fact_check'],
       includes: ['ai_generation', 'serpapi', 'image_generation'],
       image_price_source: 'app_settings.image_cost_usd_per_image',
     },
@@ -204,10 +207,17 @@ export function estimateExecutionCostBreakdown(params: {
 
 // AI provider call helper used by shared generation core.
 
+export interface CallAIOptions {
+  // writer = 執筆モデル（高品質モードでは Pro）。Gemini 以外では無視される
+  role?: GeminiRole;
+  thinkingBudget?: number;
+}
+
 export async function callAI(
   prompt: string,
   aiConfig: AIConfig,
-  maxTokens?: number
+  maxTokens?: number,
+  options?: CallAIOptions
 ): Promise<string> {
   const resolvedAiConfig = normalizeAiConfig(aiConfig);
   const provider = String(resolvedAiConfig.provider || '').toLowerCase();
@@ -289,6 +299,37 @@ export async function callAI(
       : '';
     if (!text) throw new Error('Claude API returned empty content');
     return text;
+  }
+
+  if (provider === 'gemini' && aiConfig.run) {
+    // 実行管理（Pro の自動代替・429 の再試行・利用量の記録）を通して呼ぶ
+    const run = aiConfig.run;
+    const callOnce = async (tokens: number): Promise<string> => {
+      const response = await run.call(prompt, {
+        role: options?.role ?? 'base',
+        maxOutputTokens: tokens,
+        temperature,
+        thinkingBudget: options?.thinkingBudget ?? 0,
+      });
+      if (response.finishReason === 'MAX_TOKENS') {
+        if (response.text) {
+          throw new AiOutputTruncatedError('Geminiの出力がmaxOutputTokens上限で途中終了しました。', response.text);
+        }
+        throw new Error('Geminiの出力がmaxOutputTokens上限で途中終了しました。');
+      }
+      if (!response.text) throw new Error('Gemini API returned empty content');
+      return response.text;
+    };
+    try {
+      return await callOnce(resolvedMaxTokens);
+    } catch (error) {
+      const isEmptyTruncation =
+        error instanceof Error &&
+        !(error instanceof AiOutputTruncatedError) &&
+        error.message.includes('maxOutputTokens上限');
+      if (!isEmptyTruncation) throw error;
+      return await callOnce(Math.min(16384, resolvedMaxTokens * 2));
+    }
   }
 
   if (provider === 'gemini') {

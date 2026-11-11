@@ -25,7 +25,9 @@ import { useWordPressConfig } from '../../hooks/useWordPressConfig';
 import toast from 'react-hot-toast';
 import { FactCheckResult } from '../../types/factCheck';
 import { factCheckService } from '../../services/factCheckService';
+import { multiStepGenerationService } from '../../services/multiStepGenerationService';
 import { FactCheckResultsDisplay } from '../FactCheckResultsDisplay';
+import { ArticleQualityCard } from './ArticleQualityCard';
 import { IS_CLIENT_DEPLOYMENT } from '@aw/config';
 
 interface ContentGenerationStepProps {
@@ -75,22 +77,21 @@ export const ContentGenerationStep: React.FC<ContentGenerationStepProps> = ({
 
             try {
                 const settings = await factCheckService.getSettings();
-                if (!settings?.perplexity_api_key) return;
+                if (!settings?.enabled) return;
 
                 setIsFactChecking(true);
                 setFactCheckResults([]);
                 setFactCheckProgress(null);
 
-                const items = factCheckService.extractFacts(article.content);
-                if (items.length === 0) return;
-
                 const keyword = article.keywords && article.keywords.length > 0
                     ? article.keywords[0]
                     : article.title;
 
-                const results = await factCheckService.verifyFacts(items, keyword, undefined, (progress) => {
-                    setFactCheckProgress(progress);
+                const results = await factCheckService.checkArticle(article.content, keyword, {
+                    factSheet: multiStepGenerationService.getEffectiveFactSheet(article.trendData),
+                    onProgress: (progress) => setFactCheckProgress(progress),
                 });
+                if (results.length === 0) return;
                 setFactCheckResults(results);
 
                 let nextArticle: Article = {
@@ -128,19 +129,13 @@ export const ContentGenerationStep: React.FC<ContentGenerationStepProps> = ({
         setFactCheckProgress(null);
 
         try {
-            const items = factCheckService.extractFacts(article.content);
-            if (items.length === 0) {
-                toast('検証する事実情報が見つかりませんでした', { icon: 'ℹ️' });
-                setIsFactChecking(false);
-                return;
-            }
-
             const keyword = article.keywords && article.keywords.length > 0
                 ? article.keywords[0]
                 : article.title;
 
-            const results = await factCheckService.verifyFacts(items, keyword, undefined, (progress) => {
-                setFactCheckProgress(progress);
+            const results = await factCheckService.checkArticle(article.content, keyword, {
+                factSheet: multiStepGenerationService.getEffectiveFactSheet(article.trendData),
+                onProgress: (progress) => setFactCheckProgress(progress),
             });
             setFactCheckResults(results);
 
@@ -193,6 +188,8 @@ export const ContentGenerationStep: React.FC<ContentGenerationStepProps> = ({
                                 </div>
                             </div>
                         </div>
+
+                        <ArticleQualityCard article={article} />
 
                         <div className="flex flex-col gap-4 justify-center items-center">
                             <button

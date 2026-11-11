@@ -8,10 +8,13 @@ import { KeywordManager } from './KeywordManager';
 import { PromptSetManager } from './PromptSetManager';
 import { ArticleEditor } from './ArticleEditor';
 import { PublishControl } from './PublishControl';
+import { ArticleQualityCard } from '../MultiStepGenerator/ArticleQualityCard';
 import { MultiStepGenerator } from '../MultiStepGenerator';
 import { useMultiStepGeneration } from '../../hooks/useMultiStepGeneration';
 import { FactCheckResultsDisplay } from '../FactCheckResultsDisplay';
 import { factCheckService } from '../../services/factCheckService';
+import { multiStepGenerationService } from '../../services/multiStepGenerationService';
+import { getGenerationQualityPrefs, setGenerationQualityPrefs, type GenerationQualityPrefs } from '../../services/geminiSession';
 import { titleKeywordInferenceService } from '../../services/titleKeywordInferenceService';
 import { getSharedToneDescription, sharedToneOptions, type SharedTone } from '../../shared/toneOptions';
 import { getAiModelOptions, getAiModelTierLabel } from '../../shared/aiModelCatalog';
@@ -41,6 +44,15 @@ export const AIGenerator: React.FC = () => {
     const [selectedAIConfigId, setSelectedAIConfigId] = useState<string>('');
     const [selectedAIModel, setSelectedAIModel] = useState<string>('');
     const [factCheckModel] = useState<'sonar' | 'sonar-reasoning'>('sonar');
+    // 品質モードと参考資料（ブラウザごとに記憶）
+    const [qualityPrefs, setQualityPrefs] = useState<GenerationQualityPrefs>(() => getGenerationQualityPrefs());
+    const updateQualityPrefs = (next: Partial<GenerationQualityPrefs>) => {
+        setQualityPrefs((prev) => {
+            const merged = { ...prev, ...next };
+            setGenerationQualityPrefs(merged);
+            return merged;
+        });
+    };
 
     // Fact Check State
     const [factCheckResults, setFactCheckResults] = useState<FactCheckResult[]>([]);
@@ -372,19 +384,16 @@ export const AIGenerator: React.FC = () => {
         setIsFactChecking(true);
         setFactCheckProgress(null);
         try {
-            const items = factCheckService.extractFacts(generatedArticle.content);
-            if (items.length === 0) {
-                toast('検証する事実情報が見つかりませんでした', { icon: 'ℹ️' });
-                setIsFactChecking(false);
-                return;
-            }
-
             toast.loading('ファクトチェックを実行中...', { duration: 2000 });
             const effectiveKeyword = generatedArticle.keywords && generatedArticle.keywords.length > 0
                 ? generatedArticle.keywords.slice(0, 5).join(', ')
                 : generatedArticle.title;
-            const results = await factCheckService.verifyFacts(items, effectiveKeyword, factCheckModel, (progress) => {
-                setFactCheckProgress(progress);
+            // [[ ]] で囲んだ箇所は必ず確認する
+            const plainContent = generatedArticle.content.replace(/\[\[(.+?)\]\]/g, '$1');
+            const results = await factCheckService.checkArticle(plainContent, effectiveKeyword, {
+                factSheet: multiStepGenerationService.getEffectiveFactSheet(generatedArticle.trendData),
+                userMarkedText: generatedArticle.content,
+                onProgress: (progress) => setFactCheckProgress(progress),
             });
             setFactCheckResults(results);
 
@@ -398,7 +407,7 @@ export const AIGenerator: React.FC = () => {
             updateArticle(generatedArticle.id, updatedArticle as any);
 
             if (results.length === 0) {
-                toast.error('ファクトチェック結果が0件です。Perplexity APIキー設定を確認してください。', { duration: 5000 });
+                toast.error('ファクトチェック結果が0件です。ファクトチェック設定と Gemini のAI設定を確認してください。', { duration: 5000 });
             } else {
                 const criticalIssues = results.filter(r => r.verdict === 'incorrect' && r.confidence >= 70).length;
                 if (criticalIssues > 0) {
@@ -658,6 +667,39 @@ export const AIGenerator: React.FC = () => {
                         </p>
                     </div>
 
+
+                    {/* 品質モード・参考資料 */}
+                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                                品質モード
+                            </label>
+                            <select
+                                value={qualityPrefs.qualityMode}
+                                onChange={(e) => updateQualityPrefs({ qualityMode: e.target.value === 'standard' ? 'standard' : 'high' })}
+                                disabled={isGenerating || isAutoGenerating}
+                                className="input-field"
+                            >
+                                <option value="high">高品質（本文と見直しに Gemini 3.1 Pro）</option>
+                                <option value="standard">標準（すべて基本モデル）</option>
+                            </select>
+                        </div>
+                        <div className="flex items-end">
+                            <label className="flex items-center gap-2 text-sm font-medium text-gray-700 pb-2">
+                                <input
+                                    type="checkbox"
+                                    checked={qualityPrefs.appendReferences}
+                                    onChange={(e) => updateQualityPrefs({ appendReferences: e.target.checked })}
+                                    disabled={isGenerating || isAutoGenerating}
+                                    className="h-4 w-4"
+                                />
+                                記事末に参考資料を付ける
+                            </label>
+                        </div>
+                        <p className="text-xs text-gray-500 md:col-span-2">
+                            Gemini を使う場合に有効です。書く前に Google 検索で根拠メモを作り、本文の数字や制度は根拠メモの範囲で書きます。無料キーでは Pro を使えないため、自動で基本モデルに切り替わります。
+                        </p>
+                    </div>
 
                     {/* Prompt Set Selector */}
                     <div>
@@ -1060,6 +1102,7 @@ export const AIGenerator: React.FC = () => {
 
                         {/* Publish Control */}
                         <div className="lg:col-span-1">
+                            <ArticleQualityCard article={generatedArticle} />
                             <PublishControl
                                 article={generatedArticle}
                                 wordPressConfigs={wordPressConfigs}
