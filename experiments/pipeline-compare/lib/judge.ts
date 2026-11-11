@@ -59,8 +59,11 @@ export async function comparePair(client: OpenAiClient, params: {
   keyword: string;
   current: { title: string; content: string };
   v2: { title: string; content: string };
+  // 並び順を固定したいとき（順番を入れ替えて 2 回比べる場合）に指定する
+  order?: PairwiseResult['order'];
 }): Promise<PairwiseResult> {
-  const order: PairwiseResult['order'] = Math.random() < 0.5 ? ['current', 'v2'] : ['v2', 'current'];
+  const order: PairwiseResult['order'] = params.order
+    ?? (Math.random() < 0.5 ? ['current', 'v2'] : ['v2', 'current']);
   const article = (which: 'current' | 'v2') => params[which];
   const prompt = [
     `キーワード「${params.keyword}」で検索した読者にとって、次の 2 つの記事のどちらが役に立つかを判断してください。`,

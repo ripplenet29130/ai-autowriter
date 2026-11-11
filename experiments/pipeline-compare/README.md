@@ -29,6 +29,10 @@ npx -y deno@2.9.6 run --allow-net --allow-env --allow-read --allow-write --env-f
 | `--words 3000` | 目標文字数（既定は本番と同じ） |
 | `--only current` / `--only v2` | 片方だけ動かす |
 | `--no-judge` | 採点をしない |
+| `--baseline 20261110-122307` | 今の流れだけを動かし、`out/` に保存してある以前の結果（同じキーワードの「今の流れ」の記事）と比べる。並べ比べは記事の順番を入れ替えて 2 回行う |
+
+`--words` を付けないと、今の流れは本番の新しい既定と同じ「文字数おまかせ」（AI が文字数を決める）で動きます。
+本文を順番に書く設定を試すときは、`.env` に `SECTION_WRITING_MODE=sequential` を入れます。
 
 結果は `experiments/pipeline-compare/out/日時/` にできます。
 

@@ -49,7 +49,7 @@ import { cleanupGenerated, finalizeArticle } from '../lib/finalize.ts';
 import { OpenAiClient } from '../lib/openai.ts';
 import { verifyWithChatGpt } from '../lib/verify.ts';
 import type { FlowResult } from '../lib/types.ts';
-import { pickSectionKeywords } from './current.ts';
+import { formatReviewStatus, pickSectionKeywords } from './current.ts';
 
 const MAX_FIX_ROUNDS = 2;
 
@@ -300,7 +300,8 @@ export async function runV2Flow(params: { keyword: string; targetWordCount?: num
   // 5. 見直し（省略しない）
   let editorialReview = '未実行';
   try {
-    const decision = await timer.time('見直し', () =>
+    // 時間制限がないので、いつも批評→書き直しの 2 段階（段階 2）
+    const decision = await timer.time('見直し（批評→書き直し）', () =>
       runEditorialReview({
         title,
         keyword,
@@ -308,9 +309,10 @@ export async function runV2Flow(params: { keyword: string; targetWordCount?: num
         factSheet,
         toneInstruction: 'ビジネス読者向けの自然な です・ます調',
         call: run.call,
-      }), (d) => (d.accepted ? '採用' : `不採用（${d.reason}）`));
+        critique: true,
+      }), (d) => (d.accepted ? d.reason : `不採用（${d.reason}）`));
     if (decision.accepted) content = cleanupGenerated(decision.content, title, targetWordCount);
-    editorialReview = decision.accepted ? '採用' : `不採用（${decision.reason}）`;
+    editorialReview = formatReviewStatus(decision);
   } catch (error) {
     editorialReview = `失敗（${errorMessage(error)}）`;
   }

@@ -128,6 +128,8 @@ export interface Schedule {
   quality_mode?: 'high' | 'standard' | null;
   // 記事末に参考資料（根拠メモの出典）を付けるか
   append_references?: boolean | null;
+  // 文字数の決め方（auto: AI が決める / fixed: target_word_count を使う）
+  length_mode?: 'auto' | 'fixed' | null;
 }
 
 

@@ -130,6 +130,7 @@ export const Scheduler: React.FC = () => {
     images_per_article: 0,
     quality_mode: 'high' as 'high' | 'standard',
     append_references: true,
+    length_mode: 'auto' as 'auto' | 'fixed',
   });
 
   const timeOptions = useMemo(() => {
@@ -485,6 +486,8 @@ export const Scheduler: React.FC = () => {
       images_per_article: schedule.images_per_article ?? 0,
       quality_mode: schedule.quality_mode === 'standard' ? 'standard' : 'high',
       append_references: schedule.append_references ?? true,
+      // 列が無い・値が無い既存スケジュールは文字数指定のまま
+      length_mode: schedule.length_mode === 'auto' ? 'auto' : 'fixed',
     });
     // Scroll to top to show the form
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -617,6 +620,7 @@ export const Scheduler: React.FC = () => {
       images_per_article: 0,
       quality_mode: 'high',
       append_references: true,
+      length_mode: 'auto',
     });
     setEditingSchedule(null);
   };
@@ -1196,8 +1200,36 @@ export const Scheduler: React.FC = () => {
             {/* 目標文字数 */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                目標文字数
+                文字数
               </label>
+              <div className="flex gap-2 mb-2">
+                <button
+                  type="button"
+                  onClick={() => setFormData({ ...formData, length_mode: 'auto' })}
+                  className={`px-3 py-2 text-sm rounded-md border transition-colors ${formData.length_mode === 'auto'
+                    ? 'bg-purple-600 text-white border-purple-600'
+                    : 'bg-white text-gray-700 border-gray-300 hover:border-purple-400'
+                    }`}
+                >
+                  おまかせ（AIが決める）
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFormData({ ...formData, length_mode: 'fixed' })}
+                  className={`px-3 py-2 text-sm rounded-md border transition-colors ${formData.length_mode === 'fixed'
+                    ? 'bg-purple-600 text-white border-purple-600'
+                    : 'bg-white text-gray-700 border-gray-300 hover:border-purple-400'
+                    }`}
+                >
+                  文字数指定
+                </button>
+              </div>
+              {formData.length_mode === 'auto' ? (
+                <p className="text-xs leading-relaxed text-gray-500">
+                  記事ごとに、検索意図と調査結果から AI が適切な文字数（1,500〜6,000字）と見出しの数を決めます。決めた文字数と理由は通知に載ります。長い記事は処理時間がかかり、見直しが省略されることがあります。
+                </p>
+              ) : (
+              <>
               <div className="flex gap-2 mb-2">
                 <button
                   type="button"
@@ -1244,8 +1276,10 @@ export const Scheduler: React.FC = () => {
                 placeholder="カスタム文字数を入力"
               />
               <p className="text-xs text-gray-500 mt-1">
-                プリセットを選択するか、500〜3,000字の範囲で入力してください
+                プリセットを選択するか、500〜3,000字の範囲で入力してください。文字数は目安として扱い、1.5倍を超えたときだけAIが短く書き直します
               </p>
+              </>
+              )}
             </div>
 
             {/* 文体（トーン） */}
@@ -1913,7 +1947,9 @@ export const Scheduler: React.FC = () => {
                             {formatSharedTone(schedule.writing_tone)}
                           </span>
                           <span className="font-mono text-xs bg-gray-50 text-gray-600 px-2 py-0.5 rounded border border-gray-200">
-                            {Math.min(schedule.target_word_count || 3000, 3000)}文字
+                            {schedule.length_mode === 'auto'
+                              ? '文字数おまかせ'
+                              : `${Math.min(schedule.target_word_count || 3000, 3000)}文字`}
                           </span>
                       </div>
                     </div>

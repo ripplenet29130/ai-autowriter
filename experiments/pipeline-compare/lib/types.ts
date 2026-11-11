@@ -34,6 +34,9 @@ export interface FlowResult {
   notes: string[];
   skippedSteps: string[];
   referencesCount: number;
+  // 文字数の決め方（おまかせなら AI が決めた文字数と理由）と、長すぎたときの調整結果
+  lengthPlan?: { mode: string; targetChars: number; reason: string; maxHeadings: number; source: string };
+  lengthAdjustment?: string;
   steps: Array<{ name: string; ms: number; note?: string }>;
   totalMs: number;
   usage: {

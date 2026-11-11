@@ -81,6 +81,8 @@ export const AIGenerator: React.FC = () => {
 
     // Target Word Count State
     const [targetWordCount, setTargetWordCount] = useState<number>(2000);
+    // 文字数の決め方（記事改善プラン 1-0）。既定はおまかせ（AI が決める）
+    const [lengthMode, setLengthMode] = useState<'auto' | 'fixed'>('auto');
     const usesTitleSource = contentSourceMode === 'title' || contentSourceMode === 'both';
     const activeSelectedTitle = usesTitleSource ? selectedTitle.trim() : '';
     const activeSelectedTitleSetId = usesTitleSource ? selectedTitleSetId : '';
@@ -318,7 +320,8 @@ export const AIGenerator: React.FC = () => {
                 tone,
                 targetLength: length,
                 selectedTitle: activeSelectedTitle || undefined,
-                targetWordCount,
+                targetWordCount: lengthMode === 'fixed' ? targetWordCount : undefined,
+                lengthMode,
                 articleStructureType,
                 customInstructions: [
                     selectedPromptSet?.customInstructions?.trim(),
@@ -546,7 +549,8 @@ export const AIGenerator: React.FC = () => {
                 customInstructions={buildEffectiveCustomInstructions(promptSets.find(ps => ps.id === selectedPromptSetId)?.customInstructions)}
                 selectedTitleSetId={activeSelectedTitleSetId}
                 selectedTitle={activeSelectedTitle}
-                targetWordCount={targetWordCount}
+                targetWordCount={lengthMode === 'fixed' ? targetWordCount : undefined}
+                lengthMode={lengthMode}
                 onComplete={handleMultiStepComplete}
                 onBack={() => setShowMultiStep(false)}
             />
@@ -927,8 +931,38 @@ export const AIGenerator: React.FC = () => {
                     {/* Target Word Count */}
                     <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">
-                            目標文字数
+                            文字数
                         </label>
+                        <div className="flex gap-2 mb-2">
+                            <button
+                                type="button"
+                                onClick={() => setLengthMode('auto')}
+                                className={`px-3 py-2 text-sm rounded-md border transition-colors ${lengthMode === 'auto'
+                                    ? 'bg-purple-600 text-white border-purple-600'
+                                    : 'bg-white text-gray-700 border-gray-300 hover:border-purple-400'
+                                    }`}
+                                disabled={isGenerating || isAutoGenerating}
+                            >
+                                おまかせ（AIが決める）
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setLengthMode('fixed')}
+                                className={`px-3 py-2 text-sm rounded-md border transition-colors ${lengthMode === 'fixed'
+                                    ? 'bg-purple-600 text-white border-purple-600'
+                                    : 'bg-white text-gray-700 border-gray-300 hover:border-purple-400'
+                                    }`}
+                                disabled={isGenerating || isAutoGenerating}
+                            >
+                                文字数指定
+                            </button>
+                        </div>
+                        {lengthMode === 'auto' ? (
+                            <p className="text-xs leading-relaxed text-gray-500">
+                                構成案を作る前に、検索意図と調査結果から AI が適切な文字数（1,500〜6,000字）と見出しの数を決めます。決めた文字数と理由は生成後の「品質の確認」に表示されます。
+                            </p>
+                        ) : (
+                        <>
                         <div className="flex gap-2 mb-2">
                             <button
                                 type="button"
@@ -976,8 +1010,10 @@ export const AIGenerator: React.FC = () => {
                             placeholder="カスタム文字数を入力"
                         />
                         <p className="text-xs text-gray-500 mt-1">
-                            プリセットを選択するか、カスタム文字数を入力してください
+                            プリセットを選択するか、カスタム文字数を入力してください。文字数は目安として扱います
                         </p>
+                        </>
+                        )}
                     </div>
 
                     {/* Generate Button */}

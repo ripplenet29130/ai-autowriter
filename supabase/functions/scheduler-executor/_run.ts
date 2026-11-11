@@ -34,6 +34,17 @@ export function readGeminiMaxParallel(): number {
   return Number.isInteger(raw) && raw >= 1 && raw <= 8 ? raw : DEFAULT_GEMINI_MAX_PARALLEL;
 }
 
+// 本文のセクションを順番に書くか並列に書くか（記事改善プラン 1-5）。
+// sequential: それまでの本文を全文渡して順番に書く（質が高いが時間がかかる）
+// parallel: H2 ごとに並列で書く（既定。無料の Supabase の 140 秒に収めやすい）
+export type SectionWritingMode = 'sequential' | 'parallel';
+
+export function readSectionWritingMode(): SectionWritingMode {
+  return String(Deno.env.get('SECTION_WRITING_MODE') || '').trim().toLowerCase() === 'sequential'
+    ? 'sequential'
+    : 'parallel';
+}
+
 export class SearchUnavailableError extends Error {
   constructor(message = 'Google 検索を使えないキーです') {
     super(message);

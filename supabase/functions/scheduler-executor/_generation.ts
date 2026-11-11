@@ -1,24 +1,19 @@
-// スケジューラ用の記事生成パイプライン（シングルパス）
-import { DEFAULT_TARGET_WORD_COUNT } from '../../../src/shared/generationPolicy.ts';
+// スケジューラ用の記事生成パイプライン（セクション分割・シングルパス）
+import {
+  DEFAULT_REVIEW_THINKING_BUDGET,
+  DEFAULT_WRITER_THINKING_BUDGET,
+  LOOSE_LENGTH_MAX_RATIO,
+  LOOSE_LENGTH_MIN_RATIO,
+} from '../../../src/shared/generationPolicy.ts';
 import {
   countGeneratedChars,
   formatArticleBodyForReadability,
-  generateOutlineWithAutoModeStyle,
-  insertSubheadingsIntoLongSections,
 } from '../../../src/shared/articleGenerationCore.ts';
 import {
-  buildAutoModeQualityInstructions,
-  buildAutoOutlineRetryInstructions,
-  compactAutoModeInstructions,
-  evaluateAutoOutlineQuality,
-} from '../../../src/shared/autoModeQuality.ts';
-import {
-  AiOutputTruncatedError,
   trimForLog,
   type AIConfig,
   type ArticleOutline,
   type OutlineSection,
-  type Schedule,
   type WritingTone,
 } from './_shared.ts';
 import { callAI } from './_ai.ts';
@@ -30,8 +25,13 @@ import {
 } from '../../../src/shared/factSheetCore.ts';
 import { mapWithConcurrency } from '../../../src/shared/geminiCore.ts';
 
-// 執筆モデル（Pro）の思考上限
-export const WRITER_THINKING_BUDGET = 1024;
+// 思考の上限（記事改善プラン 1-3）。環境変数 WRITER_THINKING_BUDGET / REVIEW_THINKING_BUDGET で変えられる
+function readThinkingBudget(name: string, fallback: number): number {
+  const raw = Number(Deno.env.get(name));
+  return Number.isInteger(raw) && raw >= 0 && raw <= 32768 ? raw : fallback;
+}
+export const WRITER_THINKING_BUDGET = readThinkingBudget('WRITER_THINKING_BUDGET', DEFAULT_WRITER_THINKING_BUDGET);
+export const REVIEW_THINKING_BUDGET = readThinkingBudget('REVIEW_THINKING_BUDGET', DEFAULT_REVIEW_THINKING_BUDGET);
 const WRITER_OPTIONS = { role: 'writer' as const, thinkingBudget: WRITER_THINKING_BUDGET };
 import {
   countNonSummaryHeadings,
@@ -61,7 +61,8 @@ export function validateGeneratedArticleCompleteness(
 ): void {
   const normalized = String(content || '').trim();
   const charCount = countGeneratedChars(normalized);
-  const minChars = Math.max(500, Math.round(Math.max(800, targetWordCount) * 0.75));
+  // 文字数は目安なので、途中で止まったとみなすのは目安の半分未満のときだけ（1-6）
+  const minChars = Math.max(500, Math.round(Math.max(800, targetWordCount) * LOOSE_LENGTH_MIN_RATIO));
   if (charCount < minChars) {
     throw new Error(`Generated article is too short (${charCount}/${targetWordCount} chars). AI output may have stopped midway.`);
   }
@@ -91,88 +92,29 @@ export function validateGeneratedArticleCompleteness(
 }
 
 
-export function compactArticleToTargetLength(content: string, targetWordCount: number): string {
-  const maxChars = Math.round(Math.max(800, targetWordCount) * 1.2);
-  let text = String(content || '').trim();
-  if (!text || countGeneratedChars(text) <= maxChars) return text;
-
-  const blocks = text.split(/\n{2,}/).map((block) => block.trim()).filter(Boolean);
-  const compacted: string[] = [];
-  for (const block of blocks) {
-    const isHeading = isHeadingLine(block);
-    if (isHeading) {
-      compacted.push(block);
-      continue;
-    }
-
-    const sentences = block
-      .split(/(?<=[。！？!?])\s*/)
-      .map((sentence) => sentence.trim())
-      .filter(Boolean);
-    const reduced = sentences.length >= 3
-      ? sentences.slice(0, Math.max(1, Math.ceil(sentences.length * 0.65))).join('')
-      : block;
-    compacted.push(reduced);
-  }
-
-  text = compacted.join('\n\n').trim();
-  if (countGeneratedChars(text) <= maxChars) return text;
-
-  const sections: Array<{ blocks: string[]; isSummary: boolean; hasHeading: boolean }> = [];
-  for (const block of compacted) {
-    if (isHeadingLine(block)) {
-      sections.push({
-        blocks: [block],
-        isSummary: isSummaryHeadingText(extractHeadingText(block)),
-        hasHeading: true,
-      });
-      continue;
-    }
-
-    const currentSection = sections[sections.length - 1];
-    if (currentSection) {
-      currentSection.blocks.push(block);
-    } else {
-      sections.push({ blocks: [block], isSummary: false, hasHeading: false });
-    }
-  }
-
-  const summaryCharBudget = sections
-    .filter((section) => section.isSummary)
-    .reduce((sum, section) => sum + countGeneratedChars(section.blocks.join('\n\n')), 0);
-  const nonSummaryMaxChars = Math.max(0, maxChars - summaryCharBudget);
-  const shortenedSections: string[][] = [];
-  let nonSummaryChars = 0;
-
-  for (const section of sections) {
-    const sectionText = section.blocks.join('\n\n');
-    const sectionChars = countGeneratedChars(sectionText);
-
-    if (section.isSummary) {
-      shortenedSections.push(section.blocks);
-      continue;
-    }
-
-    if (section.hasHeading && section.blocks.length <= 1) {
-      continue;
-    }
-
-    if (nonSummaryChars + sectionChars > nonSummaryMaxChars) {
-      continue;
-    }
-
-    shortenedSections.push(section.blocks);
-    nonSummaryChars += sectionChars;
-  }
-
-  return shortenedSections.flat().join('\n\n').trim() || text;
-}
-
-
 function buildToneInstruction(tone: WritingTone): string {
   return tone === 'casual'
     ? 'Tone: natural, approachable Japanese. Use desu/masu consistently, but do not sound childish. Keep sentences short and easy to follow.'
     : 'Tone: natural professional Japanese for business readers. Write like an experienced practitioner answering a reader consultation. Avoid stiff report-like prose, manual-like prose, sales copy, and overusing overly polite phrases such as 「いたします」「させていただきます」「となります」. Keep sentences short, use concrete verbs, and make the next judgment/action clear for the reader.';
+}
+
+// 執筆の中心になる指示（記事改善プラン 1-2・1-9）。
+// 段落数・文の数ではなく、読者・目的・具体性で指示する
+export function buildReaderFocusedGuidance(keyword: string, scope: 'article' | 'lead' | 'section'): string {
+  const dateNote = scope === 'section'
+    ? '- Do NOT write date notes such as 「（2026年4月時点）」 in this section. If needed, they appear once in the lead or the summary only.'
+    : '- Write a date note such as 「（2026年4月時点）」 at most ONCE in the whole article (in the lead or the summary). Never repeat it in each section.';
+  return [
+    'What matters most (content):',
+    `- The reader is someone who searched for 「${keyword}」. Before writing each part, decide what the reader should understand, decide, or be able to do after reading it.`,
+    '- Answer the reader\'s question directly. Put the answer or conclusion first, then the reasons, conditions, and exceptions.',
+    '- Include concrete examples, numbers, steps, decision criteria, or common mistakes wherever they fit. Do not end with abstract explanations only.',
+    '- Do not fill space with generic statements, obvious preambles, or empty sentences such as 「〜が重要です」「注意が必要です」 that say nothing specific.',
+    '- Do not assert numbers, fees, deadlines, or rules that you cannot support.',
+    dateNote,
+    '- Do not fix the number of paragraphs or sentences. Split paragraphs where it reads naturally.',
+    '- Prefer clear, short Japanese sentences. Explain technical terms briefly when they may be unfamiliar.',
+  ].join('\n');
 }
 
 function buildKeywordLine(keyword: string, keywords: string[]): string {
@@ -197,27 +139,24 @@ export async function generateSchedulerArticleSinglePass(params: {
   const keywordLine = buildKeywordLine(params.keyword, params.keywords);
   const toneInstruction = buildToneInstruction(params.tone);
   const factInstructions = buildArticleFactInstructions(params.factSheet);
-  const hardMaxChars = Math.round(params.targetWordCount * 1.2);
-  const hardMinChars = Math.round(params.targetWordCount * 0.85);
+  const softMaxChars = Math.round(params.targetWordCount * LOOSE_LENGTH_MAX_RATIO);
   const prompt = [
     'Write a complete Japanese article in Markdown.',
     '',
     `Title: ${params.outline.title}`,
     `Main keyword: ${params.keyword}`,
     keywordLine ? `Related keywords: ${keywordLine}` : '',
-    `Target length: ${params.targetWordCount} Japanese characters. Stay between ${hardMinChars} and ${hardMaxChars} characters. Stop writing once the article reaches ${hardMaxChars} characters — do NOT exceed this limit.`,
+    `Length guide: about ${params.targetWordCount} Japanese characters. This is a guide, not a quota — do not pad or drop content to hit it. Never go beyond about ${softMaxChars} characters.`,
     toneInstruction,
     '',
-    'Hard requirements:',
+    buildReaderFocusedGuidance(params.keyword, 'article'),
+    '',
+    'Format requirements:',
     '- Output only the article body. Do not include explanations, JSON, code fences, or notes.',
     '- Do not repeat the title as an H1.',
     '- Follow the outline structure exactly. Write every [H2] entry as "##" and every [H3] entry as "###". Do NOT skip any heading.',
     '- [H3] entries (indented in the outline) are sub-sections of the preceding [H2]. Always place them inside that H2 section.',
-    '- Write 2 to 3 short lead paragraphs BEFORE the first "##" heading.',
-    '- H2 sections: 1-2 paragraphs of body text (2-4 sentences each).',
-    '- H3 sections: 1-2 paragraphs of body text (2-4 sentences each). Keep each H3 concise to stay within the character limit.',
-    '- Prefer clear, short Japanese sentences. Split long sentences instead of stacking abstract nouns.',
-    '- Explain technical terms briefly when they may be unfamiliar to a general reader.',
+    '- Write the lead (opening paragraphs) BEFORE the first "##" heading.',
     '- Separate EVERY paragraph with a blank line (one empty line between paragraphs).',
     '- Separate headings from surrounding paragraphs with a blank line.',
     '- Avoid unfinished sentences and placeholder text.',
@@ -231,8 +170,8 @@ export async function generateSchedulerArticleSinglePass(params: {
   ].filter(Boolean).join('\n');
 
   const maxTokens = Math.min(
-    12000,
-    Math.max(3000, Math.ceil(params.targetWordCount * 2.5))
+    20000,
+    Math.max(3000, Math.ceil(softMaxChars * 2))
   );
 
   let rawText: string;
@@ -317,9 +256,10 @@ function stripModelHeadings(text: string): string {
     .trim();
 }
 
-// セクション分割生成。各セクションを個別の AI 呼び出しで書く。
-// - H2 とその下の H3 を 1 つのグループにし、グループ単位で並列に書く（parallelism > 1 のとき）
-// - グループ内は順番に書き、直前セクションの末尾を渡してつながりを保つ
+// セクション分割生成。各セクションを個別の AI 呼び出しで書く（記事改善プラン 1-5）。
+// - 順番に書く（parallelism = 1）ときは、それまでに書いた本文を全文渡してつながりと重複回避を保つ
+// - 並列（parallelism > 1）のときは H2 とその下の H3 を 1 グループにし、グループ内で書いた本文を全文渡す
+//   （他のグループの本文は見えないため、時間に余裕があれば順番に書く設定のほうが質は高い）
 // - 根拠メモがあれば、見出しごとに割り当てた事実だけを渡す
 export async function generateSchedulerArticleSectioned(params: {
   outline: ArticleOutline;
@@ -345,14 +285,14 @@ export async function generateSchedulerArticleSectioned(params: {
   const parallelism = Math.max(1, params.parallelism ?? 1);
   const useFacts = hasUsableFacts(params.factSheet);
 
-  // 文字数配分: アウトラインの estimatedWordCount 比率で配分し、無ければ均等割り
+  // 文字数の目安: アウトラインの estimatedWordCount 比率で配分し、無ければ均等割り
   const totalEstimated = sections.reduce((sum, s) => sum + (Number(s.estimatedWordCount) || 0), 0);
   const evenBudget = Math.round(params.targetWordCount / sections.length);
   const budgetFor = (section: OutlineSection): number => {
     const raw = totalEstimated > 0
       ? Math.round(params.targetWordCount * ((Number(section.estimatedWordCount) || evenBudget) / totalEstimated))
       : evenBudget;
-    return Math.min(900, Math.max(150, raw));
+    return Math.min(1500, Math.max(150, raw));
   };
 
   type Step = { section: OutlineSection | null; isLead: boolean; sectionIndex: number };
@@ -368,32 +308,35 @@ export async function generateSchedulerArticleSectioned(params: {
     else groups[groups.length - 1].push(step);
   }
 
-  const writeStep = async (step: Step, previousTail: string, writtenHeadings: string[]): Promise<string> => {
+  const isSummarySection = (section: OutlineSection | null): boolean =>
+    Boolean(section && /まとめ|結論|おわりに/.test(section.title || ''));
+
+  const writeStep = async (step: Step, writtenSoFar: string): Promise<string> => {
     const section = step.section;
     const budget = section
       ? budgetFor(section)
-      : Math.min(400, Math.max(200, Math.round(params.targetWordCount * 0.08)));
-    const minChars = Math.round(budget * 0.7);
-    const maxChars = Math.round(budget * 1.4);
+      : Math.min(500, Math.max(200, Math.round(params.targetWordCount * 0.08)));
+    const softMaxChars = Math.round(budget * LOOSE_LENGTH_MAX_RATIO);
 
     const task = step.isLead
-      ? 'Write ONLY the lead paragraphs that open the article (2-3 short paragraphs shown before the first heading).'
+      ? 'Write ONLY the lead that opens the article (the text shown before the first heading). Answer the reader\'s main question briefly and tell them what this article covers.'
       : [
           `Write ONLY the body text of the section titled 「${section!.title}」.`,
           section!.description ? `Section focus: ${section!.description}` : '',
         ].filter(Boolean).join('\n');
 
-    const contextBlock = [
-      writtenHeadings.length > 0
-        ? `Sections already written (do NOT repeat their content):\n${writtenHeadings.map((h) => `- ${h}`).join('\n')}`
-        : '',
-      previousTail
-        ? `The previous section ends with the following text. Connect the flow naturally and do not repeat it:\n${previousTail}`
-        : '',
-    ].filter(Boolean).join('\n\n');
+    const contextBlock = writtenSoFar
+      ? [
+          'Article text written so far (read it to keep the flow natural; do NOT rewrite it, and do NOT repeat explanations, examples, or numbers it already gives):',
+          '<<<',
+          writtenSoFar,
+          '>>>',
+        ].join('\n')
+      : '';
 
     const factIds = step.sectionIndex >= 0 ? (params.sectionFactIds?.[step.sectionIndex] || []) : [];
     const factInstructions = useFacts ? buildSectionFactInstructions(params.factSheet, factIds) : '';
+    const scope = step.isLead ? 'lead' : isSummarySection(section) ? 'article' : 'section';
 
     const prompt = [
       'You are writing ONE part of a longer Japanese article. The other parts are written separately.',
@@ -409,11 +352,12 @@ export async function generateSchedulerArticleSectioned(params: {
       '',
       task,
       '',
-      'Hard requirements:',
-      `- Length: between ${minChars} and ${maxChars} Japanese characters.`,
+      buildReaderFocusedGuidance(params.keyword, scope),
+      '',
+      'Format requirements:',
+      `- Length guide: about ${budget} Japanese characters. This is a guide, not a quota — do not pad. Never go beyond about ${softMaxChars} characters.`,
       '- Output only the body text in Markdown. Do NOT output any headings (## or ###), the article title, explanations, JSON, code fences, or notes.',
-      '- 2-4 short sentences per paragraph. Separate paragraphs with one blank line.',
-      '- Prefer clear, short Japanese sentences. Explain technical terms briefly for general readers.',
+      '- Separate paragraphs with one blank line.',
       '- Do not summarize the entire article here unless this section is the closing summary.',
       '- Do not explain content that clearly belongs to another heading in the outline.',
       '- Avoid unfinished sentences and placeholder text.',
@@ -421,19 +365,19 @@ export async function generateSchedulerArticleSectioned(params: {
       factInstructions ? `\n${factInstructions}` : '',
     ].filter(Boolean).join('\n');
 
-    const maxTokens = Math.min(4000, Math.max(600, Math.ceil(maxChars * 2.5)));
+    const maxTokens = Math.min(6000, Math.max(1200, Math.ceil(softMaxChars * 2)));
 
     let rawText: string;
     try {
       rawText = await callAI(prompt, params.aiConfig, maxTokens, WRITER_OPTIONS);
     } catch (error: any) {
       const partial = typeof error?.partialText === 'string' ? error.partialText : '';
-      if (countGeneratedChars(partial) >= Math.max(120, Math.round(minChars * 0.6))) {
+      if (countGeneratedChars(partial) >= Math.max(120, Math.round(budget * 0.6))) {
         console.warn(`[sectioned] Token limit hit; using partial text (${countGeneratedChars(partial)} chars) for "${section?.title ?? 'lead'}"`);
         rawText = partial;
       } else {
         // 一度だけトークン上限を引き上げて再試行。ここで失敗すれば呼び出し元がシングルパスへフォールバックする
-        rawText = await callAI(prompt, params.aiConfig, Math.min(6000, maxTokens * 2), WRITER_OPTIONS);
+        rawText = await callAI(prompt, params.aiConfig, Math.min(10000, maxTokens * 2), WRITER_OPTIONS);
       }
     }
 
@@ -444,24 +388,18 @@ export async function generateSchedulerArticleSectioned(params: {
     return text;
   };
 
-  // 並列のときは他グループの執筆済み見出しを共有できないため、グループ内の分だけ渡す。
-  // 並列でなければ全体を 1 グループとして、これまでどおり順番に書く。
+  // 並列でなければ全体を 1 グループとして順番に書き、それまでの本文を全文渡す
   const writingGroups = parallelism > 1 ? groups : [steps];
   const groupOutputs = await mapWithConcurrency(writingGroups, parallelism, async (group) => {
     const parts: string[] = [];
-    const writtenHeadings: string[] = [];
-    let previousTail = '';
     for (const step of group) {
-      const text = await writeStep(step, previousTail, writtenHeadings);
+      const text = await writeStep(step, parts.join('\n\n'));
       if (step.isLead || !step.section) {
         parts.push(text);
-        writtenHeadings.push('(リード文)');
       } else {
         const headingPrefix = step.section.level === 3 ? '###' : '##';
         parts.push(`${headingPrefix} ${step.section.title}\n\n${text}`);
-        writtenHeadings.push(step.section.title);
       }
-      previousTail = text.replace(/\s+/g, ' ').trim().slice(-160);
     }
     return parts.join('\n\n');
   });
@@ -479,4 +417,3 @@ export async function generateSchedulerArticleSectioned(params: {
     wordCount: countGeneratedChars(fullContent),
   };
 }
-// Chatwork鬯ｨ・ｾ陞溘ｊ・｡蝓ｼ・ｨ・ｾ遶擾ｽｽ繝ｻ・ｿ繝ｻ・｡

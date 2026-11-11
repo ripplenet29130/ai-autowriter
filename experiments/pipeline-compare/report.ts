@@ -9,6 +9,8 @@ import type { KeywordComparison } from './run.ts';
 
 const FLOWS: FlowName[] = ['current', 'v2'];
 const FLOW_LABEL: Record<FlowName, string> = { current: '今の流れ', v2: '新しい流れ' };
+// 以前の結果と比べるとき（--baseline）は、比較ごとに表示名を変える
+const labelOf = (c: KeywordComparison, name: FlowName): string => c.labels?.[name] || FLOW_LABEL[name];
 const VERDICT_LABEL: Record<string, string> = {
   correct: '正しい',
   partially_correct: '一部誤り',
@@ -71,22 +73,28 @@ function renderSummary(c: KeywordComparison): string {
   let headline = '採点なし';
   let tone = 'neutral';
   if (isOk(pair)) {
-    headline = pair.winner === 'tie' ? '引き分け' : `${FLOW_LABEL[pair.winner]}の方が良い`;
+    headline = pair.winner === 'tie' ? '引き分け' : `${labelOf(c, pair.winner)}の方が良い`;
     tone = pair.winner === 'v2' ? 'good' : pair.winner === 'current' ? 'warn' : 'neutral';
   } else if (pair) headline = `比較に失敗: ${esc((pair as any).error)}`;
+  // 並び順を入れ替えて 2 回比べた場合は、それぞれの結果も出す
+  const rounds = c.judge?.pairwiseRounds || [];
+  if (rounds.length > 1) {
+    const roundText = rounds.map((r, i) => `${i + 1}回目（記事1=${labelOf(c, r.order[0])}）: ${r.winner === 'tie' ? '引き分け' : labelOf(c, r.winner)}`).join(' / ');
+    headline = `${headline}（${roundText}）`;
+  }
 
   const cards = FLOWS.map((name) => {
     const flow = c.flows[name];
     if (!flow) return '';
     if (!isOk<FlowResult>(flow)) {
-      return `<div class="card"><h3>${FLOW_LABEL[name]}</h3><p class="bad">失敗: ${esc((flow as any).error)}</p></div>`;
+      return `<div class="card"><h3>${labelOf(c, name)}</h3><p class="bad">失敗: ${esc((flow as any).error)}</p></div>`;
     }
     const v = c.judge?.verify[name];
     const q = c.judge?.quality[name];
     const counts = isOk<VerifyOutcome>(v) ? countVerdicts(v.results) : null;
     const cost = flowCostJpy(flow);
     return `<div class="card">
-      <h3>${FLOW_LABEL[name]}</h3>
+      <h3>${labelOf(c, name)}</h3>
       <dl>
         <dt>第三者チェックでの誤り</dt><dd>${counts ? `<b class="${counts.incorrect ? 'bad' : ''}">誤り ${counts.incorrect}</b>・一部誤り ${counts.partially_correct}・確認できず ${counts.unverified}（${(v as VerifyOutcome).results.length}件中）` : '—'}</dd>
         <dt>第三者の総合評価</dt><dd>${isOk<VerifyOutcome>(v) ? esc(RATING_LABEL[v.overall.rating] || v.overall.rating) : '—'}</dd>
@@ -106,16 +114,18 @@ function renderComparisonTable(c: KeywordComparison): string {
   const flows = FLOWS.map((n) => c.flows[n]).map((f) => (isOk<FlowResult>(f) ? f : null));
   const row = (label: string, fn: (f: FlowResult) => string) =>
     `<tr><th>${label}</th>${flows.map((f) => `<td>${f ? fn(f) : '—'}</td>`).join('')}</tr>`;
-  return `<table class="cmp"><thead><tr><th></th>${FLOWS.map((n) => `<th>${FLOW_LABEL[n]}</th>`).join('')}</tr></thead><tbody>
+  return `<table class="cmp"><thead><tr><th></th>${FLOWS.map((n) => `<th>${labelOf(c, n)}</th>`).join('')}</tr></thead><tbody>
     ${row('タイトル', (f) => esc(f.title))}
     ${row('文字数・見出し', (f) => { const h = headingCount(f.content); return `${charCount(f.content).toLocaleString()}字・H2 ${h.h2}・H3 ${h.h3}`; })}
+    ${row('文字数の決め方', (f) => f.lengthPlan ? `${f.lengthPlan.mode === 'auto' ? 'おまかせ' : '文字数指定'} ${f.lengthPlan.targetChars.toLocaleString()}字<br><small>${esc(f.lengthPlan.reason)}・見出し上限${f.lengthPlan.maxHeadings}</small>` : '指定（記録なし）')}
+    ${row('文字数の調整', (f) => esc(f.lengthAdjustment || '機械的な削減（旧方式）'))}
     ${row('調査の方法', (f) => f.name === 'current' ? (f.research ? `${esc(f.research.source || 'SerpAPI')}（上位${f.research.articles?.length ?? 0}件のページを取得）` : '競合調査なし') : `Gemini 検索（上位${f.research?.competitors?.length ?? 0}件を AI が読む）`)}
     ${row('競合の見出し数', (f) => String(f.competitorHeadings.length))}
     ${row('関連キーワード', (f) => esc(f.relatedKeywords.join('、')) || '—')}
     ${row('根拠メモ', (f) => f.factSheet ? `事実${f.factSheet.facts.length}件・出典${f.factSheet.sources.length}件` : `なし（${esc(f.factSheetNote)}）`)}
     ${row('参考資料', (f) => `${f.referencesCount}件`)}
     ${row('執筆モデル', (f) => esc(f.writerModel))}
-    ${row('見直し', (f) => esc(f.editorialReview))}
+    ${row('見直し', (f) => esc(f.editorialReview).replace(/\n/g, '<br>'))}
     ${row('流れの中の検証', (f) => `${esc(f.factCheck.verifier)}<br><small>${f.factCheck.executed ? `${f.factCheck.results.length}件・${f.factCheck.rounds}回確認・自動修正${f.factCheck.autoFixApplied ? 'あり' : 'なし'}` : esc(f.factCheck.note || '未実行')}</small>`)}
     ${row('時間切れで省略した工程', (f) => esc(f.skippedSteps.join('、')) || 'なし')}
     ${row('Gemini の利用', (f) => geminiTokens(f))}
@@ -132,7 +142,7 @@ function renderQuality(c: KeywordComparison): string {
   const notes = qs.map((q) => isOk<QualityScore>(q)
     ? `<td><b>良い点</b><ul>${q.strengths.map((s) => `<li>${esc(s)}</li>`).join('')}</ul><b>改善点</b><ul>${q.weaknesses.map((s) => `<li>${esc(s)}</li>`).join('')}</ul></td>`
     : `<td>${q ? `失敗: ${esc((q as any).error)}` : '—'}</td>`).join('');
-  return `<table class="cmp"><thead><tr><th></th>${FLOWS.map((n) => `<th>${FLOW_LABEL[n]}</th>`).join('')}</tr></thead>
+  return `<table class="cmp"><thead><tr><th></th>${FLOWS.map((n) => `<th>${labelOf(c, n)}</th>`).join('')}</tr></thead>
     <tbody>${rows}<tr><th>コメント</th>${notes}</tr></tbody></table>`;
 }
 
@@ -155,7 +165,7 @@ function renderJudgeVerify(c: KeywordComparison): string {
   if (!c.judge) return '<p class="muted">採点は行っていません</p>';
   return `<div class="cols">${FLOWS.map((n) => {
     const v = c.judge!.verify[n];
-    return `<div><h4>${FLOW_LABEL[n]}</h4>${isOk<VerifyOutcome>(v)
+    return `<div><h4>${labelOf(c, n)}</h4>${isOk<VerifyOutcome>(v)
       ? `<p><b>${esc(RATING_LABEL[v.overall.rating])}</b>: ${esc(v.overall.summary)}</p>${renderFactResults(v.results)}`
       : v ? `<p class="bad">失敗: ${esc((v as any).error)}</p>` : '—'}</div>`;
   }).join('')}</div>`;
@@ -164,8 +174,8 @@ function renderJudgeVerify(c: KeywordComparison): string {
 function renderArticles(c: KeywordComparison, idx: number): string {
   return `<div class="cols">${FLOWS.map((n) => {
     const f = c.flows[n];
-    if (!isOk<FlowResult>(f)) return `<div><h4>${FLOW_LABEL[n]}</h4>—</div>`;
-    return `<div><h4>${FLOW_LABEL[n]}</h4><article class="md" data-md="md-${idx}-${n}"><h1>${esc(f.title)}</h1></article>
+    if (!isOk<FlowResult>(f)) return `<div><h4>${labelOf(c, n)}</h4>—</div>`;
+    return `<div><h4>${labelOf(c, n)}</h4><article class="md" data-md="md-${idx}-${n}"><h1>${esc(f.title)}</h1></article>
       <textarea hidden id="md-${idx}-${n}">${esc(f.content)}</textarea></div>`;
   }).join('')}</div>`;
 }
@@ -175,7 +185,7 @@ function renderSteps(c: KeywordComparison): string {
     const f = c.flows[n];
     if (!isOk<FlowResult>(f)) return '<div>—</div>';
     const max = Math.max(1, ...f.steps.map((s) => s.ms));
-    return `<div><h4>${FLOW_LABEL[n]}（合計 ${(f.totalMs / 1000).toFixed(0)}秒）</h4><table class="steps">${f.steps.map((s) =>
+    return `<div><h4>${labelOf(c, n)}（合計 ${(f.totalMs / 1000).toFixed(0)}秒）</h4><table class="steps">${f.steps.map((s) =>
       `<tr><td>${esc(s.name)}</td><td class="num">${(s.ms / 1000).toFixed(1)}秒</td><td><span class="bar"><span style="width:${(s.ms / max) * 100}%"></span></span></td></tr>${s.note ? `<tr><td colspan="3" class="note">${esc(s.note)}</td></tr>` : ''}`).join('')}</table></div>`;
   }).join('')}</div>`;
 }
@@ -200,7 +210,7 @@ function renderResearch(c: KeywordComparison): string {
       ? `<ol class="factlist">${sheet.facts.map((fact: any) => `<li>${esc(fact.statement)}${fact.asOf ? ` <small>（${esc(fact.asOf)}時点）</small>` : ''}</li>`).join('')}</ol>
          <p><b>出典</b></p><ul>${sheet.sources.map((s: any) => `<li><a href="${esc(s.url || s.redirectUrl)}" target="_blank" rel="noopener">${esc(s.title || s.url)}</a></li>`).join('')}</ul>`
       : `<p class="muted">なし（${esc(f.factSheetNote)}）</p>`;
-    return `<div><h4>${FLOW_LABEL[n]}</h4>${researchHtml}<h5>根拠メモ</h5>${factsHtml}</div>`;
+    return `<div><h4>${labelOf(c, n)}</h4>${researchHtml}<h5>根拠メモ</h5>${factsHtml}</div>`;
   }).join('')}</div>`;
 }
 
@@ -208,7 +218,7 @@ function renderPipelineChecks(c: KeywordComparison): string {
   return `<div class="cols">${FLOWS.map((n) => {
     const f = c.flows[n];
     if (!isOk<FlowResult>(f)) return '<div>—</div>';
-    return `<div><h4>${FLOW_LABEL[n]}: ${esc(f.factCheck.verifier)}</h4>${f.factCheck.overall ? `<p><b>${esc(RATING_LABEL[f.factCheck.overall.rating] || f.factCheck.overall.rating)}</b>: ${esc(f.factCheck.overall.summary)}</p>` : ''}${renderFactResults(f.factCheck.results)}</div>`;
+    return `<div><h4>${labelOf(c, n)}: ${esc(f.factCheck.verifier)}</h4>${f.factCheck.overall ? `<p><b>${esc(RATING_LABEL[f.factCheck.overall.rating] || f.factCheck.overall.rating)}</b>: ${esc(f.factCheck.overall.summary)}</p>` : ''}${renderFactResults(f.factCheck.results)}</div>`;
   }).join('')}</div>`;
 }
 

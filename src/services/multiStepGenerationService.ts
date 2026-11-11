@@ -26,7 +26,15 @@ import {
     selectReferenceSources,
     type FactSheet,
 } from '../shared/factSheetCore';
-import { runEditorialReview } from '../shared/editorialReviewCore';
+import { runEditorialReview, summarizeCritique, type EditorialCritique } from '../shared/editorialReviewCore';
+import { DEFAULT_WRITER_THINKING_BUDGET } from '../shared/generationPolicy';
+import {
+    buildOutlineLengthInstructions,
+    fixedLengthPlan,
+    planArticleLength,
+    type ArticleLengthPlan,
+    type LengthMode,
+} from '../shared/articleLengthPlan';
 import { USD_TO_JPY } from '../shared/aiUsage';
 import { createGeminiSession, getGenerationQualityPrefs, isGeminiActiveProvider } from './geminiSession';
 import {
@@ -412,10 +420,15 @@ export class MultiStepGenerationService {
             customInstructions?: string;
             targetWordCount?: number; // 霑ｽ蜉
             articleStructureType?: ArticleStructureType;
+            // 文字数の決め方（auto なら AI が決める）。lengthPlan があればそれを使う
+            lengthMode?: LengthMode;
+            lengthPlan?: ArticleLengthPlan;
         }
     ): Promise<ArticleOutline> {
         try {
             console.log('Step 3: アウトライン生成開始');
+
+            const lengthPlan = await this.resolveLengthPlan(keywords, trendData, options);
 
             const request: OutlineGenerationRequest = {
                 keywords,
@@ -428,9 +441,11 @@ export class MultiStepGenerationService {
                 // 構成案にだけ根拠メモの全体を渡す（本文では見出しごとに割り当てた分だけ渡す）
                 customInstructions: this.compactInstructions([
                     options?.customInstructions,
+                    // 見出しの数を文字数に合わせ、検索意図から外れる見出しを落とす（1-7・1-8）
+                    buildOutlineLengthInstructions(lengthPlan),
                     buildFactSheetOutlineInstructions(this.getEffectiveFactSheet(trendData)),
                 ]),
-                targetWordCount: options?.targetWordCount, // 霑ｽ蜉
+                targetWordCount: lengthPlan.targetChars,
                 articleStructureType: options?.articleStructureType
             };
 
@@ -442,6 +457,7 @@ export class MultiStepGenerationService {
 
             // キーワード設定を保存しておく
             outline.keywordPreferences = options?.keywordPreferences;
+            outline.lengthPlan = lengthPlan;
             outline = this.ensureFinalSummarySection(outline);
 
             console.log('Step 3: アウトライン生成完了', outline);
@@ -450,6 +466,48 @@ export class MultiStepGenerationService {
             console.error('Outline generation failed:', error);
             throw new Error('アウトライン生成に失敗しました');
         }
+    }
+
+    /**
+     * 文字数の決め方（記事改善プラン 1-0）。
+     * おまかせのときは、調査結果（上位記事・関連語・根拠メモ）をもとに AI が文字数と理由を決める
+     */
+    async resolveLengthPlan(
+        keywords: string[],
+        trendData: TrendAnalysisResult,
+        options?: {
+            targetLength?: 'short' | 'medium' | 'long';
+            selectedTitle?: string;
+            targetWordCount?: number;
+            lengthMode?: LengthMode;
+            lengthPlan?: ArticleLengthPlan;
+        }
+    ): Promise<ArticleLengthPlan> {
+        if (options?.lengthPlan) return options.lengthPlan;
+        if (options?.lengthMode !== 'auto') {
+            const fixedTarget = options?.targetWordCount
+                || (options?.targetLength === 'short' ? 1200 : options?.targetLength === 'long' ? 3000 : 2000);
+            return fixedLengthPlan(fixedTarget);
+        }
+
+        await aiService.loadActiveConfig();
+        const topArticles = trendData?.competitorAnalysis?.topArticles || [];
+        const factSheet = this.getEffectiveFactSheet(trendData);
+        const averageLength = trendData?.competitorAnalysis?.averageLength || 0;
+        const plan = await planArticleLength({
+            keyword: keywords[0] || options?.selectedTitle || '',
+            title: options?.selectedTitle,
+            competitorTitles: topArticles.map((article) => article?.title).filter(Boolean) as string[],
+            competitorHeadings: topArticles.flatMap((article) => article?.headings || []),
+            relatedKeywords: trendData?.relatedKeywords || [],
+            researchNotes: [
+                averageLength > 0 ? `上位記事の平均文字数（推定）: 約${averageLength}字` : '',
+                ...(factSheet ? factSheet.facts.map((fact) => fact.statement) : []),
+            ].filter(Boolean),
+            callAI: (prompt, maxTokens) => aiService.generateRawText(prompt, maxTokens),
+        });
+        console.log('文字数おまかせ:', plan);
+        return plan;
     }
 
     /**
@@ -634,6 +692,7 @@ export class MultiStepGenerationService {
             customInstructions?: string;
             articleStructureType?: ArticleStructureType;
             imagesPerArticle?: number; // 逕ｻ蜒乗椢謨ｰ繧定ｿｽ蜉
+            lengthMode?: LengthMode;
             onStepComplete?: (step: number, data: any) => void;
         }
     ): Promise<Article> {
@@ -652,13 +711,14 @@ export class MultiStepGenerationService {
             options?.onStepComplete?.(2, titles);
         }
 
-        // Step 3: アウトライン生成（対話モードと同じ経路）
-        const targetWordCount = options?.targetWordCount
-            || (options?.targetLength === 'short'
-                ? 1200
-                : options?.targetLength === 'long'
-                    ? 3000
-                    : 2000);
+        // Step 3: アウトライン生成（対話モードと同じ経路）。文字数おまかせならここで AI が決める
+        const lengthPlan = await this.resolveLengthPlan(keywords, trendData, {
+            targetLength: options?.targetLength,
+            selectedTitle,
+            targetWordCount: options?.targetWordCount,
+            lengthMode: options?.lengthMode,
+        });
+        const targetWordCount = lengthPlan.targetChars;
 
         const effectiveCustomInstructions = compactAutoModeInstructions([
             options?.customInstructions,
@@ -679,6 +739,7 @@ export class MultiStepGenerationService {
                 targetWordCount,
                 customInstructions: effectiveCustomInstructions,
                 articleStructureType: options?.articleStructureType,
+                lengthPlan,
             }
         );
 
@@ -702,6 +763,7 @@ export class MultiStepGenerationService {
                         buildSharedAutoOutlineRetryInstructions(outlineQuality.issues),
                     ]),
                     articleStructureType: options?.articleStructureType,
+                    lengthPlan,
                 }
             );
         }
@@ -807,7 +869,8 @@ export class MultiStepGenerationService {
             defaultMaxTokens: activeAIConfig.maxTokens || 2000,
             qualityRetryCount: 3,
             callAI: session
-                ? (prompt, maxTokens) => session.callText(prompt, { role: 'writer', maxOutputTokens: maxTokens, thinkingBudget: 1024 })
+                // 思考の上限は記事改善プラン 1-3 の値（4096）。思考分は GeminiSession 側で出力上限に足す
+                ? (prompt, maxTokens) => session.callText(prompt, { role: 'writer', maxOutputTokens: maxTokens, thinkingBudget: DEFAULT_WRITER_THINKING_BUDGET })
                 : (prompt, maxTokens) => aiService.generateRawText(prompt, maxTokens),
             getSectionInstructions: factSheet
                 ? (_section, index) => buildSectionFactInstructions(factSheet, sectionFactIds[index] || [])
@@ -856,7 +919,9 @@ export class MultiStepGenerationService {
             let reviewStatus = '未実行';
             let reviewAccepted = false;
             let contentBeforeReview: string | undefined;
-            options?.onStatus?.('記事を見直しています');
+            let reviewCritique: EditorialCritique | null = null;
+            // 手動生成は時間の制限がないので、いつも「批評 → 書き直し」の 2 段階で見直す（段階 2）
+            options?.onStatus?.('記事を読者の立場で批評しています');
             try {
                 const decision = await runEditorialReview({
                     title: outline.title,
@@ -867,9 +932,16 @@ export class MultiStepGenerationService {
                         ? 'やわらかく親しみやすい です・ます調'
                         : 'ビジネス読者向けの自然な です・ます調',
                     call: session.call,
+                    critique: true,
+                    onCritique: (critique) => {
+                        options?.onStatus?.(critique
+                            ? `批評をもとに書き直しています（${summarizeCritique(critique)}）`
+                            : '記事を見直しています');
+                    },
                 });
                 reviewAccepted = decision.accepted;
-                reviewStatus = decision.accepted ? '採用' : `不採用（${decision.reason}）`;
+                reviewCritique = decision.critique || null;
+                reviewStatus = decision.accepted ? decision.reason : `不採用（${decision.reason}）`;
                 if (decision.accepted) {
                     contentBeforeReview = article.content;
                     article.content = decision.content;
@@ -896,10 +968,11 @@ export class MultiStepGenerationService {
                 qualityMode: prefs.qualityMode,
                 writerModel: session.effectiveWriterModel,
                 proFallback: session.proUnavailable,
-                editorialReview: { status: reviewStatus, accepted: reviewAccepted, before: contentBeforeReview },
+                editorialReview: { status: reviewStatus, accepted: reviewAccepted, before: contentBeforeReview, critique: reviewCritique },
                 referencesCount,
                 notes: [...session.notes],
                 estimatedCostJpy: Math.round(usage.total_estimated_usd * USD_TO_JPY),
+                lengthPlan: outline.lengthPlan,
             };
         }
         return article;

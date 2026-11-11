@@ -28,6 +28,7 @@ class ScheduleService {
         'fact_check_notify_on_every_run',
         'quality_mode',
         'append_references',
+        'length_mode',
     ] as const;
 
     private isMissingTableError(error: any, tableName: string): boolean {
@@ -305,6 +306,7 @@ class ScheduleService {
             images_per_article: schedule.images_per_article ?? 0,
             quality_mode: schedule.quality_mode || 'high',
             append_references: schedule.append_references ?? true,
+            length_mode: schedule.length_mode === 'fixed' ? 'fixed' : 'auto',
         };
 
         const maxRetries = Math.max(this.maxSchemaRetryCount, Object.keys(insertPayload).length + 2);

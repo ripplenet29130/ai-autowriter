@@ -5,8 +5,18 @@ import {
   countGeneratedChars,
   formatArticleBodyForReadability,
   generateOutlineWithAutoModeStyle,
-  insertSubheadingsIntoLongSections,
 } from '../../../src/shared/articleGenerationCore.ts';
+import {
+  AUTO_LENGTH_MAX_CHARS,
+  buildOutlineLengthInstructions,
+  condenseArticleIfTooLong,
+  fixedLengthPlan,
+  formatLengthPlanLabel,
+  isOverLengthLimit,
+  normalizeLengthMode,
+  planArticleLength,
+  type ArticleLengthPlan,
+} from '../../../src/shared/articleLengthPlan.ts';
 import {
   buildAutoModeQualityInstructions,
   buildAutoOutlineRetryInstructions,
@@ -34,7 +44,12 @@ import {
   selectReferenceSources,
   type FactSheet,
 } from '../../../src/shared/factSheetCore.ts';
-import { runEditorialReview } from '../../../src/shared/editorialReviewCore.ts';
+import {
+  CRITIQUE_ISSUE_TYPES,
+  runEditorialReview,
+  summarizeCritique,
+  type EditorialCritique,
+} from '../../../src/shared/editorialReviewCore.ts';
 import {
   applyGeminiFactCheckFixes,
   claimsForRecheck,
@@ -50,6 +65,7 @@ import {
   GenerationRun,
   readGeminiMaxParallel,
   readSchedulerTimeBudgetMs,
+  readSectionWritingMode,
   SearchUnavailableError,
   withDeadline,
 } from './_run.ts';
@@ -62,7 +78,7 @@ import { callAI, resolveAiModelRate, estimateExecutionCostBreakdown, fetchStyleR
 import { conductCompetitorResearch, conductCompetitorResearchWithFallback, conductCompetitorResearchViaEdgeFunction, extractRelatedKeywordsFromCompetitorData, extractCompetitorHeadings, fetchRelatedKeywordsViaCustomSearch } from './_research.ts';
 import { formatContentForWordPress, normalizeGeneratedContentForPublishing, extractExcerpt, inferLengthCategory, countNonSummaryHeadings, findHeadingOnlySections, summarizeFactCheckContentChanges } from './_content-format.ts';
 import { publishToWordPress, publishViaXmlRpc, getTermIdBySlugOrName, getCategoryIdBySlugOrName, getTaxonomyCandidatesForPostType, resolveTermAssignmentForPostType, isPermissionRelatedWpError } from './_wordpress.ts';
-import { generateSchedulerArticleSectioned, generateSchedulerArticleSinglePass, formatOutlineForSinglePass, validateGeneratedArticleCompleteness, compactArticleToTargetLength } from './_generation.ts';
+import { generateSchedulerArticleSectioned, generateSchedulerArticleSinglePass, formatOutlineForSinglePass, validateGeneratedArticleCompleteness, REVIEW_THINKING_BUDGET } from './_generation.ts';
 import { sendChatworkNotifications, notifyScheduleExecutionFailure, notifyScheduleAutoPaused } from './_notifications.ts';
 
 Deno.serve(async (req: Request) => {
@@ -834,7 +850,11 @@ async function executeSchedule(
 
   // === 隰ｾ・ｹ闖ｫ・ｮ2: 郢晏現ﾎ樒ｹ晢ｽｳ郢晉甥繝ｻ隴ｫ謦ｰ・ｼ逎ｯ譛ｪ鬨ｾ・｣郢ｧ・ｭ郢晢ｽｼ郢晢ｽｯ郢晢ｽｼ郢晉甥蜿呵墓圜・ｼ繝ｻ===
   console.log(`Enriching keywords for: ${keyword}`);
-  const targetWordCount = schedule.target_word_count || DEFAULT_TARGET_WORD_COUNT;
+  // 文字数おまかせ（length_mode = auto）のときは、タイトルが決まった後に AI が決める（記事改善プラン 1-0）。
+  // 列が無い古い DB や既存のスケジュールは、これまでどおり文字数指定として扱う
+  const lengthMode = normalizeLengthMode(schedule.length_mode, 'fixed');
+  let targetWordCount = schedule.target_word_count || DEFAULT_TARGET_WORD_COUNT;
+  let lengthPlan: ArticleLengthPlan = fixedLengthPlan(targetWordCount);
   const writingTone = resolveWritingTone(schedule.writing_tone);
   const keywordArray = (schedule.keyword || '').split(',').map((k: string) => k.trim()).filter((k: string) => k);
 
@@ -901,6 +921,30 @@ async function executeSchedule(
     title: fixedTitle || '',
   });
 
+  // 文字数おまかせ: 調査結果をもとに AI が文字数と理由を決める（失敗時は既定値）
+  if (lengthMode === 'auto') {
+    const maxCharsRaw = Number(Deno.env.get('AUTO_LENGTH_MAX_CHARS'));
+    const autoMaxChars = Number.isFinite(maxCharsRaw) && maxCharsRaw >= 1500 ? maxCharsRaw : AUTO_LENGTH_MAX_CHARS;
+    lengthPlan = await planArticleLength({
+      keyword,
+      title: fixedTitle,
+      competitorTitles: (competitorData?.articles || []).map((a: any) => a?.title).filter(Boolean),
+      competitorHeadings: extractCompetitorHeadings(competitorData, 20),
+      relatedKeywords,
+      researchNotes: hasUsableFacts(factSheet) ? factSheet.facts.map((fact) => fact.statement) : [],
+      maxChars: autoMaxChars,
+      callAI: (prompt, maxTokens) => callAI(prompt, aiConfig, maxTokens),
+    });
+    targetWordCount = lengthPlan.targetChars;
+    console.log(`Length plan: ${formatLengthPlanLabel(lengthPlan)} (max headings ${lengthPlan.maxHeadings})`);
+    await updateExecutionProgressHistory(supabase, progressHistoryId, {
+      stage: 'length_planned',
+      message: `文字数を決めました（${formatLengthPlanLabel(lengthPlan)}）`,
+      progress: 60,
+      title: fixedTitle || '',
+    });
+  }
+
   console.log(`Generating outline for: ${keyword}`);
   const runGeneration = async () => {
     console.log('Generating outline with AI generator style...');
@@ -917,6 +961,8 @@ async function executeSchedule(
         targetWordCount,
       }),
     ]);
+    // 構成案にだけ渡す、見出し数と検索意図の指示（1-7・1-8）
+    const outlineLengthInstructions = buildOutlineLengthInstructions(lengthPlan);
 
     await updateExecutionProgressHistory(supabase, progressHistoryId, {
       stage: 'outline_generating',
@@ -931,7 +977,7 @@ async function executeSchedule(
       keyword,
       targetWordCount,
       fixedTitle,
-      customInstructions: compactAutoModeInstructions([effectiveCustomInstructions, outlineFactInstructions]),
+      customInstructions: compactAutoModeInstructions([effectiveCustomInstructions, outlineLengthInstructions, outlineFactInstructions]),
       competitorHeadings,
       relatedKeywords,
       tone: writingTone,
@@ -957,6 +1003,7 @@ async function executeSchedule(
         fixedTitle,
         customInstructions: compactAutoModeInstructions([
           effectiveCustomInstructions,
+          outlineLengthInstructions,
           outlineFactInstructions,
           buildAutoOutlineRetryInstructions(outlineQuality.issues),
         ]),
@@ -979,6 +1026,7 @@ async function executeSchedule(
         targetWordCount,
         relatedKeywords,
         competitorHeadings,
+        lengthPlan,
       }),
     });
 
@@ -1007,8 +1055,9 @@ async function executeSchedule(
       aiConfig,
       factSheet,
       sectionFactIds,
-      // Gemini では H2 単位で並列に書く（時間短縮）。それ以外はこれまでどおり順番に書く
-      parallelism: isGeminiProvider && run ? readGeminiMaxParallel() : 1,
+      // Gemini では既定で H2 単位で並列に書く（時間短縮）。SECTION_WRITING_MODE=sequential なら
+      // それまでの本文を全文渡して順番に書く（1-5）。Gemini 以外は順番に書く
+      parallelism: isGeminiProvider && run && readSectionWritingMode() === 'parallel' ? readGeminiMaxParallel() : 1,
     };
 
     // セクション分割生成を優先し、失敗時は従来のシングルパスへフォールバックする
@@ -1034,6 +1083,7 @@ async function executeSchedule(
         generatedChars: generationResult.wordCount,
         relatedKeywords,
         competitorHeadings,
+        lengthPlan,
       }),
     });
 
@@ -1164,9 +1214,37 @@ async function executeSchedule(
   fullContent = cleanupContentArtifacts(fullContent, articleTitle);
   console.log('Deterministic cleanup applied');
 
-  // H3 subheading insertion: matches manual generation quality
-  fullContent = insertSubheadingsIntoLongSections(fullContent, targetWordCount);
-  console.log('H3 subheadings inserted');
+  // 文字数の調整（記事改善プラン 1-1）。小見出しの機械的な差し込みと、文・見出しの機械的な削除はしない。
+  // 目安の 1.5 倍を超えたときだけ、AI に内容を保ったまま短く言い直させる。時間がなければそのまま出す
+  let lengthAdjustmentStatus = '不要';
+  if (isOverLengthLimit(countGeneratedChars(fullContent), targetWordCount)) {
+    const hasTimeForCondense = run
+      ? run.hasTime(75_000)
+      : Date.now() - schedulerStartTime < 80_000;
+    if (hasTimeForCondense) {
+      await updateExecutionProgressHistory(supabase, progressHistoryId, {
+        stage: 'length_condensing',
+        message: '長すぎるため、内容を保ったまま短くしています',
+        progress: 89,
+        title: articleTitle,
+      });
+      const condensed = await condenseArticleIfTooLong({
+        title: articleTitle,
+        keyword,
+        content: fullContent,
+        targetChars: targetWordCount,
+        callAI: (prompt, maxTokens) => callAI(prompt, aiConfig, maxTokens, { role: 'writer', thinkingBudget: 2048 }),
+      });
+      if (condensed.applied) {
+        fullContent = cleanupContentArtifacts(condensed.content, articleTitle);
+      }
+      lengthAdjustmentStatus = condensed.reason;
+    } else {
+      run?.skip('文字数の短縮');
+      lengthAdjustmentStatus = `時間切れのため短縮せずそのまま（${countGeneratedChars(fullContent)}字）`;
+    }
+    console.log(`Length adjustment: ${lengthAdjustmentStatus}`);
+  }
 
   // === Step 2: AI邵ｺ・ｫ郢ｧ蛹ｻ・玖ｬ暦ｽｨ隰ｨ・ｲ繝ｻ驛・ｽｪ・ｭ邵ｺ・ｿ郢ｧ繝ｻ笘・ｸｺ蜍滄ｫ・叉鄙ｫ繝ｻ邵ｺ・ｿ繝ｻ繝ｻ===
   // 郢ｧ・ｿ郢ｧ・､郢晢｣ｰ郢ｧ・｢郢ｧ・ｦ郢昜ｺ･・ｯ・ｾ驕ｲ繝ｻ 陷・ｽｦ騾・・蟷戊沂荵敖ｰ郢ｧ繝ｻ20驕伜宴・ｻ・･闕ｳ鬘費ｽｵ遒≫с邵ｺ蜉ｱ窶ｻ邵ｺ繝ｻ笳・ｹｧ蟲ｨ縺帷ｹｧ・ｭ郢昴・繝ｻ
@@ -1217,18 +1295,32 @@ async function executeSchedule(
   // === Step 4: Clean up generated content before publishing ===
   fullContent = cleanupContentArtifacts(fullContent, articleTitle);
 
-  // 4.5 編集見直し（執筆モデルで読み直し、重複・根拠のない断定・つながりを整える）
+  // 4.5 編集見直し（記事改善プラン 段階 2）。
+  // 時間に余裕があれば「批評 → 書き直し」の 2 段階、少なければ 1 回の見直しだけ、さらに少なければ省略
   let editorialReviewStatus = isGeminiProvider ? '未実行' : '対象外（Gemini以外）';
+  let editorialCritique: EditorialCritique | null = null;
   if (isGeminiProvider && run) {
-    if (run.hasTime(80_000)) {
+    const withCritique = run.hasTime(120_000);
+    if (withCritique || run.hasTime(80_000)) {
       await updateExecutionProgressHistory(supabase, progressHistoryId, {
         stage: 'editorial_review',
-        message: '記事を見直しています',
+        message: withCritique ? '記事を読者の立場で批評しています' : '記事を見直しています',
         progress: 90,
         title: articleTitle,
       });
       try {
         const decision = await runEditorialReview({
+          critique: withCritique,
+          onCritique: async (critique) => {
+            await updateExecutionProgressHistory(supabase, progressHistoryId, {
+              stage: 'editorial_rewrite',
+              message: critique
+                ? `批評をもとに書き直しています（${summarizeCritique(critique)}）`
+                : '記事を見直しています（批評は取得できませんでした）',
+              progress: 91,
+              title: articleTitle,
+            });
+          },
           title: articleTitle,
           keyword,
           content: fullContent,
@@ -1238,12 +1330,18 @@ async function executeSchedule(
             : 'ビジネス読者向けの自然な です・ます調',
           customInstructions: customInstructions.trim() || undefined,
           call: run.call,
+          thinkingBudget: REVIEW_THINKING_BUDGET,
         });
         if (decision.accepted) {
           fullContent = cleanupContentArtifacts(decision.content, articleTitle);
         }
-        editorialReviewStatus = decision.accepted ? '採用' : `不採用（${decision.reason}）`;
-        console.log(`Editorial review: ${editorialReviewStatus}`);
+        editorialCritique = decision.critique || null;
+        editorialReviewStatus = [
+          decision.accepted ? decision.reason : `不採用（${decision.reason}）`,
+          withCritique ? '' : '（時間が足りず批評は省略）',
+        ].join('');
+        if (!withCritique) run.skip('見直し前の批評');
+        console.log(`Editorial review: ${editorialReviewStatus}${editorialCritique ? ` / ${summarizeCritique(editorialCritique)}` : ''}`);
       } catch (reviewError) {
         editorialReviewStatus = `失敗（${formatScheduleFailureReason(reviewError)}）`;
         console.warn('Editorial review failed; keeping the original article:', reviewError);
@@ -1490,13 +1588,7 @@ async function executeSchedule(
     fullContent = baselineNormalizedContent;
   }
 
-  const finalCharsBeforeCompaction = countGeneratedChars(fullContent);
-  fullContent = formatArticleBodyForReadability(compactArticleToTargetLength(fullContent, targetWordCount));
-  const finalCharsAfterCompaction = countGeneratedChars(fullContent);
-  if (finalCharsAfterCompaction < finalCharsBeforeCompaction) {
-    console.log(`Compacted article length: ${finalCharsBeforeCompaction} -> ${finalCharsAfterCompaction}`);
-  }
-
+  // 投稿直前の機械的な文字数削減は行わない（記事改善プラン 1-1）。長さの調整は本文生成直後の AI 短縮だけ
   validateGeneratedArticleCompleteness(fullContent, outline, targetWordCount);
 
   // 自動修正で直しきれず「（修正: …）」などが残った記事は公開しない
@@ -1585,29 +1677,49 @@ async function executeSchedule(
       : null,
     fact_sheet_error: factSheet ? '' : factSheetError,
     editorial_review: editorialReviewStatus,
+    editorial_critique: editorialCritique,
     references_count: referencesCount,
     skipped_steps: run?.skippedSteps || [],
     notes: run?.notes || [],
     unverified_claims: factCheckUnverified,
     elapsed_seconds: run ? Math.round(run.elapsedMs() / 1000) : null,
     time_budget_seconds: run ? Math.round(run.budgetMs / 1000) : null,
+    length_plan: {
+      mode: lengthPlan.mode,
+      target_chars: lengthPlan.targetChars,
+      reason: lengthPlan.reason,
+      source: lengthPlan.source,
+      max_headings: lengthPlan.maxHeadings,
+    },
+    final_chars: countGeneratedChars(fullContent),
+    length_adjustment: lengthAdjustmentStatus,
   };
+  // 文字数の決め方と結果（記事改善プラン 4.1 の「記録」）
+  const lengthLines = [
+    `文字数: ${formatLengthPlanLabel(lengthPlan)} → 完成 ${qualityReport.final_chars}字`,
+    lengthAdjustmentStatus !== '不要' ? `文字数の調整: ${lengthAdjustmentStatus}` : '',
+  ];
   const qualityBlock = isGeminiProvider
     ? [
       '',
       '【品質】',
+      ...lengthLines,
       `品質モード: ${qualityMode === 'high' ? '高品質' : '標準'}`,
       `執筆モデル: ${qualityReport.writer_model}${qualityReport.pro_fallback ? '（Proが使えずFlashで代替）' : ''}`,
       `根拠メモ: ${factSheet ? `事実${factSheet.facts.length}件・出典${factSheet.sources.length}件` : `なし（${factSheetError || '作成できませんでした'}）`}`,
       `Google検索: ${aiUsageSummary?.grounded_requests ?? 0}回`,
       `見直し: ${editorialReviewStatus}`,
+      // 批評の結果（2-3）。件数の内訳と、重要な指摘を 3 件まで
+      editorialCritique ? `見直しの批評: ${summarizeCritique(editorialCritique)}` : '',
+      ...(editorialCritique?.issues.slice(0, 3).map((issue) =>
+        `・[${CRITIQUE_ISSUE_TYPES[issue.type]}] ${issue.section}: ${issue.problem}`) || []),
       `参考資料: ${referencesCount > 0 ? `${referencesCount}件` : 'なし'}`,
       qualityReport.skipped_steps.length > 0 ? `時間切れで省略: ${qualityReport.skipped_steps.join('、')}` : '',
       ...(qualityReport.notes.map((note) => `メモ: ${note}`)),
       aiUsageSummary ? `推定費用: 約${Math.max(1, Math.round(aiUsageSummary.total_estimated_usd * USD_TO_JPY))}円（有料キー換算）` : '',
       qualityReport.elapsed_seconds !== null ? `処理時間: ${qualityReport.elapsed_seconds}秒（上限${qualityReport.time_budget_seconds}秒）` : '',
     ].filter((line) => line !== '').join('\n')
-    : '';
+    : ['', '【品質】', ...lengthLines].filter((line) => line !== '').join('\n');
 
   const rawNotifyEveryRun = (schedule as any).fact_check_notify_on_every_run === true;
   const rawNotifyOnAnomaly = (schedule as any).fact_check_notify_on_anomaly ?? true;
@@ -1985,6 +2097,7 @@ function buildGenerationDebug(params: {
   relatedKeywords?: string[];
   competitorHeadings?: string[];
   publishErrorMessage?: string | null;
+  lengthPlan?: ArticleLengthPlan | null;
 }) {
   const sections = params.outline?.sections || [];
   const h2 = sections.filter((section) => section.level !== 3 && !section.isLead);
@@ -1994,6 +2107,9 @@ function buildGenerationDebug(params: {
     title: params.title || '',
     keyword: params.keyword || '',
     target_word_count: params.targetWordCount || null,
+    length_mode: params.lengthPlan?.mode || null,
+    length_reason: params.lengthPlan?.reason || null,
+    max_headings: params.lengthPlan?.maxHeadings || null,
     generated_chars: params.generatedChars || 0,
     h2_count: h2.length,
     h3_count: h3.length,

@@ -197,6 +197,7 @@ export function useMultiStepGeneration() {
             keywordPreferences?: Record<string, KeywordPreference>;
             customInstructions?: string;
             targetWordCount?: number; // 追加
+            lengthMode?: import('../types').LengthMode;
             articleStructureType?: ArticleStructureType;
         }
     ): Promise<ArticleOutline | null> => {
@@ -344,6 +345,7 @@ export function useMultiStepGeneration() {
             customInstructions?: string;
             articleStructureType?: ArticleStructureType;
             imagesPerArticle?: number; // 追加
+            lengthMode?: import('../types').LengthMode;
         }
     ): Promise<Article | null> => {
         try {

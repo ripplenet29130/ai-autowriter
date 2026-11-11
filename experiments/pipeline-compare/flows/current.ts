@@ -1,7 +1,16 @@
 // 今の流れ（自動投稿 scheduler-executor/index.ts の記事作成部分を、同じ部品・同じ順番・同じ時間管理で再現）
 // DB・WordPress・通知には触れない。
 import { DEFAULT_TARGET_WORD_COUNT } from '../../../src/shared/generationPolicy.ts';
-import { generateOutlineWithAutoModeStyle } from '../../../src/shared/articleGenerationCore.ts';
+import { countGeneratedChars, generateOutlineWithAutoModeStyle } from '../../../src/shared/articleGenerationCore.ts';
+import {
+  buildOutlineLengthInstructions,
+  condenseArticleIfTooLong,
+  fixedLengthPlan,
+  formatLengthPlanLabel,
+  isOverLengthLimit,
+  planArticleLength,
+  type ArticleLengthPlan,
+} from '../../../src/shared/articleLengthPlan.ts';
 import {
   buildAutoModeQualityInstructions,
   buildAutoOutlineRetryInstructions,
@@ -18,7 +27,23 @@ import {
   hasUsableFacts,
   type FactSheet,
 } from '../../../src/shared/factSheetCore.ts';
-import { runEditorialReview } from '../../../src/shared/editorialReviewCore.ts';
+import {
+  CRITIQUE_ISSUE_TYPES,
+  runEditorialReview,
+  summarizeCritique,
+  type EditorialReviewDecision,
+} from '../../../src/shared/editorialReviewCore.ts';
+
+// 比較ページに出す見直しの結果（批評の内訳と指摘を含める）
+export function formatReviewStatus(decision: EditorialReviewDecision, withCritique = true): string {
+  const head = decision.accepted ? decision.reason : `不採用（${decision.reason}）`;
+  if (!withCritique) return `${head}（時間が足りず批評は省略）`;
+  if (!decision.critique) return `${head}（批評は取得できませんでした）`;
+  const issues = decision.critique.issues
+    .map((issue, i) => `${i + 1}. [${CRITIQUE_ISSUE_TYPES[issue.type]}] ${issue.section}: ${issue.problem}`)
+    .join('\n');
+  return `${head}\n批評: ${summarizeCritique(decision.critique)}${issues ? `\n${issues}` : ''}`;
+}
 import {
   applyGeminiFactCheckFixes,
   claimsForRecheck,
@@ -30,6 +55,7 @@ import {
   GenerationRun,
   readGeminiMaxParallel,
   readSchedulerTimeBudgetMs,
+  readSectionWritingMode,
   SearchUnavailableError,
   withDeadline,
 } from '../../../supabase/functions/scheduler-executor/_run.ts';
@@ -43,6 +69,7 @@ import {
 import {
   generateSchedulerArticleSectioned,
   generateSchedulerArticleSinglePass,
+  REVIEW_THINKING_BUDGET,
 } from '../../../supabase/functions/scheduler-executor/_generation.ts';
 import {
   countNonSummaryHeadings,
@@ -55,7 +82,10 @@ import type { FlowResult } from '../lib/types.ts';
 
 export async function runCurrentFlow(params: { keyword: string; targetWordCount?: number }): Promise<FlowResult> {
   const keyword = params.keyword;
-  const targetWordCount = params.targetWordCount || DEFAULT_TARGET_WORD_COUNT;
+  // --words を指定したときは文字数指定、指定しなければ本番の新しい既定と同じく「おまかせ」
+  const lengthMode = params.targetWordCount ? 'fixed' : 'auto';
+  let targetWordCount = params.targetWordCount || DEFAULT_TARGET_WORD_COUNT;
+  let lengthPlan: ArticleLengthPlan = fixedLengthPlan(targetWordCount);
   const timer = new StepTimer();
   const geminiKey = requireEnv('GEMINI_API_KEY');
   const baseModel = env('GEMINI_MODEL', getDefaultAiModel('gemini'));
@@ -149,6 +179,21 @@ export async function runCurrentFlow(params: { keyword: string; targetWordCount?
   const competitorTitles = (competitorData?.articles || []).map((a: any) => a.title).filter(Boolean);
   const title = await timer.time('タイトル', () => generateTitleWithAI(keyword, relatedKeywords, competitorTitles, aiConfig, competitorData), (t) => t);
 
+  // 文字数おまかせ（本番の index.ts と同じ: タイトルの後、構成案の前に AI が決める）
+  if (lengthMode === 'auto') {
+    lengthPlan = await timer.time('文字数を決める', () =>
+      planArticleLength({
+        keyword,
+        title,
+        competitorTitles,
+        competitorHeadings: extractCompetitorHeadings(competitorData, 20),
+        relatedKeywords,
+        researchNotes: hasUsableFacts(factSheet) ? factSheet.facts.map((fact) => fact.statement) : [],
+        callAI: (prompt, maxTokens) => callAI(prompt, aiConfig, maxTokens),
+      }), (plan) => formatLengthPlanLabel(plan));
+    targetWordCount = lengthPlan.targetChars;
+  }
+
   const baseInstructions = compactAutoModeInstructions([
     relatedKeywords.length > 0 ? `Related keywords: ${relatedKeywords.slice(0, 8).join(', ')}` : undefined,
   ]);
@@ -157,13 +202,14 @@ export async function runCurrentFlow(params: { keyword: string; targetWordCount?
     buildAutoModeQualityInstructions({ selectedTitle: title, targetWordCount }),
   ]);
   const outlineFactInstructions = buildFactSheetOutlineInstructions(factSheet);
+  const outlineLengthInstructions = buildOutlineLengthInstructions(lengthPlan);
   const outline = await timer.time('構成案', async () => {
     const makeOutline = (extra?: string) =>
       generateOutlineWithAutoModeStyle({
         keyword,
         targetWordCount,
         fixedTitle: title,
-        customInstructions: compactAutoModeInstructions([effectiveInstructions, outlineFactInstructions, extra]),
+        customInstructions: compactAutoModeInstructions([effectiveInstructions, outlineLengthInstructions, outlineFactInstructions, extra]),
         competitorHeadings,
         relatedKeywords,
         tone: 'professional',
@@ -193,9 +239,11 @@ export async function runCurrentFlow(params: { keyword: string; targetWordCount?
     aiConfig,
     factSheet,
     sectionFactIds,
-    parallelism: readGeminiMaxParallel(),
+    // 本番と同じ: 既定は H2 並列、SECTION_WRITING_MODE=sequential なら順番に書く
+    parallelism: readSectionWritingMode() === 'parallel' ? readGeminiMaxParallel() : 1,
   };
-  const generated = await timer.time('本文（H2 並列）', async () => {
+  const writingLabel = readSectionWritingMode() === 'parallel' ? '本文（H2 並列）' : '本文（順番に書く）';
+  const generated = await timer.time(writingLabel, async () => {
     try {
       return await generateSchedulerArticleSectioned(generationParams);
     } catch (error) {
@@ -206,10 +254,33 @@ export async function runCurrentFlow(params: { keyword: string; targetWordCount?
 
   let content = cleanupGenerated(generated.fullContent, title, targetWordCount);
 
+  // 文字数の調整（本番の index.ts と同じ）。目安の 1.5 倍を超えたときだけ AI が短く言い直す
+  let lengthAdjustment = '不要';
+  if (isOverLengthLimit(countGeneratedChars(content), targetWordCount)) {
+    if (run.hasTime(75_000)) {
+      const condensed = await timer.time('文字数の短縮（AI）', () =>
+        condenseArticleIfTooLong({
+          title,
+          keyword,
+          content,
+          targetChars: targetWordCount,
+          callAI: (prompt, maxTokens) => callAI(prompt, aiConfig, maxTokens, { role: 'writer', thinkingBudget: 2048 }),
+        }), (r) => r.reason);
+      if (condensed.applied) content = cleanupGenerated(condensed.content, title, targetWordCount);
+      lengthAdjustment = condensed.reason;
+    } else {
+      run.skip('文字数の短縮');
+      timer.skip('文字数の短縮', '時間切れ');
+      lengthAdjustment = `時間切れのため短縮せずそのまま（${countGeneratedChars(content)}字）`;
+    }
+  }
+
+  // 見直し（本番の index.ts と同じ: 時間があれば批評→書き直しの 2 段階、少なければ 1 回、さらに少なければ省略）
   let editorialReview = '未実行';
-  if (run.hasTime(80_000)) {
+  const withCritique = run.hasTime(120_000);
+  if (withCritique || run.hasTime(80_000)) {
     try {
-      const decision = await timer.time('見直し', () =>
+      const decision = await timer.time(withCritique ? '見直し（批評→書き直し）' : '見直し（1回）', () =>
         runEditorialReview({
           title,
           keyword,
@@ -217,9 +288,11 @@ export async function runCurrentFlow(params: { keyword: string; targetWordCount?
           factSheet,
           toneInstruction: 'ビジネス読者向けの自然な です・ます調',
           call: run.call,
-        }), (d) => (d.accepted ? '採用' : `不採用（${d.reason}）`));
+          thinkingBudget: REVIEW_THINKING_BUDGET,
+          critique: withCritique,
+        }), (d) => (d.accepted ? d.reason : `不採用（${d.reason}）`));
       if (decision.accepted) content = cleanupGenerated(decision.content, title, targetWordCount);
-      editorialReview = decision.accepted ? '採用' : `不採用（${decision.reason}）`;
+      editorialReview = formatReviewStatus(decision, withCritique);
     } catch (error) {
       editorialReview = `失敗（${errorMessage(error)}）`;
     }
@@ -325,6 +398,14 @@ export async function runCurrentFlow(params: { keyword: string; targetWordCount?
     notes: run.notes,
     skippedSteps: run.skippedSteps,
     referencesCount: finalized.referencesCount,
+    lengthPlan: {
+      mode: lengthPlan.mode,
+      targetChars: lengthPlan.targetChars,
+      reason: lengthPlan.reason,
+      maxHeadings: lengthPlan.maxHeadings,
+      source: lengthPlan.source,
+    },
+    lengthAdjustment,
     steps: timer.steps,
     totalMs: timer.totalMs,
     usage: { gemini: run.tracker.summarize(), openai: null, serpapiCalls, customSearchCalls },

@@ -1,9 +1,5 @@
 // 本文ができた後の整形（今の自動投稿の処理と同じ順番）。両方の流れで同じものを使う
-import {
-  countGeneratedChars,
-  formatArticleBodyForReadability,
-  insertSubheadingsIntoLongSections,
-} from '../../../src/shared/articleGenerationCore.ts';
+import { formatArticleBodyForReadability } from '../../../src/shared/articleGenerationCore.ts';
 import {
   appendReferencesSection,
   buildReferencesMarkdown,
@@ -16,17 +12,14 @@ import {
   countNonSummaryHeadings,
   normalizeGeneratedContentForPublishing,
 } from '../../../supabase/functions/scheduler-executor/_content-format.ts';
-import {
-  compactArticleToTargetLength,
-  validateGeneratedArticleCompleteness,
-} from '../../../supabase/functions/scheduler-executor/_generation.ts';
+import { validateGeneratedArticleCompleteness } from '../../../supabase/functions/scheduler-executor/_generation.ts';
 import { errorMessage } from './env.ts';
 
 // 本文生成の直後（見直し・検証の前）の整形。
-// 本番では index.ts 内の cleanupContentArtifacts も使うが、外から呼べないため公開前の正規化で代用する
-export function cleanupGenerated(content: string, title: string, targetWordCount: number): string {
-  const normalized = normalizeGeneratedContentForPublishing(content, title);
-  return insertSubheadingsIntoLongSections(normalized, targetWordCount);
+// 本番では index.ts 内の cleanupContentArtifacts も使うが、外から呼べないため公開前の正規化で代用する。
+// 記事改善プラン段階 1 で、小見出しの機械的な差し込みはやめた（本番と同じ）
+export function cleanupGenerated(content: string, title: string, _targetWordCount: number): string {
+  return normalizeGeneratedContentForPublishing(content, title);
 }
 
 export function finalizeArticle(params: {
@@ -50,11 +43,7 @@ export function finalizeArticle(params: {
     content = baseline;
   }
 
-  const before = countGeneratedChars(content);
-  content = formatArticleBodyForReadability(compactArticleToTargetLength(content, params.targetWordCount));
-  const after = countGeneratedChars(content);
-  if (after < before) warnings.push(`文字数を調整しました（${before} → ${after}）`);
-
+  // 投稿直前の機械的な文字数削減はしない（記事改善プラン 1-1。本番と同じ）
   try {
     validateGeneratedArticleCompleteness(content, params.outline, params.targetWordCount);
   } catch (error) {

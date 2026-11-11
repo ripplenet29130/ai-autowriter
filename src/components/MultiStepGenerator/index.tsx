@@ -18,6 +18,7 @@ interface MultiStepGeneratorProps {
   selectedTitleSetId?: string;
   selectedTitle?: string;
   targetWordCount?: number;
+  lengthMode?: 'auto' | 'fixed';
   onComplete: (article: Article) => void;
   onBack: () => void;
 }
@@ -31,6 +32,7 @@ export const MultiStepGenerator: React.FC<MultiStepGeneratorProps> = ({
   selectedTitleSetId,
   selectedTitle,
   targetWordCount,
+  lengthMode,
   onComplete,
   onBack,
 }) => {
@@ -121,6 +123,7 @@ export const MultiStepGenerator: React.FC<MultiStepGeneratorProps> = ({
       selectedTitle: localSelectedTitle || undefined,
       customInstructions,
       targetWordCount,
+      lengthMode,
       articleStructureType,
     });
   };

@@ -2,6 +2,9 @@ import React, { useState } from 'react';
 import { AlertTriangle, ChevronDown, ChevronUp, Sparkles } from 'lucide-react';
 import { Article } from '../../types';
 import { countCriticalIssues, hasCorrectionArtifacts } from '../../shared/geminiFactCheck';
+import { formatLengthPlanLabel } from '../../shared/articleLengthPlan';
+import { CRITIQUE_ISSUE_TYPES, summarizeCritique } from '../../shared/editorialReviewCore';
+import { countGeneratedChars } from '../../shared/articleGenerationCore';
 
 interface ArticleQualityCardProps {
   article: Article;
@@ -61,6 +64,14 @@ export const ArticleQualityCard: React.FC<ArticleQualityCardProps> = ({ article 
               <dt className="inline text-gray-400">参考資料: </dt>
               <dd className="inline">{info.referencesCount > 0 ? `${info.referencesCount}件` : 'なし'}</dd>
             </div>
+            {info.lengthPlan && (
+              <div className="sm:col-span-2">
+                <dt className="inline text-gray-400">文字数: </dt>
+                <dd className="inline">
+                  {formatLengthPlanLabel(info.lengthPlan)} → 完成 {countGeneratedChars(article.content)}字
+                </dd>
+              </div>
+            )}
             {typeof info.estimatedCostJpy === 'number' && (
               <div className="sm:col-span-2">
                 <dt className="inline text-gray-400">推定費用（有料キー換算）: </dt>
@@ -68,6 +79,23 @@ export const ArticleQualityCard: React.FC<ArticleQualityCardProps> = ({ article 
               </div>
             )}
           </dl>
+          {review?.critique && review.critique.issues.length > 0 && (
+            <div className="rounded-lg bg-gray-50 p-3 text-xs text-gray-700">
+              <p className="mb-1 font-semibold">見直しの批評: {summarizeCritique(review.critique)}</p>
+              {review.critique.summary && <p className="mb-2 text-gray-500">{review.critique.summary}</p>}
+              <ol className="list-inside list-decimal space-y-1">
+                {review.critique.issues.map((issue, index) => (
+                  <li key={index}>
+                    <span className="font-medium">[{CRITIQUE_ISSUE_TYPES[issue.type]}] {issue.section}:</span> {issue.problem}
+                    {issue.fix && <span className="text-gray-500"> → {issue.fix}</span>}
+                  </li>
+                ))}
+              </ol>
+              <p className="mt-2 text-gray-400">
+                {review.accepted ? 'この指摘をもとに書き直した本文を採用しています。' : '書き直しは採用されなかったため、指摘は本文に反映されていません。'}
+              </p>
+            </div>
+          )}
           {info.notes.length > 0 && (
             <ul className="list-inside list-disc text-xs text-gray-500">
               {info.notes.map((note) => <li key={note}>{note}</li>)}

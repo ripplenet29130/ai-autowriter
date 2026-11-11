@@ -1,7 +1,10 @@
 import { FactCheckResult } from './factCheck';
 import type { FactSheet } from '../shared/factSheetCore';
+import type { ArticleLengthPlan, LengthMode } from '../shared/articleLengthPlan';
+import type { EditorialCritique } from '../shared/editorialReviewCore';
 export type { FactCheckResult };
 export type { FactSheet };
+export type { ArticleLengthPlan, LengthMode };
 
 // 手動生成での品質まわりの結果（見直し・根拠メモ・使用モデル）
 export interface ArticleQualityInfo {
@@ -12,10 +15,14 @@ export interface ArticleQualityInfo {
     status: string;
     accepted: boolean;
     before?: string;
+    // 見直しの前に、読者の立場で挙げた弱点（記事改善プラン 2-1・2-3）
+    critique?: EditorialCritique | null;
   };
   referencesCount: number;
   notes: string[];
   estimatedCostJpy?: number;
+  // 文字数の決め方（おまかせなら AI が決めた文字数と理由）
+  lengthPlan?: ArticleLengthPlan;
 }
 
 export interface Article {
@@ -207,6 +214,8 @@ export interface ScheduleSetting {
   quality_mode?: 'high' | 'standard';
   // 記事末に参考資料（根拠メモの出典）を付けるか
   append_references?: boolean;
+  // 文字数の決め方（auto: AI が記事ごとに決める / fixed: target_word_count を使う）
+  length_mode?: 'auto' | 'fixed';
 }
 
 export interface ChatworkRecipient {
@@ -332,6 +341,8 @@ export interface ArticleOutline {
   estimatedWordCount: number;
   keywordPreferences?: Record<string, KeywordPreference>;
   createdAt: Date;
+  // 構成案を作るときに決めた文字数（おまかせなら AI が決めた文字数と理由）
+  lengthPlan?: ArticleLengthPlan;
 }
 
 /**
