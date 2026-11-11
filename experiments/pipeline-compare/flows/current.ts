@@ -76,6 +76,7 @@ import {
   normalizeGeneratedContentForPublishing,
 } from '../../../supabase/functions/scheduler-executor/_content-format.ts';
 import type { AIConfig } from '../../../supabase/functions/scheduler-executor/_shared.ts';
+import { researchWithGemini, type AiResearch } from './v2.ts';
 import { env, errorMessage, requireEnv, StepTimer } from '../lib/env.ts';
 import { cleanupGenerated, finalizeArticle } from '../lib/finalize.ts';
 import type { FlowResult } from '../lib/types.ts';
@@ -111,7 +112,8 @@ export async function runCurrentFlow(params: { keyword: string; targetWordCount?
   const warnings: string[] = [];
   const draftReasons: string[] = [];
 
-  // 根拠メモは競合調査と同時に作る（本番と同じく 40 秒で打ち切り）
+  // 根拠メモは競合調査と同時に作る（本番と同じく 40 秒で打ち切り。--research gemini では 80 秒）。
+  // 検索が使われなかったときの作り直しは buildFactSheet の中で行う
   let factSheetNote = '';
   const factSheetPromise: Promise<FactSheet | null> = timer.time(
     '根拠メモ（Gemini 検索）',
@@ -124,7 +126,7 @@ export async function runCurrentFlow(params: { keyword: string; targetWordCount?
           resolveUrls: run.resolveUrls,
           includeLatest: () => run.hasTime(110_000),
         }),
-        40_000,
+        Deno.env.get('PIPELINE_RESEARCH_MODE') === 'gemini' ? 80_000 : 40_000,
       ).then((sheet) => {
         if (!sheet) {
           factSheetNote = '時間内に作成できませんでした';
@@ -142,8 +144,21 @@ export async function runCurrentFlow(params: { keyword: string; targetWordCount?
     return null;
   });
 
+  // 新方式の検証用: PIPELINE_RESEARCH_MODE=gemini（run.ts の --research gemini）なら、
+  // SerpAPI／SearchApi を使わず、Gemini の Google 検索＋ページ読み込みで競合調査をする（新方式の仕様書 4 章 工程 1）
+  const useGeminiResearch = Deno.env.get('PIPELINE_RESEARCH_MODE') === 'gemini';
+  let geminiResearch: AiResearch | null = null;
   let competitorData: any = null;
-  if (serpApiKey) {
+  if (useGeminiResearch) {
+    try {
+      geminiResearch = await timer.time('調査（Gemini 検索＋ページ読み込み）', () => researchWithGemini(run, keyword),
+        (r) => `上位記事${r.competitors.length}件・${r.searchUsed ? `検索${r.searchQueries.length}回` : '検索なし'}${r.urlContextUsed ? '・ページ読み込みあり' : ''}`);
+      if (!geminiResearch.searchUsed) warnings.push('調査で Google 検索が使われませんでした（AI の知識とページ読み込みだけで調査）');
+      competitorData = { articles: geminiResearch.competitors, source: 'Gemini 検索' };
+    } catch (error) {
+      warnings.push(`Gemini の調査に失敗: ${errorMessage(error)}`);
+    }
+  } else if (serpApiKey) {
     try {
       serpapiCalls += 1;
       competitorData = await timer.time(
@@ -164,8 +179,9 @@ export async function runCurrentFlow(params: { keyword: string; targetWordCount?
   const factSheet = await factSheetPromise;
 
   const relatedKeywords: string[] = [];
-  if (competitorData) relatedKeywords.push(...extractRelatedKeywordsFromCompetitorData(competitorData, keyword, 5));
-  if (googleApiKey && searchEngineId) {
+  if (geminiResearch) relatedKeywords.push(...geminiResearch.relatedKeywords.slice(0, 8));
+  else if (competitorData) relatedKeywords.push(...extractRelatedKeywordsFromCompetitorData(competitorData, keyword, 5));
+  if (!useGeminiResearch && googleApiKey && searchEngineId) {
     try {
       customSearchCalls += 1;
       relatedKeywords.push(...await fetchRelatedKeywordsViaCustomSearch(keyword, googleApiKey, searchEngineId));
@@ -203,13 +219,25 @@ export async function runCurrentFlow(params: { keyword: string; targetWordCount?
   ]);
   const outlineFactInstructions = buildFactSheetOutlineInstructions(factSheet);
   const outlineLengthInstructions = buildOutlineLengthInstructions(lengthPlan);
+  // Gemini の調査結果は「材料」として渡し、何を書くかは見出し数の上限と検索意図で絞る（新方式の仕様書 4.0）
+  const researchInstructions = geminiResearch
+    ? [
+        geminiResearch.searchIntent ? `検索意図: ${geminiResearch.searchIntent}` : '',
+        geminiResearch.readerQuestions.length
+          ? `読者の疑問（見出しの数の上限の中で、検索意図に直接関係するものに答える）:\n- ${geminiResearch.readerQuestions.join('\n- ')}`
+          : '',
+        geminiResearch.gaps.length
+          ? `上位記事に足りない点（参考。検索意図に直接関係するものだけ使う）:\n- ${geminiResearch.gaps.join('\n- ')}`
+          : '',
+      ].filter(Boolean).join('\n')
+    : '';
   const outline = await timer.time('構成案', async () => {
     const makeOutline = (extra?: string) =>
       generateOutlineWithAutoModeStyle({
         keyword,
         targetWordCount,
         fixedTitle: title,
-        customInstructions: compactAutoModeInstructions([effectiveInstructions, outlineLengthInstructions, outlineFactInstructions, extra]),
+        customInstructions: compactAutoModeInstructions([effectiveInstructions, researchInstructions, outlineLengthInstructions, outlineFactInstructions, extra]),
         competitorHeadings,
         relatedKeywords,
         tone: 'professional',
@@ -242,8 +270,21 @@ export async function runCurrentFlow(params: { keyword: string; targetWordCount?
     // 本番と同じ: 既定は H2 並列、SECTION_WRITING_MODE=sequential なら順番に書く
     parallelism: readSectionWritingMode() === 'parallel' ? readGeminiMaxParallel() : 1,
   };
-  const writingLabel = readSectionWritingMode() === 'parallel' ? '本文（H2 並列）' : '本文（順番に書く）';
+  // 新方式の検証用: PIPELINE_WRITING_MODE=single（run.ts の --writing single）なら記事全体を 1 回で書く
+  const writeWholeArticle = Deno.env.get('PIPELINE_WRITING_MODE') === 'single';
+  const writingLabel = writeWholeArticle
+    ? '本文（記事全体を一度に）'
+    : readSectionWritingMode() === 'parallel' ? '本文（H2 並列）' : '本文（順番に書く）';
+  const writingStartedAt = Date.now();
   const generated = await timer.time(writingLabel, async () => {
+    if (writeWholeArticle) {
+      try {
+        return await generateSchedulerArticleSinglePass(generationParams);
+      } catch (error) {
+        warnings.push(`一度に書くのに失敗したため見出しごとの生成に切り替え: ${errorMessage(error)}`);
+        return await generateSchedulerArticleSectioned(generationParams);
+      }
+    }
     try {
       return await generateSchedulerArticleSectioned(generationParams);
     } catch (error) {
@@ -251,6 +292,11 @@ export async function runCurrentFlow(params: { keyword: string; targetWordCount?
       return await generateSchedulerArticleSinglePass(generationParams);
     }
   }, (g) => `${g.wordCount}文字`);
+  // 新方式では 1 工程 120 秒以内に収める必要がある
+  const writingMs = Date.now() - writingStartedAt;
+  if (writeWholeArticle && writingMs > 120_000) {
+    warnings.push(`記事全体を一度に書く工程が ${Math.round(writingMs / 1000)} 秒かかり、新方式の 1 工程の上限（120 秒）を超えました`);
+  }
 
   let content = cleanupGenerated(generated.fullContent, title, targetWordCount);
 

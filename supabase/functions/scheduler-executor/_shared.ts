@@ -130,6 +130,8 @@ export interface Schedule {
   append_references?: boolean | null;
   // 文字数の決め方（auto: AI が決める / fixed: target_word_count を使う）
   length_mode?: 'auto' | 'fixed' | null;
+  // 使う方式（classic: 今の方式 / v2: 工程ごとに分けて実行する新方式）
+  pipeline_mode?: 'classic' | 'v2' | null;
 }
 
 

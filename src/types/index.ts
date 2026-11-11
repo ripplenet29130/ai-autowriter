@@ -216,6 +216,8 @@ export interface ScheduleSetting {
   append_references?: boolean;
   // 文字数の決め方（auto: AI が記事ごとに決める / fixed: target_word_count を使う）
   length_mode?: 'auto' | 'fixed';
+  // 記事の作り方（classic: 今の方式 / v2: 工程ごとに分けて実行する新方式・テスト中）
+  pipeline_mode?: 'classic' | 'v2';
 }
 
 export interface ChatworkRecipient {

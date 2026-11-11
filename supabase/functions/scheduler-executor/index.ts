@@ -748,6 +748,61 @@ async function executeSchedule(
     progress: 18,
   });
 
+  // 新方式（v2）を選んだスケジュールは、ここで記事作成をジョブに引き継ぐ（新方式の仕様書 11 章の段階 4）。
+  // 以降の工程は article-pipeline が 1 工程ずつ進め、最後に同じ実行履歴を完了にする
+  if (schedule.pipeline_mode === 'v2') {
+    const { data: job, error: jobError } = await supabase.from('article_jobs').insert({
+      account_id: schedule.account_id || wpConfig.account_id || null,
+      user_id: schedule.user_id || wpConfig.user_id || null,
+      schedule_id: schedule.id,
+      execution_history_id: progressHistoryId,
+      wordpress_config_id: wpConfig.id,
+      ai_config_id: String(aiConfig.provider || '').toLowerCase() === 'gemini' ? aiConfig.id : null,
+      keyword,
+      fixed_title: fixedTitle,
+      settings: {
+        lengthMode: normalizeLengthMode(schedule.length_mode, 'fixed'),
+        targetWordCount: schedule.target_word_count || DEFAULT_TARGET_WORD_COUNT,
+        tone: resolveWritingTone(schedule.writing_tone),
+        qualityMode: normalizeQualityMode(schedule.quality_mode),
+        customInstructions: customInstructions.trim(),
+        appendReferences: schedule.append_references !== false,
+        postStatus: schedule.post_status === 'publish' ? 'publish' : 'draft',
+      },
+    }).select('id').single();
+    if (jobError) throw new Error(`新方式のジョブを作れませんでした: ${jobError.message}`);
+    await updateExecutionProgressHistory(supabase, progressHistoryId, {
+      stage: 'handed_off_to_v2',
+      message: `新方式（工程ごとの実行）に引き継ぎました（ジョブ ${job.id}）`,
+      progress: 20,
+      title: fixedTitle || '',
+    });
+    try {
+      await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/article-pipeline`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`,
+        },
+        body: JSON.stringify({ action: 'tick', jobId: job.id }),
+        signal: AbortSignal.timeout(8000),
+      });
+    } catch (kickError) {
+      // 呼び出しに失敗しても、毎分の定期実行がジョブを拾う
+      console.warn('Failed to kick article-pipeline; the cron job will pick it up:', kickError);
+    }
+    console.log(`Handed off schedule ${schedule.id} to article-pipeline job ${job.id}`);
+    return {
+      wordpress_config_id: wpConfig.id,
+      wordpress_config_name: wpConfig.name,
+      success: true,
+      keyword,
+      title: fixedTitle || '',
+      post_id: null,
+      handed_off_job_id: job.id,
+    };
+  }
+
   let styleReferenceInstructions = '';
   if (wpConfig.style_reference_url) {
     const styleSample = await fetchStyleReferenceSample(wpConfig.style_reference_url);

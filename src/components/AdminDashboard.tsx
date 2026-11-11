@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { KeyRound, LogOut, Plus, RefreshCw, Save, Trash2, Users } from 'lucide-react';
 import { supabase } from '../services/supabaseClient';
 import { Account, useAuthStore } from '../store/useAuthStore';
+import { PipelineV2Panel } from '../pipeline-v2/PipelineV2Panel';
 
 type AccountRow = Account & {
   wordpress_count?: number;
@@ -43,6 +44,8 @@ const getSupabaseErrorMessage = async (error: unknown) => {
 
 export const AdminDashboard: React.FC = () => {
   const { user, signOut } = useAuthStore();
+  // 管理画面の表示切り替え（アカウント管理／新方式のテスト）
+  const [adminView, setAdminView] = useState<'accounts' | 'pipeline-v2'>('accounts');
   const [accounts, setAccounts] = useState<AccountRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -307,6 +310,24 @@ export const AdminDashboard: React.FC = () => {
       </header>
 
       <main className="max-w-7xl mx-auto px-6 py-8 space-y-6">
+        <div className="flex gap-2 border-b border-gray-200">
+          {([
+            ['accounts', 'アカウント管理'],
+            ['pipeline-v2', '新方式（テスト）'],
+          ] as const).map(([view, label]) => (
+            <button
+              key={view}
+              type="button"
+              onClick={() => setAdminView(view)}
+              className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px ${adminView === view ? 'border-blue-600 text-blue-700' : 'border-transparent text-gray-500 hover:text-gray-800'}`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {adminView === 'pipeline-v2' ? <PipelineV2Panel /> : (
+        <>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div className="bg-white border border-gray-200 rounded-lg p-4">
             <div className="text-sm text-gray-500">client数</div>
@@ -702,6 +723,8 @@ export const AdminDashboard: React.FC = () => {
             </table>
           </div>
         </section>
+        </>
+        )}
       </main>
     </div>
   );

@@ -131,6 +131,7 @@ export const Scheduler: React.FC = () => {
     quality_mode: 'high' as 'high' | 'standard',
     append_references: true,
     length_mode: 'auto' as 'auto' | 'fixed',
+    pipeline_mode: 'classic' as 'classic' | 'v2',
   });
 
   const timeOptions = useMemo(() => {
@@ -488,6 +489,7 @@ export const Scheduler: React.FC = () => {
       append_references: schedule.append_references ?? true,
       // 列が無い・値が無い既存スケジュールは文字数指定のまま
       length_mode: schedule.length_mode === 'auto' ? 'auto' : 'fixed',
+      pipeline_mode: schedule.pipeline_mode === 'v2' ? 'v2' : 'classic',
     });
     // Scroll to top to show the form
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -621,6 +623,7 @@ export const Scheduler: React.FC = () => {
       quality_mode: 'high',
       append_references: true,
       length_mode: 'auto',
+      pipeline_mode: 'classic',
     });
     setEditingSchedule(null);
   };
@@ -1316,6 +1319,24 @@ export const Scheduler: React.FC = () => {
               </select>
               <p className="mt-2 text-xs leading-relaxed text-gray-500">
                 Gemini を使う場合に有効です。書く前に Google 検索で根拠を集め、高品質では本文の執筆と見直しに上位モデルを使います。無料キーでは Pro を使えないため、自動で基本モデルに切り替わります。
+              </p>
+            </div>
+
+            {/* 記事の作り方（新方式はテスト中） */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                記事の作り方
+              </label>
+              <select
+                value={formData.pipeline_mode}
+                onChange={(e) => setFormData({ ...formData, pipeline_mode: e.target.value === 'v2' ? 'v2' : 'classic' })}
+                className="input-field"
+              >
+                <option value="classic">今の方式（1回の実行で最後まで作る）</option>
+                <option value="v2">新方式・テスト中（工程ごとに分けて実行し、見直しやファクトチェックを省略しない）</option>
+              </select>
+              <p className="mt-2 text-xs leading-relaxed text-gray-500">
+                新方式は Gemini の Google 検索で調査し、記事全体を一度に書いてから、批評・書き直し・ファクトチェックをすべて行います。1本あたり4〜8分かかり、テスト中は常に下書きで投稿します。Gemini の設定が必要です。
               </p>
             </div>
 

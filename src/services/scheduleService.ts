@@ -29,6 +29,7 @@ class ScheduleService {
         'quality_mode',
         'append_references',
         'length_mode',
+        'pipeline_mode',
     ] as const;
 
     private isMissingTableError(error: any, tableName: string): boolean {
@@ -307,6 +308,7 @@ class ScheduleService {
             quality_mode: schedule.quality_mode || 'high',
             append_references: schedule.append_references ?? true,
             length_mode: schedule.length_mode === 'fixed' ? 'fixed' : 'auto',
+            pipeline_mode: schedule.pipeline_mode === 'v2' ? 'v2' : 'classic',
         };
 
         const maxRetries = Math.max(this.maxSchemaRetryCount, Object.keys(insertPayload).length + 2);

@@ -8,6 +8,7 @@ import { comparePair, scoreQuality, type PairwiseResult, type QualityScore } fro
 import type { FlowName, FlowResult } from './lib/types.ts';
 import { runCurrentFlow } from './flows/current.ts';
 import { runV2Flow } from './flows/v2.ts';
+import { runPipelineFlow } from './flows/pipeline.ts';
 import { buildReportHtml } from './report.ts';
 
 export interface JudgeResult {
@@ -34,15 +35,72 @@ function parseArgs(args: string[]) {
   let only: FlowName | null = null;
   let judge = true;
   let baseline: string | null = null;
+  // 外から持ち込んだ記事（Gemini アプリなどで作ったもの）。「キーワード=ファイル」か、キーワードが 1 つならファイルだけ
+  const externals: string[] = [];
+  let externalLabel = '持ち込んだ記事';
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
+    if (a === '--external') { externals.push(String(args[++i] || '').trim()); continue; }
+    if (a === '--external-label') { externalLabel = String(args[++i] || '').trim() || externalLabel; continue; }
     if (a === '--words') words = Number(args[++i]) || undefined;
     else if (a === '--only') only = args[++i] === 'v2' ? 'v2' : 'current';
     else if (a === '--no-judge') judge = false;
     else if (a === '--baseline') baseline = String(args[++i] || '').trim() || null;
+    // 手動生成と同じく時間制限なしで動かす（見直し・検証を省略させない）。本番の 140 秒の条件ではなくなる
+    else if (a === '--no-time-limit') Deno.env.set('SCHEDULER_TIME_BUDGET_SECONDS', '1200');
+    // 新方式の検証用: single なら今の流れの本文を記事全体で 1 回に書く
+    // 新方式の検証用: gemini なら SerpAPI／SearchApi を使わず Gemini の Google 検索で競合調査をする
+    else if (a === '--research') Deno.env.set('PIPELINE_RESEARCH_MODE', String(args[++i] || '').trim() === 'gemini' ? 'gemini' : 'serpapi');
+    // 新方式（article-pipeline）の工程そのものを、この PC の上で順番に動かす
+    else if (a === '--flow') Deno.env.set('PIPELINE_COMPARE_FLOW', String(args[++i] || '').trim() === 'pipeline' ? 'pipeline' : 'current');
+    else if (a === '--writing') Deno.env.set('PIPELINE_WRITING_MODE', String(args[++i] || '').trim() === 'single' ? 'single' : 'sections');
     else if (a.trim()) keywords.push(a.trim());
   }
-  return { keywords, words, only, judge, baseline };
+  return { keywords, words, only, judge, baseline, externals, externalLabel };
+}
+
+// 外から持ち込んだ記事を、採点できる形にする（Markdown の最初の「# 」の行をタイトルにする）
+async function loadExternalArticles(
+  specs: string[],
+  keywords: string[],
+  label: string,
+): Promise<{ label: string; byKeyword: Map<string, FlowResult> }> {
+  const byKeyword = new Map<string, FlowResult>();
+  for (const spec of specs) {
+    const eq = spec.indexOf('=');
+    const keyword = eq > 0 ? spec.slice(0, eq).trim() : keywords[0];
+    const path = eq > 0 ? spec.slice(eq + 1).trim() : spec;
+    if (!keyword || !path) continue;
+    const raw = (await Deno.readTextFile(path)).replace(/\r\n?/g, '\n').trim();
+    const titleMatch = raw.match(/^#\s+(.+)$/m);
+    const title = titleMatch ? titleMatch[1].trim() : keyword;
+    const content = titleMatch ? raw.replace(titleMatch[0], '').trim() : raw;
+    byKeyword.set(keyword, {
+      name: 'current',
+      label,
+      keyword,
+      title,
+      content,
+      outline: null,
+      research: null,
+      relatedKeywords: [],
+      competitorHeadings: [],
+      factSheet: null,
+      factSheetNote: '外から持ち込んだ記事',
+      editorialReview: '—（外から持ち込んだ記事）',
+      factCheck: { verifier: '—', executed: false, results: [], rounds: 0, autoFixApplied: false, note: '外から持ち込んだ記事' },
+      writerModel: label,
+      draftReasons: [],
+      warnings: [],
+      notes: [`ファイル: ${path}`],
+      skippedSteps: [],
+      referencesCount: 0,
+      steps: [],
+      totalMs: 0,
+      usage: { gemini: null, openai: null, serpapiCalls: 0, customSearchCalls: 0 },
+    });
+  }
+  return { label, byKeyword };
 }
 
 // 以前の比較結果（out/日時/result.json）から、同じキーワードの「今の流れ」の記事を読み込む
@@ -53,7 +111,8 @@ async function loadBaseline(baseline: string): Promise<{ label: string; byKeywor
   const data = JSON.parse(await Deno.readTextFile(new URL('result.json', dirUrl))) as KeywordComparison[];
   const byKeyword = new Map<string, FlowResult>();
   for (const comparison of data) {
-    const flow = comparison.flows?.current;
+    // --baseline で作った結果では、v2 枠に「改善後（その回に作った記事）」が入っている
+    const flow = comparison.labels ? comparison.flows?.v2 : comparison.flows?.current;
     if (isOk<FlowResult>(flow)) byKeyword.set(comparison.keyword, flow);
   }
   const name = baseline.replace(/\\/g, '/').replace(/\/+$/, '').split('/').pop() || baseline;
@@ -138,14 +197,17 @@ function stamp(): string {
 }
 
 async function main() {
-  const { keywords, words, only, judge, baseline } = parseArgs(Deno.args);
+  const { keywords, words, only, judge, baseline, externals, externalLabel } = parseArgs(Deno.args);
   if (keywords.length === 0) {
     console.error('キーワードを指定してください。例: deno run ... run.ts "相続税 申告期限" "NISA 始め方"');
     Deno.exit(1);
   }
 
   // --baseline: 今の流れだけを動かし、以前の結果の記事と同じ基準で比べる
-  const baselineData = baseline ? await loadBaseline(baseline) : null;
+  // --external（外から持ち込んだ記事）も、比べる相手として --baseline と同じ扱いにする
+  const baselineData = externals.length > 0
+    ? await loadExternalArticles(externals, keywords, externalLabel)
+    : baseline ? await loadBaseline(baseline) : null;
   if (baselineData) {
     const missing = keywords.filter((k) => !baselineData.byKeyword.has(k));
     if (missing.length > 0) {
@@ -163,8 +225,10 @@ async function main() {
   for (const keyword of keywords) {
     console.log(`\n=== ${keyword} ===`);
     const comparison: KeywordComparison = { keyword, flows: {}, judge: null };
+    // --flow pipeline なら「今の流れ」の枠で、新方式（article-pipeline）の工程を順番に動かす
+    const usePipeline = Deno.env.get('PIPELINE_COMPARE_FLOW') === 'pipeline';
     const runners: Array<[FlowName, typeof runCurrentFlow]> = [
-      ['current', runCurrentFlow],
+      ['current', usePipeline ? runPipelineFlow : runCurrentFlow],
       ['v2', runV2Flow],
     ];
     // 回数制限の取り合いを避け、時間を正しく測るため、1 つずつ順番に実行する
@@ -188,7 +252,14 @@ async function main() {
       const fresh = comparison.flows.current;
       const before = baselineData.byKeyword.get(keyword)!;
       comparison.flows = { current: before, v2: fresh };
-      comparison.labels = { current: baselineData.label, v2: '改善後（今回）' };
+      const noLimit = Number(Deno.env.get('SCHEDULER_TIME_BUDGET_SECONDS')) >= 1200;
+      const single = Deno.env.get('PIPELINE_WRITING_MODE') === 'single';
+      const geminiResearch = Deno.env.get('PIPELINE_RESEARCH_MODE') === 'gemini';
+      const notes = [noLimit ? '時間制限なし' : '', single ? '一度に書く' : '', geminiResearch ? 'Gemini 調査' : ''].filter(Boolean).join('・');
+      comparison.labels = {
+        current: baselineData.label,
+        v2: Deno.env.get('PIPELINE_COMPARE_FLOW') === 'pipeline' ? '新方式（工程ごと）' : `改善後（今回${notes ? `・${notes}` : ''}）`,
+      };
       await Deno.writeTextFile(new URL(`${safeName(keyword)}-before.md`, outDir), `# ${before.title}\n\n${before.content}\n`);
     }
 

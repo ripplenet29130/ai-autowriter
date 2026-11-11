@@ -261,7 +261,7 @@ function stripModelHeadings(text: string): string {
 // - 並列（parallelism > 1）のときは H2 とその下の H3 を 1 グループにし、グループ内で書いた本文を全文渡す
 //   （他のグループの本文は見えないため、時間に余裕があれば順番に書く設定のほうが質は高い）
 // - 根拠メモがあれば、見出しごとに割り当てた事実だけを渡す
-export async function generateSchedulerArticleSectioned(params: {
+export interface SectionedGenerationParams {
   outline: ArticleOutline;
   keyword: string;
   keywords: string[];
@@ -273,7 +273,17 @@ export async function generateSchedulerArticleSectioned(params: {
   // outline.sections と同じ並びの、見出しごとに使う根拠メモの番号
   sectionFactIds?: string[][];
   parallelism?: number;
-}): Promise<{ sectionsWithContent: any[]; fullContent: string; wordCount: number }> {
+}
+
+export type SectionWritingStep = { section: OutlineSection | null; isLead: boolean; sectionIndex: number };
+
+// 見出しごとに書くための部品。グループ（リード／H2 とその下の H3）単位で書ける。
+// 新方式（article-pipeline）は 1 グループを 1 工程として、それまでの本文を渡して順番に書く
+export function createSectionWriter(params: SectionedGenerationParams): {
+  groups: SectionWritingStep[][];
+  writeStep: (step: SectionWritingStep, writtenSoFar: string) => Promise<string>;
+  formatStep: (step: SectionWritingStep, text: string) => string;
+} {
   const sections = params.outline.sections || [];
   if (sections.length === 0) {
     throw new Error('Sectioned generation requires an outline with sections');
@@ -282,7 +292,6 @@ export async function generateSchedulerArticleSectioned(params: {
   const outlineText = formatOutlineForSinglePass(params.outline);
   const keywordLine = buildKeywordLine(params.keyword, params.keywords);
   const toneInstruction = buildToneInstruction(params.tone);
-  const parallelism = Math.max(1, params.parallelism ?? 1);
   const useFacts = hasUsableFacts(params.factSheet);
 
   // 文字数の目安: アウトラインの estimatedWordCount 比率で配分し、無ければ均等割り
@@ -295,7 +304,7 @@ export async function generateSchedulerArticleSectioned(params: {
     return Math.min(1500, Math.max(150, raw));
   };
 
-  type Step = { section: OutlineSection | null; isLead: boolean; sectionIndex: number };
+  type Step = SectionWritingStep;
   const steps: Step[] = [];
   if (!sections.some((s) => s.isLead)) steps.push({ section: null, isLead: true, sectionIndex: -1 });
   sections.forEach((section, index) => steps.push({ section, isLead: section.isLead, sectionIndex: index }));
@@ -388,18 +397,29 @@ export async function generateSchedulerArticleSectioned(params: {
     return text;
   };
 
+  // 書いた本文に見出しを付ける（見出しは組み立て側で付与する）
+  const formatStep = (step: Step, text: string): string => {
+    if (step.isLead || !step.section) return text;
+    const headingPrefix = step.section.level === 3 ? '###' : '##';
+    return `${headingPrefix} ${step.section.title}\n\n${text}`;
+  };
+
+  return { groups, writeStep, formatStep };
+}
+
+export async function generateSchedulerArticleSectioned(
+  params: SectionedGenerationParams,
+): Promise<{ sectionsWithContent: any[]; fullContent: string; wordCount: number }> {
+  const { groups, writeStep, formatStep } = createSectionWriter(params);
+  const parallelism = Math.max(1, params.parallelism ?? 1);
+
   // 並列でなければ全体を 1 グループとして順番に書き、それまでの本文を全文渡す
-  const writingGroups = parallelism > 1 ? groups : [steps];
+  const writingGroups = parallelism > 1 ? groups : [groups.flat()];
   const groupOutputs = await mapWithConcurrency(writingGroups, parallelism, async (group) => {
     const parts: string[] = [];
     for (const step of group) {
       const text = await writeStep(step, parts.join('\n\n'));
-      if (step.isLead || !step.section) {
-        parts.push(text);
-      } else {
-        const headingPrefix = step.section.level === 3 ? '###' : '##';
-        parts.push(`${headingPrefix} ${step.section.title}\n\n${text}`);
-      }
+      parts.push(formatStep(step, text));
     }
     return parts.join('\n\n');
   });

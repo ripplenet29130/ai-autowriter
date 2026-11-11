@@ -273,11 +273,13 @@ export async function runEditorialReview(params: ReviewParams & {
   critique?: boolean;
   // 批評が終わったとき（書き直しの前）に呼ぶ。進み具合の表示用
   onCritique?: (critique: EditorialCritique | null) => void | Promise<void>;
+  // 別の工程で作った批評を使う（新方式で「批評」と「書き直し」を別の工程に分けるため）。指定すると批評はしない
+  presetCritique?: EditorialCritique | null;
 }): Promise<EditorialReviewDecision> {
   const thinkingBudget = params.thinkingBudget ?? DEFAULT_REVIEW_THINKING_BUDGET;
 
-  let critique: EditorialCritique | null = null;
-  if (params.critique !== false) {
+  let critique: EditorialCritique | null = params.presetCritique ?? null;
+  if (params.presetCritique === undefined && params.critique !== false) {
     try {
       critique = await runEditorialCritique({ ...params, thinkingBudget });
     } catch (error) {
