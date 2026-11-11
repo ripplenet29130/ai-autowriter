@@ -94,6 +94,8 @@ export function buildFactSheetPrompt(params: {
     'ルール:',
     '- 検索で確認できた事実だけを書く。推測や一般論は書かない。',
     '- 数値・日付・料金・制度名は正確に書く。いつ時点の情報かを「｜」の後ろに書く（不明なら空にする）。',
+    // 11/11 のテストで、根拠メモの古い数字（前年度の利用率など）が記事に入り誤りと判定されたため（新方式の仕様書 工程 1b）
+    '- 統計・利用率・料金・税率などは、今日の日付で確認できる最新の年度・最新の発表の数字を書く。新しい数字が見つかったときは古い年度の数字を書かない。',
     '- 公的機関・公式サイト・業界団体の情報を優先する。',
     '- 情報源によって内容が割れている点や、変わりやすい点は【注意点】に書く。',
     '- 1件の事実は1文（80字以内）で書く。',
@@ -246,7 +248,7 @@ export function applyResolvedSourceUrls(sheet: FactSheet, resolved: Record<strin
 }
 
 // 根拠メモを作る（基本情報 → 必要なら最新情報 → 出典 URL の取得）
-export async function buildFactSheet(params: {
+interface BuildFactSheetParams {
   keyword: string;
   title?: string | null;
   relatedKeywords?: string[];
@@ -255,7 +257,29 @@ export async function buildFactSheet(params: {
   resolveUrls?: UrlResolver;
   includeLatest?: () => boolean;
   today?: Date;
-}): Promise<FactSheet> {
+  // Gemini が検索を使わずに答えたとき、1 回だけ作り直す（既定: する）
+  retryIfSearchUnused?: boolean;
+}
+
+// Gemini は検索するかどうかを自分で決めるため、検索を使わずに答えることがある。
+// その場合は 1 回だけ作り直し、検索を使った方を返す（記事改善プラン・新方式の仕様書 11 章の 0）
+export async function buildFactSheet(params: BuildFactSheetParams): Promise<FactSheet> {
+  const first = await buildFactSheetOnce(params);
+  if (first.searchUsed || params.retryIfSearchUnused === false) return first;
+  console.warn('[factSheet] Google search was not used; retrying once');
+  try {
+    const second = await buildFactSheetOnce(params);
+    if (second.searchUsed) {
+      second.warnings.push('1 回目は Google 検索が使われなかったため、作り直しました。');
+      return second;
+    }
+  } catch (error) {
+    console.warn('[factSheet] Retry failed; keeping the first result:', error);
+  }
+  return first;
+}
+
+async function buildFactSheetOnce(params: BuildFactSheetParams): Promise<FactSheet> {
   const today = params.today ?? new Date();
   const runFocus = async (focus: FactSheetFocus) => {
     const response = await params.call(

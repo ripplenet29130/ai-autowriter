@@ -501,16 +501,34 @@ export function formatArticleBodyForReadability(content: string): string {
       const trimmed = block.trim();
       if (!trimmed) return '';
       if (/^#{1,6}\s/m.test(trimmed) && /\n/.test(trimmed)) {
-        return trimmed
-          .split('\n')
-          .map((line) => {
-            const current = line.trim();
-            if (!current) return '';
-            if (isMarkdownStructuralBlock(current)) return current;
-            return splitJapaneseParagraphForReadability(current);
-          })
-          .filter(Boolean)
-          .join('\n\n');
+        // 見出しと本文が 1 つのブロックに入っているときは行ごとに分ける。
+        // ただし表の行・箇条書きの行は続けて 1 つのまとまりにする（表が崩れる不具合の対策）
+        const chunks: string[] = [];
+        let group: string[] = [];
+        let groupKind: 'table' | 'list' | null = null;
+        const flush = () => {
+          if (group.length > 0) chunks.push(group.join('\n'));
+          group = [];
+          groupKind = null;
+        };
+        for (const line of trimmed.split('\n')) {
+          const current = line.trim();
+          if (!current) {
+            flush();
+            continue;
+          }
+          const kind = /^\|/.test(current) ? 'table' : /^([-*+]|\d+[.)])\s/.test(current) ? 'list' : null;
+          if (kind) {
+            if (groupKind !== kind) flush();
+            groupKind = kind;
+            group.push(current);
+            continue;
+          }
+          flush();
+          chunks.push(isMarkdownStructuralBlock(current) ? current : splitJapaneseParagraphForReadability(current));
+        }
+        flush();
+        return chunks.filter(Boolean).join('\n\n');
       }
       if (isMarkdownStructuralBlock(trimmed)) return trimmed;
       return splitJapaneseParagraphForReadability(trimmed);

@@ -1,4 +1,5 @@
 import { convertMarkdownLinksToHtml } from '../shared/markdownLinks';
+import { isMarkdownTableLine, renderMarkdownTableGutenberg } from '../shared/markdownTable';
 
 /**
  * Convert Markdown/HTML content to Gutenberg block format
@@ -11,9 +12,31 @@ export function convertToGutenbergBlocks(content: string): string {
     const lines = content.split('\n');
     let inList = false;
     let listItems: string[] = [];
+    let tableLines: string[] = [];
+    const formatCell = (text: string) => convertMarkdownLinksToHtml(text)
+        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    // Markdown の表は表ブロックにする。表として読めなければ段落として残す
+    const flushTable = () => {
+        if (tableLines.length === 0) return;
+        const table = renderMarkdownTableGutenberg(tableLines, formatCell);
+        if (table) result += `${table}\n\n`;
+        else tableLines.forEach((row) => { result += createParagraphBlock(formatCell(row)); });
+        tableLines = [];
+    };
 
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i].trim();
+
+        if (isMarkdownTableLine(line)) {
+            if (inList) {
+                result += createListBlock(listItems);
+                inList = false;
+                listItems = [];
+            }
+            tableLines.push(line);
+            continue;
+        }
+        flushTable();
 
         // Skip empty lines
         if (!line) {
@@ -123,6 +146,8 @@ export function convertToGutenbergBlocks(content: string): string {
             result += createParagraphBlock(processedLine);
         }
     }
+
+    flushTable();
 
     // Close any remaining list
     if (inList) {

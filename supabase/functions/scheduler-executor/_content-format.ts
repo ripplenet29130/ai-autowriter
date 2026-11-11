@@ -2,6 +2,7 @@
 import { countGeneratedChars } from '../../../src/shared/articleGenerationCore.ts';
 import { trimForLog } from './_shared.ts';
 import { convertMarkdownLinksToHtml } from '../../../src/shared/markdownLinks.ts';
+import { renderMarkdownTableHtml } from '../../../src/shared/markdownTable.ts';
 
 export function splitLongParagraphForReadability(text: string): string[] {
   const normalized = String(text || '').replace(/\s+/g, ' ').trim();
@@ -52,6 +53,10 @@ export function renderBufferedBlock(lines: string[]): string[] {
       .join('\n');
     return [`<ul>\n${items}\n</ul>`];
   }
+
+  // Markdown の表（| で始まり、2 行目が区切り行）を HTML の表にする
+  const table = renderMarkdownTableHtml(cleaned);
+  if (table) return [table];
 
   const isOrderedList = cleaned.every((line) => /^\d+[.)]\s+/.test(line));
   if (isOrderedList) {
@@ -468,6 +473,8 @@ export function normalizeGeneratedContentForPublishing(rawContent: string, artic
 
   for (let i = 0; i < lines.length; i++) {
     const current = String(lines[i] || '').trim();
+    // 表の行（| で始まる）は見出しにしない（表の最後の行が「## | …」になる不具合の対策）
+    if (/^\|/.test(current)) continue;
     if (!looksLikeStandaloneHeadingLine(current)) continue;
 
     const nextIndex = findNextNonEmptyLineIndex(lines, i + 1);
