@@ -35,7 +35,22 @@ function naturalStyleInstructions(): string {
     '- 専門用語を使う場合は、読者が判断しやすいように短く補足すること',
     '- 1文を長くしすぎず、目安として60文字前後で一度区切ること',
     '- 抽象的な名詞を続けず、「何をすればよいか」「なぜ必要か」が伝わる具体的な動詞で書くこと',
-    '- 各段落の最初か最後に、読者が次に判断しやすくなる一文を入れること',
+  ].join('\n');
+}
+
+// 執筆の中心になる指示（記事改善プラン 1-2）。形（段落数・文の数）ではなく、読者・目的・具体性で指示する
+export function buildReaderFocusedWritingGuidance(options: { mainKeyword?: string; isLead?: boolean } = {}): string {
+  const reader = options.mainKeyword ? `「${options.mainKeyword}」で検索した人` : 'この記事を検索して読みに来た人';
+  return [
+    `- 読者は${reader}。その人がこの部分を読み終えたとき、何が分かり、何を判断・実行できるようになるかを決めてから書くこと`,
+    '- 読者の疑問に直接答えること。結論・答えを先に書き、理由や条件をその後に書くこと',
+    '- 具体例・数字・手順・判断基準・よくある失敗のうち、この部分に合うものを入れること。抽象的な説明だけで終わらせないこと',
+    '- 一般論、当たり前の前置き、「重要です」「注意が必要です」だけで終わる文で字数を埋めないこと',
+    '- 根拠が示せない数字・料金・制度の断定はしないこと',
+    options.isLead
+      ? '- 「（2026年4月時点）」のような時点の注記が必要な場合は、ここで1回だけ書くこと'
+      : '- 「（2026年4月時点）」のような時点の注記は書かないこと（必要なら記事の冒頭か末尾で1回だけ書く）',
+    '- 段落の数や文の数は決めない。内容に合わせて、読みやすい長さで段落を分けること',
   ].join('\n');
 }
 
@@ -123,7 +138,7 @@ ${input.totalOutline || '未設定'}
 
 今回のセクション: ${input.sectionTitle} (${sectionLevel === 2 ? 'H2' : 'H3'})
 文体: ${toneInstruction(input.tone)}
-目標文字数: ${input.targetChars}文字前後
+文字数の目安: ${input.targetChars}文字前後（目安です。内容を削ったり水増ししたりして合わせないこと）
 
 キーワード方針:
 - 主キーワード: ${mainKeywords.length > 0 ? mainKeywords.join('、') : 'なし'}
@@ -139,6 +154,8 @@ ${prefText || ''}
 - 他セクションの内容を重複させないこと
 - 情報が不確かな場合は断定しすぎないこと
 - 自然な日本語で、具体性のある本文にすること
+- 書く内容は以下を中心にすること
+${buildReaderFocusedWritingGuidance({ mainKeyword: mainKeywords[0], isLead: input.isLead })}
 - 文体は以下を守ること
 ${naturalStyleInstructions()}
 - AIO・AI検索向けに、以下を守ること

@@ -1,6 +1,6 @@
 import {
-  DEFAULT_WORD_COUNT_TOLERANCE,
-  getWordCountBounds,
+  getLooseWordCountBounds,
+  maxHeadingsForLength,
 } from './generationPolicy.ts';
 import { buildSummaryPrompt, buildSupplementPrompt } from './generationPrompts.ts';
 import { buildSchedulerOutlinePrompt } from './multiStepPromptTemplates.ts';
@@ -18,7 +18,6 @@ export interface SearchConsolePromptQuery {
   position?: number;
 }
 
-const FINAL_ARTICLE_WORD_COUNT_TOLERANCE = 0.18;
 
 export interface SharedOutlineSection {
   title: string;
@@ -71,9 +70,9 @@ export interface GenerateArticleWithSharedCoreParams {
   defaultMaxTokens?: number;
   qualityRetryCount?: number;
   finalPolish?: boolean;
+  sectionTimeoutMs?: number;
   // 見出しごとに追加する指示（根拠メモの割り当てなど）
   getSectionInstructions?: (section: SharedOutlineSection, index: number) => string | undefined;
-  sectionTimeoutMs?: number;
   onSectionStart?: (payload: {
     index: number;
     total: number;
@@ -108,45 +107,6 @@ export function countGeneratedChars(content: string): number {
     .replace(/\n+/g, '\n')
     .trim();
   return cleaned.length;
-}
-
-function truncateByParagraph(content: string, targetWordCount: number): string {
-  const paragraphs = content.split('\n\n').map((p) => p.trim()).filter(Boolean);
-  const max = Math.max(1, Math.floor(targetWordCount * 1.05));
-  const result: string[] = [];
-  let currentCount = 0;
-
-  const isHeadingOnly = (paragraph: string): boolean => /^#{1,6}\s+\S/.test(paragraph.trim());
-
-  for (let i = 0; i < paragraphs.length; i += 1) {
-    const paragraph = paragraphs[i];
-    const paragraphLength = countGeneratedChars(paragraph);
-
-    if (isHeadingOnly(paragraph) && i + 1 < paragraphs.length) {
-      const next = paragraphs[i + 1];
-      const bundledLength = paragraphLength + countGeneratedChars(next);
-      if (currentCount + bundledLength <= max || result.length === 0) {
-        result.push(paragraph, next);
-        currentCount += bundledLength;
-        i += 1;
-        continue;
-      }
-      break;
-    }
-
-    if (currentCount + paragraphLength <= max || result.length === 0) {
-      result.push(paragraph);
-      currentCount += paragraphLength;
-    } else {
-      break;
-    }
-  }
-
-  while (result.length > 0 && isHeadingOnly(result[result.length - 1])) {
-    result.pop();
-  }
-
-  return result.join('\n\n').trim();
 }
 
 function normalizeComparableText(value: string): string {
@@ -833,7 +793,7 @@ async function summarizeToWordCount(
     const summarizedText = await callAI(summaryPrompt, maxTokens);
     const cleaned = sanitizeRewriterOutput(summarizedText, originalContent, isSection);
     if (!cleaned) {
-      return isSection ? truncateByParagraph(originalContent, targetWordCount) : originalContent;
+      return originalContent;
     }
     if (!isSection) {
       const hasDanglingHeading = /(?:^|\n\n)#{1,6}\s+\S+\s*$/.test(cleaned);
@@ -848,7 +808,7 @@ async function summarizeToWordCount(
     }
     return cleaned;
   } catch {
-    return isSection ? truncateByParagraph(originalContent, targetWordCount) : originalContent;
+    return originalContent;
   }
 }
 
@@ -1630,11 +1590,10 @@ function isWeakH3Title(title: string): boolean {
   return /^(物流|効率|品質|安全|費用|コスト|方法|対策|課題|効果|種類|比較|選び方|注意点|ポイント|メリット|デメリット|概要|基本|導入)$/.test(normalized);
 }
 
-function getTargetH3Count(targetWordCount: number): number {
-  if (!Number.isFinite(targetWordCount) || targetWordCount < 1800) return 0;
-  if (targetWordCount < 2600) return 9;
-  if (targetWordCount < 3600) return 12;
-  return 15;
+// H3 を使うかどうかは構成案の段階で AI に決めさせる（記事改善プラン 1-4）。
+// 以前は文字数に応じて 9〜15 個の H3 を必須にしていたが、見出しが増えすぎて 1 見出しあたりの本文が薄くなっていた
+function getTargetH3Count(_targetWordCount: number): number {
+  return 0;
 }
 
 function getHardMinimumH3Count(targetWordCount: number): number {
@@ -2313,10 +2272,10 @@ async function normalizeLengthWithQualityGate(
   callAI: SharedCallAI,
   maxTokens: number,
   retryCount: number,
-  customInstructions?: string,
-  tolerance = DEFAULT_WORD_COUNT_TOLERANCE
+  customInstructions?: string
 ): Promise<string> {
-  const { minAllowed, maxAllowed } = getWordCountBounds(targetWordCount, tolerance);
+  // 文字数は目安。目安の 0.5〜1.5 倍から外れたときだけ AI で直す（1-6）
+  const { minAllowed, maxAllowed } = getLooseWordCountBounds(targetWordCount);
   let normalized = content;
 
   for (let attempt = 0; attempt <= retryCount; attempt++) {
@@ -2388,7 +2347,7 @@ async function generateSectionWithQualityGate(
     Math.ceil(section.estimatedWordCount * 2.5)
   );
   let content = stripHeading(await params.callAI(prompt, sectionMaxTokens));
-  const { minAllowed, maxAllowed } = getWordCountBounds(section.estimatedWordCount, DEFAULT_WORD_COUNT_TOLERANCE);
+  const { minAllowed, maxAllowed } = getLooseWordCountBounds(section.estimatedWordCount);
   let citationRepairAttempted = false;
 
   for (let attempt = 0; attempt <= params.qualityRetryCount; attempt++) {
@@ -2453,13 +2412,6 @@ async function generateSectionWithQualityGate(
     break;
   }
 
-  if (section.isLead) {
-    const leadHardMax = Math.max(120, Math.round(section.estimatedWordCount * 1.15));
-    if (countGeneratedChars(content) > leadHardMax) {
-      content = truncateByParagraph(content, leadHardMax);
-    }
-  }
-
   const normalized = trimDanglingTailSafe(formatReadableParagraphs(content));
   if (section.isLead) {
     return trimDanglingTailSafe(stripLeadingTitleLine(normalized, outline.title));
@@ -2491,6 +2443,7 @@ export async function generateOutlineWithSharedCore(
         ? 6
         : 7;
   const minimumNonLeadCount = Math.max(3, minimumSectionCount - 1);
+  const maxNonLeadCount = Math.max(minimumNonLeadCount, maxHeadingsForLength(params.targetWordCount));
   const targetH3Count = getTargetH3Count(params.targetWordCount);
   const hardMinimumH3Count = getHardMinimumH3Count(params.targetWordCount);
   let resolvedTitle = params.fixedTitle || `${params.keyword} について`;
@@ -2505,6 +2458,7 @@ export async function generateOutlineWithSharedCore(
         '【再生成指示】',
         '- 出力形式を厳守し、Section(Lead/H2/H3) の形で返してください。',
         '- 導入とまとめ以外の見出しを最低3つ作成してください。',
+        `- 導入を除く見出し（H2・H3・まとめ）は最大${maxNonLeadCount}個にしてください。検索意図から外れる見出しは削ってください。`,
         targetH3Count > 0
           ? `- 主要H2ごとにH3を3個置いてください。記事全体のH3目標は${targetH3Count}個です。H3は直前のH2の具体論にしてください。`
           : '',
@@ -2558,23 +2512,27 @@ export async function generateOutlineWithSharedCore(
     const h3Count = countH3Sections(normalized);
     attemptDiagnostics.push(`attempt${attempt + 1}: parsed=${parsedSections.length}, normalized=${normalized.length}, h3=${h3Count}, score=${qualityScore}`);
 
+    const nonLeadCount = normalized.filter((section) => !section.isLead).length;
+    // 見出しの上限を超えた案は、超えた分だけ評価を下げる（1-7）
+    const overCapPenalty = Math.max(0, nonLeadCount - maxNonLeadCount) * 10;
+    const adjustedScore = qualityScore - overCapPenalty;
     if (
-      qualityScore > bestScore ||
-      (qualityScore === bestScore && normalized.length > bestSections.length)
+      adjustedScore > bestScore ||
+      (adjustedScore === bestScore && normalized.length < bestSections.length)
     ) {
       bestSections = normalized;
-      bestScore = qualityScore;
+      bestScore = adjustedScore;
     }
-    const nonLeadCount = normalized.filter((section) => !section.isLead).length;
     const minimumQualityScore = isCountermeasureTopic(params.keyword, params.fixedTitle) ? 70 : 45;
     if (
       normalized.length >= minimumSectionCount &&
       nonLeadCount >= minimumNonLeadCount &&
+      nonLeadCount <= maxNonLeadCount &&
       h3Count >= targetH3Count &&
       qualityScore >= minimumQualityScore
     ) {
       bestSections = normalized;
-      bestScore = qualityScore;
+      bestScore = adjustedScore;
       break;
     }
   }
@@ -2669,7 +2627,6 @@ export async function generateOutlineWithSharedCore(
         if (h3Supplement.added === 0) break;
       } catch (error) {
         attemptDiagnostics.push(`h3Supplement:error=${error instanceof Error ? error.message : String(error)}`);
-    const sectionInstructions = params.getSectionInstructions?.(section, index);
         break;
       }
     }
@@ -2712,6 +2669,7 @@ export async function generateArticleFromOutlineWithSharedCore(
       });
     }
 
+    const sectionInstructions = params.getSectionInstructions?.(section, index);
     const contentPromise = generateSectionWithQualityGate(section, params.outline, accumulatedContent, {
       keywords: params.keywords,
       tone,
@@ -2776,7 +2734,6 @@ export async function generateArticleFromOutlineWithSharedCore(
   }
 
   fullContent = removeDuplicateTitleAtStart(fullContent, params.outline.title);
-  fullContent = insertSubheadingsIntoLongSections(fullContent, params.targetWordCount);
   fullContent = trimDanglingTailSafe(formatArticleBodyForReadability(formatReadableParagraphs(fullContent)));
   // まとめセクション保険は最後に一度だけ実行
   fullContent = ensureSummarySection(fullContent, params.outline);
@@ -2789,8 +2746,7 @@ export async function generateArticleFromOutlineWithSharedCore(
       params.callAI,
       maxTokens,
       1,
-      params.customInstructions,
-      FINAL_ARTICLE_WORD_COUNT_TOLERANCE
+      params.customInstructions
     );
     fullContent = trimDanglingTailSafe(formatArticleBodyForReadability(formatReadableParagraphs(fullContent)));
   }

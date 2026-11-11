@@ -2,6 +2,7 @@
 import { countGeneratedChars } from './articleGenerationCore.ts';
 import { buildArticleFactInstructions, type FactSheet } from './factSheetCore.ts';
 import type { GeminiCaller } from './geminiCore.ts';
+import { DEFAULT_REVIEW_THINKING_BUDGET } from './generationPolicy.ts';
 
 export const EDITORIAL_REVIEW_LENGTH_TOLERANCE = 0.15;
 
@@ -32,6 +33,7 @@ export function buildEditorialReviewPrompt(params: {
     '- セクション間のつながりを自然にする（前のセクションと同じ説明から始めない）',
     '- 読者の疑問に答える。各セクションは結論を先に書く',
     '- 冗長な言い回し、硬すぎる表現を読みやすくする',
+    '- 「（2026年4月時点）」のような時点の注記が本文に何度も出てくる場合は、記事の冒頭か末尾の1回だけにまとめる',
     '',
     '守る点:',
     '- 見出し（## と ###）の数・順番・文言を変えない',
@@ -123,20 +125,23 @@ export async function runEditorialReview(params: {
   toneInstruction?: string;
   customInstructions?: string;
   call: GeminiCaller;
+  // 思考の上限（省略時は DEFAULT_REVIEW_THINKING_BUDGET）
+  thinkingBudget?: number;
 }): Promise<EditorialReviewDecision> {
   const prompt = buildEditorialReviewPrompt(params);
-  // 3.1 Pro は思考の上限（2,048）を超えて 5,000〜11,000 トークン考えることがあり、
-  // 思考分も出力上限に数えられるため、その分の余裕を足す（足りないと本文が途中で切れる）
-  const THINKING_HEADROOM_TOKENS = 12000;
+  const thinkingBudget = params.thinkingBudget ?? DEFAULT_REVIEW_THINKING_BUDGET;
+  // 3.1 Pro は思考の上限を超えて考えることがあり、思考分も出力上限に数えられるため、
+  // その分の余裕を足す（足りないと本文が途中で切れる）
+  const THINKING_HEADROOM_TOKENS = Math.max(12000, thinkingBudget + 6000);
   const maxOutputTokens = Math.min(
-    28000,
+    40000,
     Math.max(4096, Math.ceil(countGeneratedChars(params.content) * 2.5) + 2048) + THINKING_HEADROOM_TOKENS,
   );
   const response = await params.call(prompt, {
     role: 'writer',
     maxOutputTokens,
     temperature: 0.4,
-    thinkingBudget: 2048,
+    thinkingBudget,
   });
   if (response.finishReason === 'MAX_TOKENS') {
     return { accepted: false, reason: '見直し結果が途中で切れたため不採用', content: params.content };

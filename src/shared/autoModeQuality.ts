@@ -1,4 +1,5 @@
 import type { ArticleOutline, ArticleStructureType } from './articleTypes.ts';
+import { MIN_CHARS_PER_HEADING, maxHeadingsForLength } from './generationPolicy.ts';
 
 export function compactAutoModeInstructions(parts: Array<string | undefined | null | false>): string | undefined {
   const text = parts
@@ -20,10 +21,12 @@ export function buildAutoModeQualityInstructions(options: {
     options.selectedTitle
       ? `- 固定タイトル「${options.selectedTitle}」の検索意図を最優先し、タイトルから外れた章を作らない`
       : '- 入力キーワードから読者の検索意図を特定し、記事全体を一つの明確な目的に揃える',
-    `- 目標文字数は${options.targetWordCount}字。導入・本文・まとめの配分を崩さず、本文を薄くしない`,
+    `- 目標文字数は約${options.targetWordCount}字（目安）。導入・本文・まとめの配分を崩さず、本文を薄くしない`,
+    `- 導入を除く見出しは最大${maxHeadingsForLength(options.targetWordCount)}個（1見出しあたり${MIN_CHARS_PER_HEADING}字以上）。網羅のために見出しを増やさない`,
+    '- 検索した人の疑問に直接答えない見出しは入れない。調査で見つけた話題でも、検索意図から外れるものは落とす',
     '- 対話モードで人が確認したアウトラインと同等になるよう、各H2の役割を分ける',
     '- 「種類と特徴」「選び方と注意点」「活用方法」だけの汎用見出しに逃げず、テーマ固有の判断材料にする',
-    '- H3は直前のH2を具体化する小見出しとして使い、独立した大テーマにしない',
+    '- H3は、直前のH2の中に分けて説明すべき論点が複数あるときだけ使う。独立した大テーマにしない',
     '- 本文では同じ説明を繰り返さず、原因・対策・比較・注意点・実行手順のどれを扱うかを明確にする',
     '- AIO・AI検索で要約されやすいよう、導入で結論を先に示し、定義・手順・比較・判断基準・FAQに転用しやすい見出しを必要に応じて入れる',
     '- 各見出しは1つの質問に対する答えが抜き出せる粒度にし、複数テーマを混ぜない',
@@ -59,8 +62,7 @@ export function evaluateAutoOutlineQuality(
   const sections = outline.sections || [];
   const nonLeadSections = sections.filter((section) => !section.isLead);
   const h2Sections = nonLeadSections.filter((section) => section.level === 2);
-  const h3Sections = nonLeadSections.filter((section) => section.level === 3);
-  const minSections = options.targetWordCount <= 1200 ? 5 : options.targetWordCount <= 3000 ? 6 : 7;
+  const minSections = options.targetWordCount <= 2500 ? 5 : options.targetWordCount <= 3500 ? 6 : 7;
 
   if (sections.length < minSections) {
     issues.push(`section count is too low (${sections.length}/${minSections})`);
@@ -70,8 +72,12 @@ export function evaluateAutoOutlineQuality(
     issues.push(`H2 count is too low (${h2Sections.length}/3)`);
   }
 
-  if (options.targetWordCount >= 1600 && h3Sections.length < 2) {
-    issues.push(`H3 count is too low (${h3Sections.length}/2)`);
+  // 見出しが多すぎると 1 見出しあたりの本文が薄くなる（記事改善プラン 1-7）
+  const maxHeadings = maxHeadingsForLength(options.targetWordCount);
+  if (nonLeadSections.length > maxHeadings) {
+    issues.push(
+      `too many headings (${nonLeadSections.length}/${maxHeadings}). Merge or drop headings that do not directly answer the searcher's question`
+    );
   }
 
   if (!sections.some((section) => isSummaryTitle(section.title))) {
@@ -113,6 +119,6 @@ export function buildAutoOutlineRetryInstructions(issues: string[]): string {
     '前回のアウトラインは自動生成品質基準を満たしていません。以下を必ず修正してください。',
     ...issues.map((issue) => `- ${issue}`),
     '- H2ごとの役割を明確に分け、汎用見出しをテーマ固有の具体的な見出しに置き換える',
-    '- 目標文字数に対して本文が薄くならない章数と配分にする',
+    '- 目標文字数に対して本文が薄くならない章数と配分にする（見出しを増やしすぎない）',
   ].join('\n');
 }
