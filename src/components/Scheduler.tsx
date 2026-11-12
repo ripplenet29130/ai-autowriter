@@ -1332,11 +1332,11 @@ export const Scheduler: React.FC = () => {
                 onChange={(e) => setFormData({ ...formData, pipeline_mode: e.target.value === 'v2' ? 'v2' : 'classic' })}
                 className="input-field"
               >
-                <option value="classic">今の方式（1回の実行で最後まで作る）</option>
-                <option value="v2">新方式・テスト中（工程ごとに分けて実行し、見直しやファクトチェックを省略しない）</option>
+                <option value="classic">今の方式（1回の実行の中で、構成案を作ってから見出しごとに書く）</option>
+                <option value="v2">新方式・テスト中（広く調べてから、記事全体を1回で書き切る）</option>
               </select>
               <p className="mt-2 text-xs leading-relaxed text-gray-500">
-                新方式は Gemini の Google 検索で調査し、記事全体を一度に書いてから、批評・書き直し・ファクトチェックをすべて行います。1本あたり4〜8分かかり、テスト中は常に下書きで投稿します。Gemini の設定が必要です。
+                新方式は、上位記事の中身・Q&A サイトの悩み・公式情報を広く調べ、その材料で記事全体を1回で書き切ります。そのあと事実を Web 検索で確かめ、間違いを直します（標準: 調査・執筆・修正は Gemini、ファクトチェックは ChatGPT。AI 設定の「役割ごとの AI」で変えられます）。1回の実行には時間の上限があるため、調査・執筆・ファクトチェック・修正は別々の実行に分けて順番に進めます。1本あたり6〜7分かかり、テスト中は常に下書きで投稿します。Gemini の設定が必要です。
               </p>
             </div>
 
