@@ -201,6 +201,11 @@ export function looksLikeStandaloneHeadingLine(line: string): boolean {
   if (/^https?:\/\//i.test(text)) return false;
   if (text.length < 5 || text.length > 90) return false;
   if (/[。！？!?]$/.test(text)) return false;
+  // 文の途中で改行しただけの行（「〜基礎控除は」「〜実務では」など）は見出しにしない。
+  // 2026-11-12 ChatGPT が書いた記事で、次の行へ続く書き出しが ## 見出しにされた。「〜とは」は見出しによくあるので残す
+  if (/[。]/.test(text)) return false;
+  if (/[、，,：:]$/.test(text)) return false;
+  if (!/とは$/.test(text) && /(?:は|が|を|に|で|へ|も|から|まで|より|ので|けど|けれど)$/.test(text)) return false;
   return /[A-Za-z0-9\u3040-\u30ff\u3400-\u9fff]/.test(text);
 }
 
@@ -475,6 +480,8 @@ export function normalizeGeneratedContentForPublishing(rawContent: string, artic
     const current = String(lines[i] || '').trim();
     // 表の行（| で始まる）は見出しにしない（表の最後の行が「## | …」になる不具合の対策）
     if (/^\|/.test(current)) continue;
+    // 1 行まるごと太字の行は強調（計算式など）なので見出しにしない（2026-11-12 「基礎控除額 ＝ …」が見出しになった）
+    if (/^\*\*[^*]+\*\*$/.test(current)) continue;
     if (!looksLikeStandaloneHeadingLine(current)) continue;
 
     const nextIndex = findNextNonEmptyLineIndex(lines, i + 1);

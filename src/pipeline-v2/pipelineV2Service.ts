@@ -6,11 +6,13 @@ export type PipelineJobStatus = 'queued' | 'running' | 'completed' | 'failed' | 
 
 export const PIPELINE_STEP_LABELS: Record<string, string> = {
   research: '調査',
+  draft: '執筆（1回で書き切る）',
   facts: '根拠メモ',
   plan: '企画',
   write: '執筆',
   condense: '文字数の調整',
   critique: '批評',
+  supplement: '補足調査',
   rewrite: '書き直し',
   factcheck: 'ファクトチェック',
   fix: '修正と再確認',
@@ -19,6 +21,14 @@ export const PIPELINE_STEP_LABELS: Record<string, string> = {
 
 export const PIPELINE_STEP_ORDER = Object.keys(PIPELINE_STEP_LABELS);
 
+export type PipelineWritingStyle = 'oneshot' | 'steps';
+
+// 書き方ごとに通る工程（画面の進み具合の表示用）
+export const PIPELINE_STEPS_BY_STYLE: Record<PipelineWritingStyle, string[]> = {
+  oneshot: ['research', 'draft', 'factcheck', 'fix', 'finalize'],
+  steps: PIPELINE_STEP_ORDER.filter((step) => step !== 'draft'),
+};
+
 export interface PipelineJobSettings {
   lengthMode: 'auto' | 'fixed';
   targetWordCount: number;
@@ -26,6 +36,8 @@ export interface PipelineJobSettings {
   qualityMode: 'high' | 'standard';
   customInstructions: string;
   appendReferences: boolean;
+  // oneshot = 広い調査＋1回で書き切る（標準）、steps = 工程を分けて批評・書き直しを重ねる
+  writingStyle?: PipelineWritingStyle;
 }
 
 export interface PipelineJob {

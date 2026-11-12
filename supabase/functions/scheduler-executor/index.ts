@@ -25,6 +25,7 @@ import {
 } from '../../../src/shared/autoModeQuality.ts';
 import { getFixableFactCheckIssues, type FactCheckResult } from '../../../src/shared/factCheckCore.ts';
 import { generateTitleSuggestionsWithSharedCore } from '../../../src/shared/titleGenerationCore.ts';
+import { reviewTitleAgainstContent } from '../../../src/shared/titleReviewCore.ts';
 import { pickNextTitle, TITLE_USAGE_SELECT } from '../../../src/shared/titleUsage.ts';
 import {
   getDefaultAiModel,
@@ -958,6 +959,8 @@ async function executeSchedule(
   }
 
   // === 隰ｾ・ｹ闖ｫ・ｮ4: AI郢ｧ・ｿ郢ｧ・､郢晏現ﾎ晞墓ｻ薙・ ===
+  // タイトルセットなどで人が指定したタイトルか（指定されたタイトルは本文に合わせた見直しで変えない）
+  const titleSpecifiedByUser = Boolean(fixedTitle);
   if (!fixedTitle) {
     await updateExecutionProgressHistory(supabase, progressHistoryId, {
       stage: 'title_generating',
@@ -1257,7 +1260,8 @@ async function executeSchedule(
   let fullContent = generationResult.fullContent;
   const baseGeneratedContent = generationResult.fullContent;
   // タイトルセットの使用済み判定は execution_history.article_title で行うため、決定済みタイトルを優先する
-  const articleTitle = fixedTitle || outline.title;
+  // AI が作ったタイトルは、見直しのあと本文に合わせて変えることがある
+  let articleTitle = fixedTitle || outline.title;
 
   console.log('Word count check:', {
     target: targetWordCount,
@@ -1404,6 +1408,30 @@ async function executeSchedule(
     } else {
       run.skip('編集見直し');
       editorialReviewStatus = '時間切れで省略';
+    }
+  }
+
+  // 4.55 タイトルを本文に合わせて見直す（AI が作ったタイトルだけ。人が指定したタイトルは変えない）
+  let titleReviewStatus = titleSpecifiedByUser ? '対象外（指定されたタイトル）' : '未実行';
+  if (!titleSpecifiedByUser) {
+    const hasTimeForTitle = run ? run.hasTime(60_000) : Date.now() - schedulerStartTime < 90_000;
+    if (hasTimeForTitle) {
+      const review = await reviewTitleAgainstContent({
+        title: articleTitle,
+        keyword,
+        content: fullContent,
+        callAI: (prompt, maxTokens) => callAI(prompt, aiConfig, maxTokens),
+      });
+      if (review.changed) {
+        console.log(`Title reviewed: "${articleTitle}" -> "${review.title}" (${review.reason})`);
+        titleReviewStatus = `「${articleTitle}」から変更（${review.reason}）`;
+        articleTitle = review.title;
+      } else {
+        titleReviewStatus = review.reason;
+      }
+    } else {
+      run?.skip('タイトルの見直し');
+      titleReviewStatus = '時間切れで省略';
     }
   }
 
@@ -1733,6 +1761,7 @@ async function executeSchedule(
     fact_sheet_error: factSheet ? '' : factSheetError,
     editorial_review: editorialReviewStatus,
     editorial_critique: editorialCritique,
+    title_review: titleReviewStatus,
     references_count: referencesCount,
     skipped_steps: run?.skippedSteps || [],
     notes: run?.notes || [],
@@ -1768,6 +1797,7 @@ async function executeSchedule(
       editorialCritique ? `見直しの批評: ${summarizeCritique(editorialCritique)}` : '',
       ...(editorialCritique?.issues.slice(0, 3).map((issue) =>
         `・[${CRITIQUE_ISSUE_TYPES[issue.type]}] ${issue.section}: ${issue.problem}`) || []),
+      titleReviewStatus.startsWith('「') ? `タイトルの見直し: ${titleReviewStatus}` : '',
       `参考資料: ${referencesCount > 0 ? `${referencesCount}件` : 'なし'}`,
       qualityReport.skipped_steps.length > 0 ? `時間切れで省略: ${qualityReport.skipped_steps.join('、')}` : '',
       ...(qualityReport.notes.map((note) => `メモ: ${note}`)),

@@ -32,7 +32,9 @@ function readThinkingBudget(name: string, fallback: number): number {
 }
 export const WRITER_THINKING_BUDGET = readThinkingBudget('WRITER_THINKING_BUDGET', DEFAULT_WRITER_THINKING_BUDGET);
 export const REVIEW_THINKING_BUDGET = readThinkingBudget('REVIEW_THINKING_BUDGET', DEFAULT_REVIEW_THINKING_BUDGET);
-const WRITER_OPTIONS = { role: 'writer' as const, thinkingBudget: WRITER_THINKING_BUDGET };
+function writerOptionsFor(thinkingBudget?: number) {
+  return { role: 'writer' as const, thinkingBudget: thinkingBudget ?? WRITER_THINKING_BUDGET };
+}
 import {
   countNonSummaryHeadings,
   extractHeadingText,
@@ -101,9 +103,10 @@ function buildToneInstruction(tone: WritingTone): string {
 // 執筆の中心になる指示（記事改善プラン 1-2・1-9）。
 // 段落数・文の数ではなく、読者・目的・具体性で指示する
 export function buildReaderFocusedGuidance(keyword: string, scope: 'article' | 'lead' | 'section'): string {
+  // 時点の注記は、法律・料金・税率・統計など時間で変わる情報を扱う記事だけに書く（植物の育て方などには不要）
   const dateNote = scope === 'section'
     ? '- Do NOT write date notes such as 「（2026年4月時点）」 in this section. If needed, they appear once in the lead or the summary only.'
-    : '- Write a date note such as 「（2026年4月時点）」 at most ONCE in the whole article (in the lead or the summary). Never repeat it in each section.';
+    : '- Write a date note such as 「（2026年4月時点）」 only if the article relies on information that changes over time (laws, fees, tax rates, statistics, prices), and at most ONCE in the whole article (in the lead or the summary). For evergreen topics (how-to, hobbies, plant care), write no date note. Never attach date notes to product names.';
   return [
     'What matters most (content):',
     `- The reader is someone who searched for 「${keyword}」. Before writing each part, decide what the reader should understand, decide, or be able to do after reading it.`,
@@ -111,6 +114,13 @@ export function buildReaderFocusedGuidance(keyword: string, scope: 'article' | '
     '- Include concrete examples, numbers, steps, decision criteria, or common mistakes wherever they fit. Do not end with abstract explanations only.',
     '- Do not fill space with generic statements, obvious preambles, or empty sentences such as 「〜が重要です」「注意が必要です」 that say nothing specific.',
     '- Do not assert numbers, fees, deadlines, or rules that you cannot support.',
+    '- When the fact memo has a fact that directly answers the reader\'s question (a deadline, threshold, rate, formula, or rule), use it with its date. Do not leave such facts unused.',
+    '- If the reader may wonder whether something applies to them (e.g. whether they must file at all), give the concrete criterion or formula, not a statistic.',
+    '- When a rule has tiers (tax rates, penalties, fees, conditions), state every tier that matters, including the heavier or basic ones. Do not give only the mildest tier.',
+    '- State concrete limits, amounts, and periods instead of vague words like 「一定の」「所定の」 when you know them.',
+    '- When describing a schedule or timeline, give concrete milestones (e.g. by which month what must be done, and related deadlines), not just a generic order of tasks.',
+    '- Use the 「Q. 」/「A. 」 format ONLY inside a section whose heading is an FAQ (e.g. 「よくある疑問」「よくある質問」「Q&A」). There, put each question on its own line starting with 「Q. 」 and the answer in the next paragraph starting with 「A. 」. In every other section, write normal prose: do NOT start sections with a Q./A. pair, and do not restate the same answer twice.',
+    '- Do not start consecutive paragraphs with the same connective (e.g. 「また、」).',
     dateNote,
     '- Do not fix the number of paragraphs or sentences. Split paragraphs where it reads naturally.',
     '- Prefer clear, short Japanese sentences. Explain technical terms briefly when they may be unfamiliar.',
@@ -134,7 +144,10 @@ export async function generateSchedulerArticleSinglePass(params: {
   customInstructions?: string;
   aiConfig: AIConfig;
   factSheet?: FactSheet | null;
+  // 思考の上限（省略時は WRITER_THINKING_BUDGET）。新方式では多めにする
+  writerThinkingBudget?: number;
 }): Promise<{ sectionsWithContent: any[]; fullContent: string; wordCount: number }> {
+  const WRITER_OPTIONS = writerOptionsFor(params.writerThinkingBudget);
   const outlineText = formatOutlineForSinglePass(params.outline);
   const keywordLine = buildKeywordLine(params.keyword, params.keywords);
   const toneInstruction = buildToneInstruction(params.tone);
@@ -273,6 +286,8 @@ export interface SectionedGenerationParams {
   // outline.sections と同じ並びの、見出しごとに使う根拠メモの番号
   sectionFactIds?: string[][];
   parallelism?: number;
+  // 思考の上限（省略時は WRITER_THINKING_BUDGET）
+  writerThinkingBudget?: number;
 }
 
 export type SectionWritingStep = { section: OutlineSection | null; isLead: boolean; sectionIndex: number };
@@ -293,6 +308,7 @@ export function createSectionWriter(params: SectionedGenerationParams): {
   const keywordLine = buildKeywordLine(params.keyword, params.keywords);
   const toneInstruction = buildToneInstruction(params.tone);
   const useFacts = hasUsableFacts(params.factSheet);
+  const WRITER_OPTIONS = writerOptionsFor(params.writerThinkingBudget);
 
   // 文字数の目安: アウトラインの estimatedWordCount 比率で配分し、無ければ均等割り
   const totalEstimated = sections.reduce((sum, s) => sum + (Number(s.estimatedWordCount) || 0), 0);

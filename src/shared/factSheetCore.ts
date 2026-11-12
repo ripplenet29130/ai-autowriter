@@ -34,7 +34,8 @@ export interface FactSheet {
   createdAt: string;
 }
 
-export const MAX_FACT_SHEET_FACTS = 25;
+// 基本・読者の疑問・最新情報・補足調査を合わせた上限
+export const MAX_FACT_SHEET_FACTS = 40;
 export const REFERENCES_HEADING = '参考資料';
 
 export function createEmptyFactSheet(): FactSheet {
@@ -63,7 +64,8 @@ const normalizeForMatch = (text: string): string =>
     .replace(/statement|as_of|facts|cautions/g, '')
     .toLowerCase();
 
-export type FactSheetFocus = 'basic' | 'latest';
+// questions: 読者の疑問ごとに答えになる事実を集める（判定基準・区分ごとの金額など）
+export type FactSheetFocus = 'basic' | 'latest' | 'questions';
 
 export function buildFactSheetPrompt(params: {
   keyword: string;
@@ -71,13 +73,18 @@ export function buildFactSheetPrompt(params: {
   relatedKeywords?: string[];
   competitorHeadings?: string[];
   focus: FactSheetFocus;
+  // focus が questions のとき、答えを集める読者の疑問
+  questions?: string[];
   today?: Date;
   maxFacts?: number;
 }): string {
-  const maxFacts = params.maxFacts ?? (params.focus === 'basic' ? 18 : 10);
+  const questions = (params.questions || []).map((q) => String(q || '').trim()).filter(Boolean).slice(0, 8);
+  const maxFacts = params.maxFacts ?? (params.focus === 'basic' ? 18 : params.focus === 'questions' ? 14 : 10);
   const focusText = params.focus === 'basic'
     ? '定義・仕組み・手順・費用や数値の目安・関係する制度や法令・注意点'
-    : '直近1〜2年の制度改定・最新の料金や価格・最新の統計値・今後予定されている変更';
+    : params.focus === 'questions'
+      ? '下の「読者の疑問」それぞれに答えるための事実（自分が対象かどうかの判定基準や計算式、金額・期限の基準、区分ごとの税率や金額、条件と例外）'
+      : '直近1〜2年の制度改定・最新の料金や価格・最新の統計値・今後予定されている変更';
 
   return [
     'あなたは記事執筆の下調べ担当です。Google 検索で調べ、次のテーマについて記事に使える事実を集めてください。',
@@ -89,6 +96,9 @@ export function buildFactSheetPrompt(params: {
       ? `上位記事の主な見出し（参考）:\n${params.competitorHeadings.slice(0, 12).map((h) => `- ${h}`).join('\n')}`
       : '',
     `調べる観点: ${focusText}`,
+    params.focus === 'questions' && questions.length > 0
+      ? `読者の疑問（1つずつ検索し、それぞれに答えになる事実を最低1件書く）:\n${questions.map((q) => `- ${q}`).join('\n')}`
+      : '',
     `今日の日付: ${formatJapaneseDate(params.today ?? new Date())}`,
     '',
     'ルール:',
@@ -96,6 +106,9 @@ export function buildFactSheetPrompt(params: {
     '- 数値・日付・料金・制度名は正確に書く。いつ時点の情報かを「｜」の後ろに書く（不明なら空にする）。',
     // 11/11 のテストで、根拠メモの古い数字（前年度の利用率など）が記事に入り誤りと判定されたため（新方式の仕様書 工程 1b）
     '- 統計・利用率・料金・税率などは、今日の日付で確認できる最新の年度・最新の発表の数字を書く。新しい数字が見つかったときは古い年度の数字を書かない。',
+    '- 統計（対象者の割合など）より、読者が自分に当てはめて判断できる基準（計算式・金額や日数の基準・条件）を優先して書く。',
+    '- 税率・料金・加算などに段階や区分がある制度は、一部だけでなくすべての区分を書く（区分ごとに1件でよい）。',
+    '- 「一定の額まで」のようにぼかさず、上限額・計算式などの具体的な値を書く。',
     '- 公的機関・公式サイト・業界団体の情報を優先する。',
     '- 情報源によって内容が割れている点や、変わりやすい点は【注意点】に書く。',
     '- 1件の事実は1文（80字以内）で書く。',
@@ -259,6 +272,8 @@ interface BuildFactSheetParams {
   today?: Date;
   // Gemini が検索を使わずに答えたとき、1 回だけ作り直す（既定: する）
   retryIfSearchUnused?: boolean;
+  // 調査で分かった読者の疑問。あれば、疑問ごとの答えになる事実も同時に集める
+  readerQuestions?: string[];
 }
 
 // Gemini は検索するかどうかを自分で決めるため、検索を使わずに答えることがある。
@@ -289,6 +304,7 @@ async function buildFactSheetOnce(params: BuildFactSheetParams): Promise<FactShe
         relatedKeywords: params.relatedKeywords,
         competitorHeadings: params.competitorHeadings,
         focus,
+        questions: params.readerQuestions,
         today,
       }),
       { role: 'base', useSearch: true, maxOutputTokens: 4096, temperature: 0.2, thinkingBudget: 0 },
@@ -296,14 +312,24 @@ async function buildFactSheetOnce(params: BuildFactSheetParams): Promise<FactShe
     return parseFactSheetResponse(response);
   };
 
-  // 基本情報と最新情報の検索は同時に行う（待ち時間を短くするため）
+  // 基本情報・読者の疑問・最新情報の検索は同時に行う（待ち時間を短くするため）
   const includeLatest = params.includeLatest?.() ?? true;
-  const [basicResult, latestResult] = await Promise.allSettled([
+  const hasQuestions = (params.readerQuestions || []).some((q) => String(q || '').trim());
+  const [basicResult, questionsResult, latestResult] = await Promise.allSettled([
     runFocus('basic'),
+    hasQuestions ? runFocus('questions') : Promise.resolve(null),
     includeLatest ? runFocus('latest') : Promise.resolve(null),
   ]);
   if (basicResult.status === 'rejected') throw basicResult.reason;
   const sheets: FactSheet[] = [basicResult.value];
+  // 読者の疑問への答えは、基本情報の次に優先する
+  if (questionsResult.status === 'fulfilled' && questionsResult.value) {
+    sheets.push(questionsResult.value);
+  } else if (questionsResult.status === 'rejected') {
+    const reason = questionsResult.reason;
+    const message = reason instanceof Error ? reason.message : String(reason || '');
+    sheets[0].warnings.push(`読者の疑問の検索に失敗しました: ${message.slice(0, 160)}`);
+  }
   if (latestResult.status === 'fulfilled' && latestResult.value) {
     sheets.push(latestResult.value);
   } else if (latestResult.status === 'rejected') {
@@ -330,6 +356,60 @@ async function buildFactSheetOnce(params: BuildFactSheetParams): Promise<FactShe
   return sheet;
 }
 
+// 批評で「答えていない」「区分が抜けている」などと指摘された点を検索で調べ、根拠メモに足す。
+// 書き直しは根拠メモにある事実しか使えないため、足りない事実をここで補う。
+// 検索が使われなかった・何も見つからなかったときは、元の根拠メモをそのまま返す。
+export async function supplementFactSheet(params: {
+  keyword: string;
+  title?: string | null;
+  questions: string[];
+  base: FactSheet | null;
+  call: GeminiCaller;
+  resolveUrls?: UrlResolver;
+  today?: Date;
+}): Promise<{ sheet: FactSheet | null; added: number; searchUsed: boolean }> {
+  const questions = params.questions.map((q) => String(q || '').trim()).filter(Boolean);
+  if (questions.length === 0) return { sheet: params.base, added: 0, searchUsed: false };
+  const prompt = buildFactSheetPrompt({
+    keyword: params.keyword,
+    title: params.title,
+    focus: 'questions',
+    questions,
+    today: params.today ?? new Date(),
+    maxFacts: 12,
+  });
+  const ask = async () => parseFactSheetResponse(await params.call(
+    prompt,
+    { role: 'base', useSearch: true, maxOutputTokens: 4096, temperature: 0.2, thinkingBudget: 0 },
+  ));
+  let extra = await ask();
+  // Gemini が検索せずに答えたときは 1 回だけ聞き直す（2026-11-12 の実測で 1 回目に検索されず、何も足せなかった）
+  if (!extra.searchUsed) {
+    try {
+      extra = await ask();
+    } catch (error) {
+      console.warn('[supplement] Retry failed:', error);
+    }
+  }
+  // 検索なしの答えは AI の知識だけなので、根拠には使わない
+  if (!extra.searchUsed || extra.facts.length === 0) {
+    return { sheet: params.base, added: 0, searchUsed: extra.searchUsed };
+  }
+  if (params.resolveUrls) {
+    const redirectUrls = extra.sources.filter((s) => !s.url && s.redirectUrl).map((s) => s.redirectUrl as string);
+    if (redirectUrls.length > 0) {
+      try {
+        extra = applyResolvedSourceUrls(extra, await params.resolveUrls(redirectUrls));
+      } catch (error) {
+        console.warn('Failed to resolve supplement source URLs:', error);
+      }
+    }
+  }
+  const before = params.base?.facts.length || 0;
+  const merged = mergeFactSheets(params.base ? [params.base, extra] : [extra]);
+  return { sheet: merged, added: merged.facts.length - before, searchUsed: true };
+}
+
 export function excludeFacts(sheet: FactSheet, excludedIds: string[]): FactSheet {
   if (!excludedIds.length) return sheet;
   const excluded = new Set(excludedIds);
@@ -350,6 +430,8 @@ export const FACT_GROUNDED_WRITING_RULES = [
   '- 根拠メモにない具体的な数字は書かない。必要なら「一般的には」「目安として」のように断定を避ける。',
   '- 料金・制度・統計など変わりやすい情報には、根拠メモにある時点を添える（例: 「2026年11月時点」）。',
   '- 根拠メモの「注意」にある点は断定しない。',
+  '- 根拠メモにある事実は「〜とされています」「〜と考えられます」でぼかさず、言い切って書く。',
+  '- 読者が自分に当てはめて判断できる基準（計算式・金額の基準・区分ごとの税率など）が根拠メモにあれば、統計より優先して本文に入れる。',
   '- 根拠メモの番号（[F1] など）や出典名は本文に書かない。',
 ].join('\n');
 

@@ -21,9 +21,9 @@ export interface AiResearch {
   searchUsed: boolean;
 }
 
-export function buildResearchPrompt(keyword: string): string {
+export function buildResearchPrompt(keyword: string, pages = 3): string {
   return [
-    `キーワード「${keyword}」で日本の Google 検索をして、上位に表示される記事ページ（広告・動画・SNS・EC の商品ページを除く）を 5 件ほど実際に読んでください。`,
+    `キーワード「${keyword}」で日本の Google 検索をして、上位に表示される記事ページ（広告・動画・SNS・EC の商品ページを除く）を ${pages} 件だけ実際に読んでください（それ以上は読まない）。`,
     'そのうえで、このキーワードで記事を書くための調査結果をまとめてください。',
     '見出しは推測で作らず、読んだページにあるものだけを書いてください。',
     '',
@@ -93,21 +93,42 @@ export function parseResearchText(text: string): Pick<AiResearch, 'searchIntent'
   return result;
 }
 
-// Gemini の Google 検索＋URL 読み込みで調査する（geminiCore の共通部品は URL 読み込みに未対応のため個別に呼ぶ）
-export async function researchWithGemini(run: GenerationRun, keyword: string, timeoutMs = 100_000): Promise<AiResearch> {
+// Gemini の Google 検索＋URL 読み込みで調査する（geminiCore の共通部品は URL 読み込みに未対応のため個別に呼ぶ）。
+// 2026-11-11 のテストで 1 回 110 秒超・作り直し込みで 170 秒かかったため、
+// 読むページ数を絞り、作り直しも含めて totalMs 以内に収める（1 工程は 120 秒まで）
+export async function researchWithGemini(
+  run: GenerationRun,
+  keyword: string,
+  totalMs = 100_000,
+  pages = 3,
+): Promise<AiResearch> {
   let useUrlContext = true;
+  const deadline = Date.now() + totalMs;
+  let ungrounded: { research: ReturnType<typeof parseResearchText>; parsed: ReturnType<typeof parseGeminiResponse>; data: any } | null = null;
   for (let attempt = 0; ; attempt++) {
+    const remaining = deadline - Date.now();
+    if (remaining < 15_000) {
+      // 作り直す時間がなければ、検索なしでまとめた 1 回目の結果を使う
+      if (ungrounded) return finishResearch(run, ungrounded.research, ungrounded.parsed, ungrounded.data, useUrlContext);
+      throw new Error('調査の時間が足りませんでした');
+    }
     const body = {
-      contents: [{ role: 'user', parts: [{ text: buildResearchPrompt(keyword) }] }],
-      generationConfig: { temperature: 0.2, maxOutputTokens: 8192 },
+      contents: [{ role: 'user', parts: [{ text: buildResearchPrompt(keyword, pages) }] }],
+      generationConfig: { temperature: 0.2, maxOutputTokens: 6144 },
       tools: [{ google_search: {} }, ...(useUrlContext ? [{ url_context: {} }] : [])],
     };
-    const res = await fetch(geminiGenerateUrl(run.baseModel, run.apiKey), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(timeoutMs),
-    });
+    let res: Response;
+    try {
+      res = await fetch(geminiGenerateUrl(run.baseModel, run.apiKey), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(remaining),
+      });
+    } catch (error) {
+      if (ungrounded) return finishResearch(run, ungrounded.research, ungrounded.parsed, ungrounded.data, useUrlContext);
+      throw error;
+    }
     if (!res.ok) {
       const text = await res.text();
       if (res.status === 400 && useUrlContext && /url_context/i.test(text)) {
@@ -128,18 +149,30 @@ export async function researchWithGemini(run: GenerationRun, keyword: string, ti
     if (!research.searchIntent && research.competitors.length === 0) {
       throw new Error(`調査結果を読み取れませんでした: ${parsed.text.slice(0, 300)}`);
     }
-    // 検索せずに答えた場合は 1 回だけやり直す
-    if (!parsed.grounded && attempt < 1) continue;
-
-    const resolved = await run.resolveUrls(parsed.sources.map((s) => s.uri).filter(Boolean)).catch(() => ({} as Record<string, string>));
-    return {
-      ...research,
-      searchUsed: parsed.grounded,
-      searchQueries: parsed.searchQueries,
-      groundingSources: parsed.sources.map((s) => ({ title: s.title, url: resolved[s.uri] || s.uri })),
-      urlContextUsed: useUrlContext && Boolean(data?.candidates?.[0]?.urlContextMetadata),
-    };
+    // 検索せずに答えた場合は、時間が残っていれば 1 回だけやり直す
+    if (!parsed.grounded && attempt < 1) {
+      ungrounded = { research, parsed, data };
+      continue;
+    }
+    return finishResearch(run, research, parsed, data, useUrlContext);
   }
+}
+
+async function finishResearch(
+  run: GenerationRun,
+  research: ReturnType<typeof parseResearchText>,
+  parsed: ReturnType<typeof parseGeminiResponse>,
+  data: any,
+  useUrlContext: boolean,
+): Promise<AiResearch> {
+  const resolved = await run.resolveUrls(parsed.sources.map((s) => s.uri).filter(Boolean)).catch(() => ({} as Record<string, string>));
+  return {
+    ...research,
+    searchUsed: parsed.grounded,
+    searchQueries: parsed.searchQueries,
+    groundingSources: parsed.sources.map((s) => ({ title: s.title, url: resolved[s.uri] || s.uri })),
+    urlContextUsed: useUrlContext && Boolean(data?.candidates?.[0]?.urlContextMetadata),
+  };
 }
 
 // 構成案に渡す、調査結果の「材料」（何を書くかは見出し数の上限と検索意図で絞る。仕様書 4.0）

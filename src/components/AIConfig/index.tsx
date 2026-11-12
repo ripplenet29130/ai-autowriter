@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Zap, Check, AlertCircle } from 'lucide-react';
 import { useAppStore } from '../../store/useAppStore';
 import { AIConfigForm } from './AIConfigForm';
+import { AiRoleSettings } from './AiRoleSettings';
 import { AIConfig } from '../../types';
 import toast from 'react-hot-toast';
 
@@ -36,9 +37,9 @@ export const AIConfigComponent: React.FC = () => {
     };
 
     const providers: { id: 'openai' | 'claude' | 'gemini', label: string, description: string }[] = [
-        { id: 'openai', label: 'OpenAI', description: 'GPT-5.2 / GPT-5 / GPT-4.1' },
-        { id: 'claude', label: 'Anthropic Claude', description: 'Claude 4.5 Opus / Sonnet' },
-        { id: 'gemini', label: 'Google Gemini', description: 'Gemini 3 Flash / Pro / 2.5' },
+        { id: 'openai', label: 'OpenAI', description: 'GPT-5.5 / GPT-5.4 / GPT-5.4 mini' },
+        { id: 'claude', label: 'Anthropic Claude', description: 'Claude Opus 4.8 / Sonnet 4.6 / Haiku 4.5' },
+        { id: 'gemini', label: 'Google Gemini', description: 'Gemini 3.8 Flash / 3.1 Pro / 3.1 Flash-Lite' },
     ];
 
     return (
@@ -127,6 +128,8 @@ export const AIConfigComponent: React.FC = () => {
                     })}
                 </div>
             )}
+
+            {!selectedProvider && <AiRoleSettings aiConfigs={aiConfigs} />}
         </div>
     );
 };

@@ -29,6 +29,8 @@ export function finalizeArticle(params: {
   targetWordCount: number;
   outline: any;
   factSheet: FactSheet | null;
+  // 根拠メモがないとき（1 回で書き切る書き方）の参考資料
+  referencesMarkdown?: string;
 }): { content: string; referencesCount: number; draftReasons: string[]; warnings: string[] } {
   const draftReasons: string[] = [];
   const warnings: string[] = [];
@@ -44,11 +46,14 @@ export function finalizeArticle(params: {
   }
 
   // 投稿直前の機械的な文字数削減はしない（記事改善プラン 1-1。本番と同じ）
-  try {
-    validateGeneratedArticleCompleteness(content, params.outline, params.targetWordCount);
-  } catch (error) {
-    // 本番では失敗扱いになる
-    warnings.push(`本番では失敗扱いになる状態です: ${errorMessage(error)}`);
+  // 構成案がない書き方（1 回で書き切る）では、構成案と照らす確認はしない（本番と同じ）
+  if (params.outline) {
+    try {
+      validateGeneratedArticleCompleteness(content, params.outline, params.targetWordCount);
+    } catch (error) {
+      // 本番では失敗扱いになる
+      warnings.push(`本番では失敗扱いになる状態です: ${errorMessage(error)}`);
+    }
   }
 
   if (hasCorrectionArtifacts(content)) {
@@ -62,6 +67,9 @@ export function finalizeArticle(params: {
       content = appendReferencesSection(content, refs);
       referencesCount = selectReferenceSources(params.factSheet).length;
     }
+  } else if (params.referencesMarkdown) {
+    content = appendReferencesSection(content, params.referencesMarkdown);
+    referencesCount = params.referencesMarkdown.split('\n').filter((line) => line.startsWith('- ')).length;
   }
   return { content, referencesCount, draftReasons, warnings };
 }

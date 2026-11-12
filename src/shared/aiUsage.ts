@@ -27,6 +27,22 @@ export function resolveGeminiRate(model: string, at: Date = new Date()): ModelRa
   return { input: 1.5, output: 7.5 };
 }
 
+// ChatGPT・Claude の単価（役割ごとの AI で選んだとき用。2026-11 時点のおおよその料金）
+export function resolveModelRate(model: string, at: Date = new Date()): ModelRate {
+  const m = String(model || '').toLowerCase();
+  if (m.startsWith('gpt-')) {
+    if (m.includes('gpt-5.5')) return { input: 5.0, output: 30.0 };
+    if (m.includes('mini')) return { input: 0.75, output: 4.5 };
+    return { input: 2.5, output: 15.0 };
+  }
+  if (m.startsWith('claude-')) {
+    if (m.includes('opus')) return { input: 5.0, output: 25.0 };
+    if (m.includes('haiku')) return { input: 1.0, output: 5.0 };
+    return { input: 3.0, output: 15.0 };
+  }
+  return resolveGeminiRate(model, at);
+}
+
 export interface ModelUsageSummary {
   model: string;
   calls: number;
@@ -71,7 +87,7 @@ export class AiUsageTracker {
 
   summarize(at: Date = new Date()): AiUsageSummary {
     const models: ModelUsageSummary[] = Array.from(this.byModel.entries()).map(([model, u]) => {
-      const rate = resolveGeminiRate(model, at);
+      const rate = resolveModelRate(model, at);
       // 思考トークンは出力単価で課金される
       const usd = (u.input / 1_000_000) * rate.input + ((u.output + u.thoughts) / 1_000_000) * rate.output;
       return {

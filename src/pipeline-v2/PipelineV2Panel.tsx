@@ -7,7 +7,7 @@ import { Play, RefreshCw, RotateCcw, Square } from 'lucide-react';
 import toast from 'react-hot-toast';
 import {
   PIPELINE_STEP_LABELS,
-  PIPELINE_STEP_ORDER,
+  PIPELINE_STEPS_BY_STYLE,
   pipelineV2Service,
   type PipelineJob,
   type PipelineJobSettings,
@@ -35,6 +35,8 @@ const CRITIQUE_LABEL: Record<string, string> = {
   thin: '説明が薄い',
   duplicate: '重複',
   unsupported: '根拠のない断定',
+  incomplete: '区分の抜け',
+  vague: 'あいまい',
   unanswered: '答えていない疑問',
   off_topic: '検索意図から外れる',
   flow: 'つながりが悪い',
@@ -56,6 +58,7 @@ const defaultSettings: PipelineJobSettings = {
   qualityMode: 'high',
   customInstructions: '',
   appendReferences: true,
+  writingStyle: 'oneshot',
 };
 
 export const PipelineV2Panel: React.FC = () => {
@@ -183,6 +186,17 @@ export const PipelineV2Panel: React.FC = () => {
             <select className="input-field mt-1" value={wpConfigId} onChange={(e) => setWpConfigId(e.target.value)}>
               <option value="">投稿しない（記事だけ作る）</option>
               {wpConfigs.map((config) => <option key={config.id} value={config.id}>{config.label}</option>)}
+            </select>
+          </label>
+          <label className="block text-sm">
+            <span className="text-gray-700">書き方</span>
+            <select
+              className="input-field mt-1"
+              value={settings.writingStyle || 'oneshot'}
+              onChange={(e) => setSettings({ ...settings, writingStyle: e.target.value === 'steps' ? 'steps' : 'oneshot' })}
+            >
+              <option value="oneshot">広い調査＋1回で書き切る（おすすめ）</option>
+              <option value="steps">工程を分けて批評・書き直しを重ねる（以前の方式）</option>
             </select>
           </label>
           <div className="text-sm">
@@ -313,7 +327,8 @@ export const PipelineV2Panel: React.FC = () => {
 
           {/* 工程の進み具合 */}
           <div className="flex flex-wrap gap-2">
-            {PIPELINE_STEP_ORDER.map((step) => {
+            {/* 書き方の設定がない古いジョブは、構成案があれば工程を分ける書き方とみなす */}
+            {PIPELINE_STEPS_BY_STYLE[selected.settings?.writingStyle === 'steps' || (!selected.settings?.writingStyle && selected.state?.outline) ? 'steps' : 'oneshot'].map((step) => {
               const done = steps.some((s) => s.step === step && s.status === 'completed');
               const failed = !done && steps.some((s) => s.step === step && s.status === 'failed');
               const current = selected.status !== 'completed' && selected.current_step === step;

@@ -17,6 +17,7 @@ import {
   hasUsableFacts,
   selectReferenceSources,
 } from '../../../src/shared/factSheetCore.ts';
+import { buildWideReferencesMarkdown, selectWideReferences, WIDE_RESEARCH_LABELS } from './_wideResearch.ts';
 import {
   countCriticalIssues,
   countMinorIssues,
@@ -26,6 +27,8 @@ import {
 import { CRITIQUE_ISSUE_TYPES, summarizeCritique } from '../../../src/shared/editorialReviewCore.ts';
 import { normalizeAiModel, normalizeQualityMode, resolveWritingModel } from '../../../src/shared/aiModelCatalog.ts';
 import { USD_TO_JPY } from '../../../src/shared/aiUsage.ts';
+import { AI_ROLES, describeAiRoleValues } from '../../../src/shared/aiRoleSettings.ts';
+import { externalCallersForStep, geminiModelsForStep } from './_roleCallers.ts';
 import { GenerationRun } from '../scheduler-executor/_run.ts';
 import { publishToWordPress } from '../scheduler-executor/_wordpress.ts';
 import { extractExcerpt, inferLengthCategory } from '../scheduler-executor/_content-format.ts';
@@ -33,6 +36,7 @@ import { sendChatworkNotifications } from '../scheduler-executor/_notifications.
 import { validateGeneratedArticleCompleteness } from '../scheduler-executor/_generation.ts';
 import type { AIConfig, WordPressConfig } from '../scheduler-executor/_shared.ts';
 import {
+  baseModelForStep,
   isStepName,
   normalizeJobSettings,
   STEP_HANDLERS,
@@ -114,6 +118,40 @@ async function loadGeminiConfig(supabase: any, job: any): Promise<AIConfig> {
     throw new Error('Gemini の AI 設定（API キー）が見つかりません。新方式は Gemini の Google 検索を使うため、Gemini の設定が必要です');
   }
   return { ...config, model: normalizeAiModel('gemini', config.model) } as AIConfig;
+}
+
+// ChatGPT・Claude の API キー（AI 設定で保存したもの）
+async function loadProviderApiKey(supabase: any, job: any, provider: 'openai' | 'claude'): Promise<string | null> {
+  for (const [column, value] of [['user_id', job.user_id], ['account_id', job.account_id]] as const) {
+    if (!value) continue;
+    const { data } = await supabase
+      .from('ai_configs')
+      .select('api_key')
+      .eq(column, value)
+      .eq('provider', provider)
+      .order('created_at', { ascending: false })
+      .limit(5);
+    const key = (data || []).map((row: any) => String(row.api_key || '').trim()).find(Boolean);
+    if (key) return key;
+  }
+  return null;
+}
+
+// AI 設定の「役割ごとの AI」（ジョブを作るときに設定へ写す）。保存していない役割は標準（AI_ROLES の defaultValue）
+async function loadAiRoleSettings(supabase: any, userId: string | null): Promise<Record<string, string>> {
+  if (!userId) return {};
+  const { data } = await supabase
+    .from('app_settings')
+    .select('key, value')
+    .eq('user_id', userId)
+    .in('key', AI_ROLES.map((role) => role.settingKey));
+  const map = new Map<string, string>((data || []).map((row: any) => [String(row.key), String(row.value || '')]));
+  const values: Record<string, string> = {};
+  for (const role of AI_ROLES) {
+    const value = map.get(role.settingKey);
+    if (value) values[role.id] = value;
+  }
+  return values;
 }
 
 async function loadWordPressConfig(supabase: any, id: string | null): Promise<WordPressConfig | null> {
@@ -222,10 +260,13 @@ async function finalizeJob(supabase: any, job: any, state: JobState, settings: J
 }> {
   const title = state.title || job.fixed_title || job.keyword;
   let finalContent = tidyContent(String(content || '').replace(/\[\[(.+?)\]\]/g, '$1'), title);
-  try {
-    validateGeneratedArticleCompleteness(finalContent, state.outline!, state.lengthPlan?.targetChars || settings.targetWordCount);
-  } catch (error) {
-    state.notes = [...(state.notes || []), `本文の確認で注意: ${errorText(error)}`];
+  // 1 回で書き切る書き方には構成案がないので、構成案と照らす確認は工程を分ける書き方のときだけ行う
+  if (state.outline) {
+    try {
+      validateGeneratedArticleCompleteness(finalContent, state.outline, state.lengthPlan?.targetChars || settings.targetWordCount);
+    } catch (error) {
+      state.notes = [...(state.notes || []), `本文の確認で注意: ${errorText(error)}`];
+    }
   }
 
   // 公開判定（仕様書 7 章）
@@ -248,6 +289,13 @@ async function finalizeJob(supabase: any, job: any, state: JobState, settings: J
     if (references) {
       finalContent = appendReferencesSection(finalContent, references);
       referencesCount = selectReferenceSources(state.factSheet).length;
+    }
+  } else if (settings.appendReferences && state.wideResearch?.sources?.length) {
+    // 1 回で書き切る書き方は根拠メモがないので、広い調査で読んだ出典（公式情報を優先）を載せる
+    const references = buildWideReferencesMarkdown(state.wideResearch.sources);
+    if (references) {
+      finalContent = appendReferencesSection(finalContent, references);
+      referencesCount = selectWideReferences(state.wideResearch.sources).length;
     }
   }
 
@@ -297,7 +345,11 @@ async function finalizeJob(supabase: any, job: any, state: JobState, settings: J
     final_chars: chars,
     length_adjustment: state.lengthAdjustment || '不要',
     write_mode: state.writeMode,
+    writing_style: settings.writingStyle,
+    ai_roles: settings.aiRoles,
+    fact_check_patches: state.factCheck?.patches || [],
     editorial_review: state.reviewStatus || '未実行',
+    title_review: state.titleReview || null,
     editorial_critique: state.critique || null,
     fact_sheet: state.factSheet
       ? { facts: state.factSheet.facts, sources: state.factSheet.sources.map(({ id, title: t, url }) => ({ id, title: t, url })) }
@@ -319,6 +371,9 @@ async function finalizeJob(supabase: any, job: any, state: JobState, settings: J
     notes: state.notes || [],
     research: state.research
       ? { search_intent: state.research.searchIntent, competitors: state.research.competitors.length, search_used: state.research.searchUsed }
+      : null,
+    wide_research: state.wideResearch
+      ? state.wideResearch.parts.map((p) => ({ part: p.part, ok: p.ok, chars: p.text.length, grounded: p.grounded, error: p.error || null }))
       : null,
   };
   const verdict = { post_status: postStatus, draft_reasons: draftReasons, warnings, publish_error: publishError };
@@ -350,10 +405,17 @@ async function finalizeJob(supabase: any, job: any, state: JobState, settings: J
       '投稿状態: {status}',
       '',
       '【品質】',
-      `文字数: ${formatLengthPlanLabel(state.lengthPlan)} → 完成 ${chars}字`,
+      `文字数: ${formatLengthPlanLabel(state.lengthPlan) || (settings.lengthMode === 'fixed' ? `指定 ${settings.targetWordCount}字` : 'おまかせ')} → 完成 ${chars}字`,
       state.lengthAdjustment && state.lengthAdjustment !== '不要' ? `文字数の調整: ${state.lengthAdjustment}` : '',
-      `根拠メモ: ${state.factSheet ? `事実${state.factSheet.facts.length}件・出典${state.factSheet.sources.length}件` : `なし（${state.factSheetNote || '作成できませんでした'}）`}`,
-      `見直し: ${state.reviewStatus || '未実行'}`,
+      settings.writingStyle === 'oneshot'
+        ? `書き方: 広い調査＋1回で書き切る（調査: ${(state.wideResearch?.parts || []).map((p) => `${WIDE_RESEARCH_LABELS[p.part]}${p.ok ? '○' : '×'}`).join('・')}）`
+        : `根拠メモ: ${state.factSheet ? `事実${state.factSheet.facts.length}件・出典${state.factSheet.sources.length}件` : `なし（${state.factSheetNote || '作成できませんでした'}）`}`,
+      settings.writingStyle === 'oneshot' ? '' : `見直し: ${state.reviewStatus || '未実行'}`,
+      `使った AI: ${describeAiRoleValues(settings.aiRoles)}`,
+      ...(state.notes || []).filter((note) => /Gemini で(?:行いました|続けました|書き直して)/.test(note)).map((note) => `注意: ${note}`),
+      state.titleReview && state.titleReview.before !== state.titleReview.after
+        ? `タイトルの見直し: 「${state.titleReview.before}」→ 本文に合わせて変更（${state.titleReview.reason}）`
+        : '',
       critique ? `見直しの批評: ${summarizeCritique(critique)}` : '',
       ...(critique?.issues.slice(0, 3).map((issue) => `・[${CRITIQUE_ISSUE_TYPES[issue.type]}] ${issue.section}: ${issue.problem}`) || []),
       state.factCheck
@@ -398,6 +460,13 @@ async function processJob(supabase: any, job: any): Promise<void> {
   }
 
   const startedAt = new Date().toISOString();
+  // スケジュールから引き継いだジョブなど、作るときに役割ごとの AI を写していないジョブは、
+  // 最初の工程で AI 設定の保存内容を写して残す（以降の工程は同じ選択で進む）
+  if (!job.settings?.aiRoles) {
+    const saved = await loadAiRoleSettings(supabase, job.user_id || null);
+    job.settings = { ...(job.settings || {}), aiRoles: normalizeJobSettings({ aiRoles: saved }).aiRoles };
+    await supabase.from('article_jobs').update({ settings: job.settings }).eq('id', job.id);
+  }
   const settings = normalizeJobSettings(job.settings);
   const state: JobState = (job.state && typeof job.state === 'object') ? job.state : {};
   let run: GenerationRun | null = null;
@@ -405,7 +474,27 @@ async function processJob(supabase: any, job: any): Promise<void> {
   try {
     const aiConfig = await loadGeminiConfig(supabase, job);
     const qualityMode = normalizeQualityMode(settings.qualityMode);
-    run = new GenerationRun(Date.now(), STEP_TIME_BUDGET_MS, aiConfig.api_key, aiConfig.model, resolveWritingModel('gemini', aiConfig.model, qualityMode));
+    // 費用より質を優先: 高品質モードでは調査と根拠メモ以外の工程を上位モデル（Pro）で行う
+    // AI 設定で Gemini の特定のモデルを選んでいれば、その工程だけ差し替える
+    const models = geminiModelsForStep(step, settings, {
+      base: aiConfig.model,
+      writer: resolveWritingModel('gemini', aiConfig.model, qualityMode),
+    });
+    run = new GenerationRun(
+      Date.now(),
+      STEP_TIME_BUDGET_MS,
+      aiConfig.api_key,
+      baseModelForStep(step, models.base, models.writer, qualityMode),
+      models.writer,
+      true,
+    );
+    const stepRun = run;
+    const roleCallers = await externalCallersForStep({
+      step,
+      settings,
+      run: stepRun,
+      loadApiKey: (provider) => loadProviderApiKey(supabase, job, provider),
+    });
     const runConfig: AIConfig = { ...aiConfig, run };
 
     let result: { state: JobState; next: StepName | 'done'; content?: string; title?: string; output: Record<string, unknown> };
@@ -424,6 +513,7 @@ async function processJob(supabase: any, job: any): Promise<void> {
       const handler = STEP_HANDLERS[step];
       if (!handler) throw new Error(`未知の工程です: ${step}`);
       result = await handler({
+        attempt: attempts,
         keyword: job.keyword,
         fixedTitle: job.fixed_title || null,
         settings,
@@ -431,6 +521,7 @@ async function processJob(supabase: any, job: any): Promise<void> {
         content: String(job.content || ''),
         run,
         aiConfig: runConfig,
+        callers: roleCallers,
       });
     }
 
@@ -451,7 +542,8 @@ async function processJob(supabase: any, job: any): Promise<void> {
 
     const done = result.next === 'done';
     const { error } = await supabase.from('article_jobs').update({
-      state: result.state,
+      // 工程の中の注意（選んだ AI が使えず Gemini で続けた、など）も記事の記録と通知に残す
+      state: { ...result.state, notes: [...new Set([...(result.state.notes || []), ...run.notes])] },
       current_step: done ? 'finalize' : result.next,
       status: done ? 'completed' : 'running',
       step_attempts: 0,
@@ -544,7 +636,11 @@ Deno.serve(async (req: Request) => {
         fixed_title: String(body?.title || '').trim() || null,
         wordpress_config_id: body?.wordpressConfigId || null,
         ai_config_id: body?.aiConfigId || null,
-        settings: normalizeJobSettings(body?.settings || {}),
+        // 役割ごとの AI は、画面から指定がなければ AI 設定の保存内容を使う
+        settings: normalizeJobSettings({
+          ...(body?.settings || {}),
+          aiRoles: { ...(await loadAiRoleSettings(supabase, userId)), ...(body?.settings?.aiRoles || {}) },
+        }),
       }).select('id').single();
       if (error) throw error;
       await kick(job.id);

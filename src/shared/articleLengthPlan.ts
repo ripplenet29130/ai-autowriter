@@ -134,7 +134,8 @@ export async function planArticleLength(
   };
 
   try {
-    const text = await input.callAI(buildLengthPlanPrompt({ ...input, maxChars }), 600);
+    // 上位モデル（Pro）では思考の分も出力の上限に数えられるため、余裕を持たせる
+    const text = await input.callAI(buildLengthPlanPrompt({ ...input, maxChars }), 4096);
     const parsed = parseLengthPlanResponse(text, maxChars);
     if (!parsed) return fallback('AI の回答を読み取れなかったため既定値を使用');
     return {
@@ -164,6 +165,7 @@ export function buildOutlineLengthInstructions(plan: ArticleLengthPlan): string 
     `- 導入を除く見出し（H2・H3・まとめを合わせて）は最大${plan.maxHeadings}個。1見出しあたり${MIN_CHARS_PER_HEADING}字以上書ける数にする`,
     '- 見出しを増やして網羅するより、少ない見出しで1つずつ深く答える',
     '- 各見出しは「検索した人の疑問に直接答えるか」で選ぶ。調査で見つけた話題でも、検索意図から外れるもの（周辺の手続き・窓口の受付時間などの細部）は見出しにしない',
+    '- 一方で、検索した人が一緒に知りたいこと（自分が対象かどうかの判定基準、同じ場面で関係する別の期限・条件、具体的な時系列）は検索意図に含まれる。見出しか本文で必ず扱う',
     '- H3（小見出し）は、そのH2の中に読者が分けて知りたい論点が本当に複数あるときだけ使う。数合わせで作らない',
   ].join('\n');
 }

@@ -66,6 +66,9 @@ export class GenerationRun {
     readonly apiKey: string,
     readonly baseModel: string,
     readonly writerModel: string,
+    // true なら、基本モデルと執筆モデルが同じでも執筆の思考を止めない（新方式で全工程を Pro にする場合）。
+    // false（今の自動投稿）では、執筆モデルを使えないとき時間を優先して思考を止める
+    readonly keepWriterThinking = false,
   ) {}
 
   get usesWriterModel(): boolean {
@@ -108,11 +111,12 @@ export class GenerationRun {
     }
 
     // 執筆モデルが使えず基本モデルで代わりに書く場合は、時間を優先して思考を止める
-    const thinkingBudget = options.role === 'writer' && !wantsWriter ? 0 : options.thinkingBudget;
+    const writerThinks = options.role === 'writer' && (wantsWriter || (this.keepWriterThinking && !this.proUnavailable));
+    const thinkingBudget = options.role === 'writer' && !writerThinks ? 0 : options.thinkingBudget;
     const extraThinkingTokens = typeof thinkingBudget === 'number' && thinkingBudget > 0 ? thinkingBudget : 0;
     const requestOptions: GeminiRequestOptions = {
       prompt,
-      maxOutputTokens: options.maxOutputTokens + (options.role === 'writer' && wantsWriter ? extraThinkingTokens : 0),
+      maxOutputTokens: options.maxOutputTokens + (writerThinks ? extraThinkingTokens : 0),
       temperature: options.temperature,
       thinkingBudget,
       useSearch: options.useSearch,

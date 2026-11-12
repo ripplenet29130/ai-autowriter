@@ -28,7 +28,8 @@ npx -y deno@2.9.6 run --allow-net --allow-env --allow-read --allow-write --env-f
 |---|---|
 | `--words 3000` | 目標文字数（既定は本番と同じ） |
 | `--only current` / `--only v2` | 片方だけ動かす |
-| `--no-judge` | 採点をしない |
+| `--no-judge` | 採点をしない（比較ページは作る） |
+| `--article-only` | 記事だけを作る。採点も比較ページ（`report.html`）・`result.json` も作らず、記事の `.md` だけを残す。`--flow pipeline` と組み合わせると新方式で 1 本作れる |
 | `--baseline 20261110-122307` | 今の流れだけを動かし、`out/` に保存してある以前の結果（同じキーワードの「今の流れ」の記事）と比べる。並べ比べは記事の順番を入れ替えて 2 回行う |
 | `--flow pipeline` | 「今の流れ」の代わりに、新方式（`supabase/functions/article-pipeline` の工程）をこの PC の上で順番に動かす。工程ごとに 125 秒の枠を作り、120 秒を超えた工程は「注意」に出す。DB・WordPress・通知は使わない |
 | `--external 記事.md` | 外から持ち込んだ記事（Gemini アプリなどで作ったもの）と比べる。今の流れだけを動かし、その記事と同じ基準で採点・並べ比べする。キーワードが複数あるときは `--external "キーワード=記事.md"` を繰り返す。記事の最初の `# ` の行をタイトルにする |

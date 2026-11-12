@@ -19,6 +19,18 @@ export interface GenerateTitleSuggestionsWithSharedCoreParams {
   callAI: (prompt: string, maxTokens: number) => Promise<string>;
 }
 
+// タイトルの質のルール（2026-11-11 の新方式のテストで「カレンダー」と書いたのに本文に一覧がない、
+// 「過ぎたら」の主語が抜けた不自然な日本語、「網羅」などの宣伝文句が問題になったため）
+export const TITLE_QUALITY_RULES = [
+  '日本語として自然な文にする。主語や目的語を省いて意味が通らない表現にしない（例: ×「計算から過ぎたら課される」→ ○「期限を過ぎたときのペナルティ」）',
+  '本文で必ず用意するとは限らない形式（カレンダー・早見表・一覧・チェックリスト・テンプレート・ランキングなど）をタイトルで約束しない',
+  '「網羅」「完全ガイド」「徹底解説」「決定版」「保存版」などの宣伝文句を使わない',
+  '記事を読むと何が分かるか（読者の疑問への答え）が伝わるようにする',
+];
+
+// 宣伝文句（タイトルに使わない語）
+export const TITLE_HYPE_PATTERN = /網羅|完全ガイド|完全版|徹底解説|徹底ガイド|決定版|保存版|永久保存/;
+
 function extractJsonArray(text: string): string | null {
   const trimmed = String(text || '').trim();
   if (!trimmed) return null;
@@ -180,6 +192,8 @@ function normalizeAndFilterSuggestions(
     const title = normalizeTitleText(String(item?.title || ''));
     if (!title) continue;
     if (hasRedundantTitlePattern(title, keyword)) continue;
+    // 宣伝文句のタイトルは使わない（指示を守らなかった場合の保険）
+    if (TITLE_HYPE_PATTERN.test(title)) continue;
 
     const comparable = normalizeComparable(title);
     if (!comparable || seen.has(comparable)) continue;
@@ -226,9 +240,12 @@ function parseAiTitleSuggestions(raw: string, keyword: string, count: number): S
     () => parseLineBasedTitles(raw),
   ];
 
+  // 件数がそろわなくても（宣伝文句などで除いた分があっても）、使える候補があれば返す
+  let best: SharedTitleSuggestion[] = [];
   for (const parse of parsers) {
     const suggestions = normalizeAndFilterSuggestions(parse(), keyword, count);
     if (suggestions.length >= count) return ensureReasonDiversity(suggestions);
+    if (suggestions.length > best.length) best = suggestions;
   }
 
   const jsonText = extractJsonArray(raw);
@@ -238,12 +255,13 @@ function parseAiTitleSuggestions(raw: string, keyword: string, count: number): S
       const parsedSuggestions = parseSuggestionsFromJsonValue(parsed);
       const suggestions = normalizeAndFilterSuggestions(parsedSuggestions, keyword, count);
       if (suggestions.length >= count) return ensureReasonDiversity(suggestions);
+      if (suggestions.length > best.length) best = suggestions;
     } catch {
-      return [];
+      // 下の best を返す
     }
   }
 
-  return [];
+  return best.length > 0 ? ensureReasonDiversity(best) : [];
 }
 
 export async function generateTitleSuggestionsWithSharedCore(
@@ -295,9 +313,10 @@ ${competitorText}
 1. 既存記事を模倣しない
 2. ${count}件それぞれ異なる切り口にする
 3. メインキーワードを自然に含める
-4. titleは24〜68字
+4. titleは24〜40字（検索結果で切れないよう、32字前後を目安にする）
 5. reasonは20字以内
 6. 解説、前置き、Markdown、コードブロックは禁止
+${TITLE_QUALITY_RULES.map((rule, index) => `${index + 7}. ${rule}`).join('\n')}
 
 【出力形式】
 JSON配列のみ。次の形以外は出力しない:
@@ -321,8 +340,9 @@ ${outputExample}
 - 返答はJSON配列のみ
 - 配列の要素数は必ず${count}件
 - 各要素は title と reason を持つ
-- titleは24〜68字
+- titleは24〜40字
 - reasonは20字以内
+${TITLE_QUALITY_RULES.map((rule) => `- ${rule}`).join('\n')}
 - 前置き、説明文、Markdown、コードブロックは禁止
 
 出力例:

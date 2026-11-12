@@ -34,6 +34,7 @@ function parseArgs(args: string[]) {
   let words: number | undefined;
   let only: FlowName | null = null;
   let judge = true;
+  let articleOnly = false;
   let baseline: string | null = null;
   // 外から持ち込んだ記事（Gemini アプリなどで作ったもの）。「キーワード=ファイル」か、キーワードが 1 つならファイルだけ
   const externals: string[] = [];
@@ -45,6 +46,8 @@ function parseArgs(args: string[]) {
     if (a === '--words') words = Number(args[++i]) || undefined;
     else if (a === '--only') only = args[++i] === 'v2' ? 'v2' : 'current';
     else if (a === '--no-judge') judge = false;
+    // 記事だけ作る（採点しない・比較ページを作らない・今の流れの枠だけ動かす）
+    else if (a === '--article-only') { articleOnly = true; judge = false; only = 'current'; }
     else if (a === '--baseline') baseline = String(args[++i] || '').trim() || null;
     // 手動生成と同じく時間制限なしで動かす（見直し・検証を省略させない）。本番の 140 秒の条件ではなくなる
     else if (a === '--no-time-limit') Deno.env.set('SCHEDULER_TIME_BUDGET_SECONDS', '1200');
@@ -53,10 +56,20 @@ function parseArgs(args: string[]) {
     else if (a === '--research') Deno.env.set('PIPELINE_RESEARCH_MODE', String(args[++i] || '').trim() === 'gemini' ? 'gemini' : 'serpapi');
     // 新方式（article-pipeline）の工程そのものを、この PC の上で順番に動かす
     else if (a === '--flow') Deno.env.set('PIPELINE_COMPARE_FLOW', String(args[++i] || '').trim() === 'pipeline' ? 'pipeline' : 'current');
+    // 新方式の書き方: oneshot（広い調査＋1 回で書き切る。標準）か steps（工程を分けて批評・書き直し）
+    else if (a === '--style') Deno.env.set('PIPELINE_WRITING_STYLE', String(args[++i] || '').trim() === 'steps' ? 'steps' : 'oneshot');
+    // 役割ごとの AI（例: --ai factcheck=openai:gpt-5.4 --ai writer=auto）。役割は aiRoleSettings.ts の AI_ROLES。
+    // 指定しない役割は標準（ファクトチェック・修正は ChatGPT）
+    else if (a === '--ai') {
+      const [role, value] = String(args[++i] || '').split('=');
+      if (role && value) Deno.env.set(`PIPELINE_AI_${role.trim().toUpperCase()}`, value.trim());
+    }
+    else if (a === '--writer') Deno.env.set('PIPELINE_AI_WRITER', String(args[++i] || '').trim());
+    else if (a === '--checker') Deno.env.set('PIPELINE_AI_FACTCHECK', String(args[++i] || '').trim());
     else if (a === '--writing') Deno.env.set('PIPELINE_WRITING_MODE', String(args[++i] || '').trim() === 'single' ? 'single' : 'sections');
     else if (a.trim()) keywords.push(a.trim());
   }
-  return { keywords, words, only, judge, baseline, externals, externalLabel };
+  return { keywords, words, only, judge, baseline, externals, externalLabel, articleOnly };
 }
 
 // 外から持ち込んだ記事を、採点できる形にする（Markdown の最初の「# 」の行をタイトルにする）
@@ -197,7 +210,7 @@ function stamp(): string {
 }
 
 async function main() {
-  const { keywords, words, only, judge, baseline, externals, externalLabel } = parseArgs(Deno.args);
+  const { keywords, words, only, judge, baseline, externals, externalLabel, articleOnly } = parseArgs(Deno.args);
   if (keywords.length === 0) {
     console.error('キーワードを指定してください。例: deno run ... run.ts "相続税 申告期限" "NISA 始め方"');
     Deno.exit(1);
@@ -226,9 +239,9 @@ async function main() {
     console.log(`\n=== ${keyword} ===`);
     const comparison: KeywordComparison = { keyword, flows: {}, judge: null };
     // --flow pipeline なら「今の流れ」の枠で、新方式（article-pipeline）の工程を順番に動かす
-    const usePipeline = Deno.env.get('PIPELINE_COMPARE_FLOW') === 'pipeline';
+    const flowMode = Deno.env.get('PIPELINE_COMPARE_FLOW');
     const runners: Array<[FlowName, typeof runCurrentFlow]> = [
-      ['current', usePipeline ? runPipelineFlow : runCurrentFlow],
+      ['current', flowMode === 'pipeline' ? runPipelineFlow : runCurrentFlow],
       ['v2', runV2Flow],
     ];
     // 回数制限の取り合いを避け、時間を正しく測るため、1 つずつ順番に実行する
@@ -240,7 +253,8 @@ async function main() {
         const flow = await runner({ keyword, targetWordCount: words });
         comparison.flows[name] = flow;
         await Deno.writeTextFile(new URL(`${safeName(keyword)}-${name}.md`, outDir), `# ${flow.title}\n\n${flow.content}\n`);
-        console.log(`  完了: ${(flow.totalMs / 1000).toFixed(0)}秒`);
+        console.log(`  完了: ${(flow.totalMs / 1000).toFixed(0)}秒・AI の費用 約${flow.usage.gemini?.total_estimated_jpy ?? 0}円（有料キー換算・ChatGPT や Claude を選んだ分も含む）`);
+        for (const warning of flow.warnings) console.log(`  注意: ${warning}`);
       } catch (error) {
         console.error(`  失敗: ${errorMessage(error)}`);
         comparison.flows[name] = { error: errorMessage(error) };
@@ -276,13 +290,19 @@ async function main() {
     }
     comparisons.push(comparison);
 
+    // --article-only では記事（.md）だけを残し、比較ページと結果のファイルは作らない
+    if (articleOnly) continue;
     // 途中で止まっても結果が残るよう、キーワードごとに書き出す
     await Deno.writeTextFile(new URL('result.json', outDir), JSON.stringify(comparisons, null, 2));
     await Deno.writeTextFile(new URL('report.html', outDir), buildReportHtml(comparisons));
   }
 
-  const reportPath = decodeURIComponent(new URL('report.html', outDir).pathname).replace(/^\/([A-Za-z]:)/, '$1');
-  console.log(`\n比較ページ: ${reportPath}`);
+  const toPath = (name: string) => decodeURIComponent(new URL(name, outDir).pathname).replace(/^\/([A-Za-z]:)/, '$1');
+  if (articleOnly) {
+    console.log(`\n記事: ${keywords.map((keyword) => toPath(`${safeName(keyword)}-current.md`)).join('\n      ')}`);
+    return;
+  }
+  console.log(`\n比較ページ: ${toPath('report.html')}`);
 }
 
 function safeName(keyword: string): string {
