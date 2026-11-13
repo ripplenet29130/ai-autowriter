@@ -57,10 +57,16 @@ export function renderBufferedBlock(lines: string[]): string[] {
     .filter((line) => line.length > 0);
   if (cleaned.length === 0) return [];
 
-  const isUnorderedList = cleaned.every((line) => /^[-*+]\s+/.test(line));
+  // 「・」「●」で始まる行も箇条書きにする。「・a。・b。・c。」と 1 行に続けて書かれたものは項目ごとに分ける
+  // 2026-11-13 書く AI が「・」の箇条書きを 1 行に続けて書き、普通の段落になっていた
+  const BULLET_MARK = /^(?:[-*+]\s+|[・●■◆]\s*)/;
+  const listLines = cleaned.flatMap((line) =>
+    /^[・●■◆]/.test(line) ? line.split(/(?<=[。．！？!?])\s*(?=[・●■◆])/).map((part) => part.trim()).filter(Boolean) : [line]
+  );
+  const isUnorderedList = listLines.every((line) => BULLET_MARK.test(line));
   if (isUnorderedList) {
-    const items = cleaned
-      .map((line) => line.replace(/^[-*+]\s+/, '').trim())
+    const items = listLines
+      .map((line) => line.replace(BULLET_MARK, '').trim())
       .filter(Boolean)
       .map((item) => `<li style="${LIST_ITEM_STYLE}display:list-item;">${item}</li>`)
       .join('\n');
@@ -495,6 +501,26 @@ export function insertMissingFaqHeading(lines: string[]): string[] {
   return [...lines.slice(0, insertAt), `## ${FAQ_HEADING_TEXT}`, '', ...lines.slice(insertAt)];
 }
 
+// 「### 質問」「### Q1」のように見出しが仮の言葉だけで、次の行に質問文があるときは、質問文を見出しにする
+// 2026-11-13 書く AI が指示の「### 質問」をそのまま見出しにし、質問文を本文に書いた
+const PLACEHOLDER_QUESTION_HEADING = /^(?:質問|よくある質問|Q|Ｑ)\s*[0-9０-９]*\s*[.:：．]?$/i;
+
+export function fillPlaceholderQuestionHeadings(lines: string[]): string[] {
+  const output = [...lines];
+  for (let i = 0; i < output.length; i++) {
+    const line = String(output[i] || '').trim();
+    if (getHeadingLevel(line) < 3) continue;
+    if (!PLACEHOLDER_QUESTION_HEADING.test(extractHeadingText(line))) continue;
+    const nextIndex = findNextNonEmptyLineIndex(output, i + 1);
+    if (nextIndex === -1) continue;
+    const next = String(output[nextIndex] || '').trim().replace(/^(?:Q|Ｑ)\s*[.:：．]?\s*/i, '');
+    if (isHeadingLine(next) || next.length > 80 || !QUESTION_HEADING_PATTERN.test(next)) continue;
+    output[i] = `${'#'.repeat(getHeadingLevel(line))} ${next}`;
+    output.splice(nextIndex, 1);
+  }
+  return output;
+}
+
 export function normalizeGeneratedContentForPublishing(rawContent: string, articleTitle: string): string {
   let text = String(rawContent ?? '')
     .replace(/\r\n/g, '\n')
@@ -540,6 +566,7 @@ export function normalizeGeneratedContentForPublishing(rawContent: string, artic
     lines[i] = `## ${normalizedHeading}`;
   }
 
+  lines = fillPlaceholderQuestionHeadings(lines);
   lines = insertMissingFaqHeading(lines);
   lines = normalizeHeadingHierarchy(lines);
   lines = removeDuplicateSummarySections(lines);
