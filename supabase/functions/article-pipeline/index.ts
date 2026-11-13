@@ -17,7 +17,7 @@ import {
   hasUsableFacts,
   selectReferenceSources,
 } from '../../../src/shared/factSheetCore.ts';
-import { buildWideReferencesMarkdown, selectWideReferences, WIDE_RESEARCH_LABELS } from './_wideResearch.ts';
+import { buildWideReferencesMarkdown, WIDE_RESEARCH_LABELS } from './_wideResearch.ts';
 import {
   countCriticalIssues,
   countMinorIssues,
@@ -292,10 +292,11 @@ async function finalizeJob(supabase: any, job: any, state: JobState, settings: J
     }
   } else if (settings.appendReferences && state.wideResearch?.sources?.length) {
     // 1 回で書き切る書き方は根拠メモがないので、広い調査で読んだ出典（公式情報を優先）を載せる
-    const references = buildWideReferencesMarkdown(state.wideResearch.sources);
-    if (references) {
-      finalContent = appendReferencesSection(finalContent, references);
-      referencesCount = selectWideReferences(state.wideResearch.sources).length;
+    // ページを読みに行って本当のタイトルを取る（1 件 4 秒まで・同時に取る）
+    const references = await buildWideReferencesMarkdown(state.wideResearch.sources);
+    if (references.markdown) {
+      finalContent = appendReferencesSection(finalContent, references.markdown);
+      referencesCount = references.count;
     }
   }
 

@@ -9,6 +9,7 @@ import {
   sleep,
 } from '../../../src/shared/geminiCore.ts';
 import type { GenerationRun } from '../scheduler-executor/_run.ts';
+import { enrichReferenceTitles, formatReferenceLine, type PageTitleResult } from '../../../src/shared/pageTitles.ts';
 
 export type WideResearchPart = 'top_a' | 'top_b' | 'voices' | 'official';
 
@@ -182,17 +183,22 @@ export function selectWideReferences(sources: WideResearch['sources'], maxItems 
   return sources.filter((s) => /^https?:\/\//.test(s.url) && !NON_REFERENCE_PATTERN.test(s.url)).slice(0, maxItems);
 }
 
-export function buildWideReferencesMarkdown(sources: WideResearch['sources'], maxItems = 5): string {
-  const refs = selectWideReferences(sources, maxItems);
-  if (refs.length === 0) return '';
-  const label = (url: string, title: string) => {
-    try {
-      return new URL(url).hostname.replace(/^www\./, '');
-    } catch {
-      return title;
-    }
+// 参考資料を「ページタイトル（ドメイン名）」のリンクで作る。存在しないページ（404）は外して次の候補で埋める
+// 2026-11-13 ドメイン名だけの一覧だと何の資料か分からないと指摘があった
+export async function buildWideReferencesMarkdown(
+  sources: WideResearch['sources'],
+  maxItems = 5,
+  fetcher?: (url: string) => Promise<PageTitleResult>,
+): Promise<{ markdown: string; count: number; titled: number }> {
+  const candidates = selectWideReferences(sources, maxItems + 3);
+  if (candidates.length === 0) return { markdown: '', count: 0, titled: 0 };
+  const refs = await enrichReferenceTitles(candidates, maxItems, fetcher);
+  if (refs.length === 0) return { markdown: '', count: 0, titled: 0 };
+  return {
+    markdown: ['## 参考資料', '', ...refs.map(formatReferenceLine)].join('\n'),
+    count: refs.length,
+    titled: refs.filter((r) => r.fetchedTitle).length,
   };
-  return ['## 参考資料', '', ...refs.map((s) => `- [${label(s.url, s.title)}](${s.url})`)].join('\n');
 }
 
 // 書く AI に渡す材料（検索で確かめられなかった調査は「参考程度」と明記する）

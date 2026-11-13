@@ -2,14 +2,14 @@
 import { countGeneratedChars } from '../../../src/shared/articleGenerationCore.ts';
 import { trimForLog } from './_shared.ts';
 import { convertMarkdownLinksToHtml } from '../../../src/shared/markdownLinks.ts';
-import { renderMarkdownTableHtml } from '../../../src/shared/markdownTable.ts';
+import { renderMarkdownTableStyledHtml } from '../../../src/shared/markdownTable.ts';
 
 export function splitLongParagraphForReadability(text: string): string[] {
   const normalized = String(text || '').replace(/\s+/g, ' ').trim();
   if (!normalized) return [];
 
   const sentences = normalized
-    .split(/(?<=[邵ｲ繧托ｽｼ繝ｻ・ｼ繝ｻ?])\s*/g)
+    .split(/(?<=[。！？!?])\s*/g)
     .map((s) => s.trim())
     .filter(Boolean);
 
@@ -31,7 +31,14 @@ export function splitLongParagraphForReadability(text: string): string[] {
   }
 
   if (buffer.length > 0) {
-    chunks.push(buffer.join(''));
+    const rest = buffer.join('');
+    // 最後に 1 文だけ残ったときは、短ければ前の段落につなげる（1 文だけの段落を作らない）
+    const prev = chunks[chunks.length - 1];
+    if (buffer.length === 1 && prev && prev.length + rest.length <= 200) {
+      chunks[chunks.length - 1] = prev + rest;
+    } else {
+      chunks.push(rest);
+    }
   }
 
   return chunks.length > 0 ? chunks : [normalized];
@@ -55,7 +62,7 @@ export function renderBufferedBlock(lines: string[]): string[] {
   }
 
   // Markdown の表（| で始まり、2 行目が区切り行）を HTML の表にする
-  const table = renderMarkdownTableHtml(cleaned);
+  const table = renderMarkdownTableStyledHtml(cleaned);
   if (table) return [table];
 
   const isOrderedList = cleaned.every((line) => /^\d+[.)]\s+/.test(line));
@@ -68,7 +75,11 @@ export function renderBufferedBlock(lines: string[]): string[] {
     return [`<ol>\n${items}\n</ol>`];
   }
 
-  const merged = cleaned.join(' ').replace(/\s+/g, ' ').trim();
+  // 日本語の行どうしは空白なしでつなぐ（英数字どうしのときだけ空白を入れる）
+  const merged = cleaned
+    .reduce((acc, line) => (acc && /[A-Za-z0-9]$/.test(acc) && /^[A-Za-z0-9]/.test(line) ? `${acc} ${line}` : acc + line), '')
+    .replace(/\s+/g, ' ')
+    .trim();
   return splitLongParagraphForReadability(merged).map((paragraph) => `<p>${paragraph}</p>`);
 }
 
@@ -93,6 +104,10 @@ export function wrapPlainTextBlocksWithParagraphs(text: string): string {
   for (const rawLine of lines) {
     const line = String(rawLine || '').trim();
     if (!line) {
+      // 文の途中（「、」「・」で終わる行）の空行は段落の切れ目にしない
+      // 2026-11-13 「室内機・室外機・」で段落が切れて「リモコン…」が次の段落になった
+      const last = buffer[buffer.length - 1] || '';
+      if (/[、・，,]$/.test(last)) continue;
       flushBuffer();
       continue;
     }
@@ -410,7 +425,7 @@ export function shouldRemoveLeadingTitleLine(line: string, articleTitle: string)
 
   const looksHeadingLike = isHeadingLine(line) || (
     raw.length <= 80 &&
-    !/[邵ｲ繧托ｽｼ繝ｻ・ｼ繝ｻ!?]$/.test(raw) &&
+    !/[。！？!?]$/.test(raw) &&
     /[A-Za-z0-9\u3040-\u30ff\u3400-\u9fff]/.test(raw)
   );
   if (!looksHeadingLike) return false;
@@ -419,7 +434,7 @@ export function shouldRemoveLeadingTitleLine(line: string, articleTitle: string)
   const normalizedTitle = normalizeComparableText(articleTitle);
   if (!normalizedLine || !normalizedTitle) return false;
 
-  const withoutSummary = normalizeComparableText(raw.replace(/繝ｻ驛・ｽｦ竏ｫ・ｴ繝ｻ・ｼ讎蚕(髫補悪・ｴﾐｫ)|邵ｲ蜊・ｦ竏ｫ・ｴ繝ｻﾂ謗・囎竏ｫ・ｴ繝ｻ/g, ''));
+  const withoutSummary = normalizeComparableText(raw.replace(/（要約）|\(要約\)|【要約】/g, ''));
   if (normalizedLine === normalizedTitle) return true;
   if (withoutSummary === normalizedTitle) return true;
   // Only remove via prefix match when the line is close in length to the title
@@ -427,7 +442,7 @@ export function shouldRemoveLeadingTitleLine(line: string, articleTitle: string)
   const lineIsShortEnough = raw.length <= articleTitle.length * 1.3 + 10;
   if (lineIsShortEnough && (normalizedLine.startsWith(normalizedTitle) || normalizedTitle.startsWith(normalizedLine))) return true;
 
-  const hasSummarySuffix = /(繝ｻ驛・ｽｦ竏ｫ・ｴ繝ｻ・ｼ讎蚕(髫補悪・ｴﾐｫ)|邵ｲ蜊・ｦ竏ｫ・ｴ繝ｻﾂ謗・囎竏ｫ・ｴ繝ｻ)/.test(raw);
+  const hasSummarySuffix = /(（要約）|\(要約\)|【要約】)/.test(raw);
   if (hasSummarySuffix && (normalizedLine.includes(normalizedTitle) || withoutSummary.includes(normalizedTitle))) {
     return true;
   }

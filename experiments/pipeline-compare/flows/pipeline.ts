@@ -153,7 +153,7 @@ export async function runPipelineFlow(params: { keyword: string; targetWordCount
     targetWordCount: state.lengthPlan?.targetChars || settings.targetWordCount,
     outline: state.outline,
     factSheet: state.factSheet || null,
-    referencesMarkdown: !state.factSheet && state.wideResearch ? buildWideReferencesMarkdown(state.wideResearch.sources) : undefined,
+    referencesMarkdown: !state.factSheet && state.wideResearch ? (await buildWideReferencesMarkdown(state.wideResearch.sources)).markdown : undefined,
   });
   const fc = state.factCheck;
   for (const r of fc?.results || []) {
