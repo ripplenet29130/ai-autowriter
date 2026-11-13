@@ -1,3 +1,4 @@
+import { CASUAL_TONE_INSTRUCTION } from '../shared/toneOptions';
 import { v4 as uuidv4 } from 'uuid';
 import {
     Article,
@@ -929,7 +930,7 @@ export class MultiStepGenerationService {
                     content: article.content,
                     factSheet,
                     toneInstruction: options?.tone === 'casual'
-                        ? 'やわらかく親しみやすい です・ます調'
+                        ? CASUAL_TONE_INSTRUCTION
                         : 'ビジネス読者向けの自然な です・ます調',
                     call: session.call,
                     critique: true,

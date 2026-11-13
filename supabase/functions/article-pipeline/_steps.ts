@@ -1,3 +1,4 @@
+import { CASUAL_TONE_INSTRUCTION } from '../../../src/shared/toneOptions.ts';
 // 新方式の工程（仕様書 4 章）。1 工程は 1 回の実行（120 秒以内）で終える。
 // どの工程も、それまでの途中経過（state）と最新の記事を DB から受け取り、結果を返す。
 import {
@@ -249,7 +250,7 @@ export interface StepResult {
 }
 
 const toneInstructionFor = (tone: WritingTone) =>
-  tone === 'casual' ? 'やわらかく親しみやすい です・ます調' : 'ビジネス読者向けの自然な です・ます調';
+  tone === 'casual' ? CASUAL_TONE_INSTRUCTION : 'ビジネス読者向けの自然な です・ます調';
 
 function addNote(state: JobState, note: string): void {
   state.notes = [...(state.notes || []), note];

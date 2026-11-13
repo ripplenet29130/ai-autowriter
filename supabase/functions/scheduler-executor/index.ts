@@ -1,3 +1,4 @@
+import { CASUAL_TONE_INSTRUCTION } from '../../../src/shared/toneOptions.ts';
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { DOMParser } from 'https://deno.land/x/deno_dom/deno-dom-wasm.ts';
 import { DEFAULT_TARGET_WORD_COUNT } from '../../../src/shared/generationPolicy.ts';
@@ -1402,7 +1403,7 @@ async function executeSchedule(
           content: fullContent,
           factSheet,
           toneInstruction: writingTone === 'casual'
-            ? 'やわらかく親しみやすい です・ます調'
+            ? CASUAL_TONE_INSTRUCTION
             : 'ビジネス読者向けの自然な です・ます調',
           customInstructions: customInstructions.trim() || undefined,
           call: run.call,

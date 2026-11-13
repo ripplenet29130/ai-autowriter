@@ -1,3 +1,4 @@
+import { CASUAL_TONE_INSTRUCTION } from './toneOptions.ts';
 type Tone = 'professional' | 'casual';
 type KeywordPreference = 'default' | 'ng' | 'essential';
 
@@ -21,7 +22,7 @@ function toneInstruction(tone: Tone): string {
     case 'professional':
       return '専門性は保ちつつ、読者からの相談に答えるような自然で読みやすい文体で書くこと。堅い報告書調ではなく、実務者がやさしく説明する温度感にすること。';
     case 'casual':
-      return '読みやすく親しみやすい文体で、くだけすぎず自然に説明すること。話し言葉に寄せすぎず、読者がすっと理解できる温度感にすること。';
+      return `${CASUAL_TONE_INSTRUCTION}。`;
     default:
       return '自然で読みやすい日本語で書くこと。';
   }

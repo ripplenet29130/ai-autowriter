@@ -1,3 +1,4 @@
+import { CASUAL_TONE_INSTRUCTION } from './toneOptions.ts';
 import type { ArticleStructureType } from './articleTypes.ts';
 import type { SearchConsolePromptQuery } from './articleGenerationCore.ts';
 import { MIN_CHARS_PER_HEADING, maxHeadingsForLength } from './generationPolicy.ts';
@@ -283,7 +284,7 @@ Estimated: [推定文字数]
 
 export function resolveToneInstruction(writingTone: string): string {
   if (writingTone === 'casual' || writingTone === 'friendly' || writingTone === 'desu_masu') {
-    return '親しみやすい文体。くだけすぎず、読者に自然に説明する。1文を長くしすぎず、自然な「です・ます」で書く。';
+    return `${CASUAL_TONE_INSTRUCTION}。1文を長くしすぎない。`;
   }
   return '専門性は保ちつつ、読者からの相談に答えるような自然で読みやすい文体。堅い報告書調、過度な敬語、営業文を避け、実務者がやさしく説明するように根拠に基づいて書く。1文を長くしすぎず、読者が次に何を判断すればよいか分かる表現にする。';
 }

@@ -1,3 +1,4 @@
+import { CASUAL_TONE_INSTRUCTION } from '../../../src/shared/toneOptions.ts';
 // スケジューラ用の記事生成パイプライン（セクション分割・シングルパス）
 import {
   DEFAULT_REVIEW_THINKING_BUDGET,
@@ -96,7 +97,7 @@ export function validateGeneratedArticleCompleteness(
 
 function buildToneInstruction(tone: WritingTone): string {
   return tone === 'casual'
-    ? 'Tone: natural, approachable Japanese. Use desu/masu consistently, but do not sound childish. Keep sentences short and easy to follow.'
+    ? `Tone (Japanese): ${CASUAL_TONE_INSTRUCTION}。Keep sentences short and easy to follow.`
     : 'Tone: natural professional Japanese for business readers. Write like an experienced practitioner answering a reader consultation. Avoid stiff report-like prose, manual-like prose, sales copy, and overusing overly polite phrases such as 「いたします」「させていただきます」「となります」. Keep sentences short, use concrete verbs, and make the next judgment/action clear for the reader.';
 }
 

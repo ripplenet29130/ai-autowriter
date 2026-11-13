@@ -1,3 +1,4 @@
+import { CASUAL_TONE_INSTRUCTION } from "../shared/toneOptions";
 ﻿import { AIConfig, GenerationPrompt } from "../types";
 import { supabase } from "./supabaseClient";
 import { imageGenerationService } from "./imageGenerationService";
@@ -822,7 +823,7 @@ JSON形式の配列（文字列のみの配列）で出力してください。
         case "professional":
           return "専門性は保ちつつ、読者からの相談に答えるような自然で読みやすい文体で書いてください。堅い報告書調ではなく、実務者がやさしく説明する温度感にしてください。";
         case "casual":
-          return "親しみやすく、くだけすぎない自然な文体で書いてください。話し言葉に寄せすぎず、読者がすっと理解できる温度感にしてください。";
+          return `${CASUAL_TONE_INSTRUCTION}。`;
         default:
           return "自然で読みやすい日本語で書いてください。";
       }
