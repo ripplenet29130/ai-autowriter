@@ -283,20 +283,27 @@ async function finalizeJob(supabase: any, job: any, state: JobState, settings: J
   const publishAllowed = Deno.env.get('ARTICLE_PIPELINE_ALLOW_PUBLISH') === 'true';
   const postStatus = settings.postStatus === 'publish' && publishAllowed && draftReasons.length === 0 ? 'publish' : 'draft';
 
+  // 出典は本文に載せるかどうかに関わらず作り、ジョブ結果（管理画面）に残す
+  // 2026-11-13 本文には載せないのを基本にした（スケジュールで ON にしたときだけ載せる）
   let referencesCount = 0;
-  if (settings.appendReferences && hasUsableFacts(state.factSheet)) {
-    const references = buildReferencesMarkdown(state.factSheet);
-    if (references) {
-      finalContent = appendReferencesSection(finalContent, references);
-      referencesCount = selectReferenceSources(state.factSheet).length;
+  let references: Array<{ title: string; url: string }> = [];
+  if (hasUsableFacts(state.factSheet)) {
+    references = selectReferenceSources(state.factSheet).map((s) => ({ title: s.title, url: s.url }));
+    if (settings.appendReferences) {
+      const markdown = buildReferencesMarkdown(state.factSheet);
+      if (markdown) {
+        finalContent = appendReferencesSection(finalContent, markdown);
+        referencesCount = references.length;
+      }
     }
-  } else if (settings.appendReferences && state.wideResearch?.sources?.length) {
-    // 1 回で書き切る書き方は根拠メモがないので、広い調査で読んだ出典（公式情報を優先）を載せる
+  } else if (state.wideResearch?.sources?.length) {
+    // 1 回で書き切る書き方は根拠メモがないので、広い調査で読んだ出典（公式情報を優先）を使う
     // ページを読みに行って本当のタイトルを取る（1 件 4 秒まで・同時に取る）
-    const references = await buildWideReferencesMarkdown(state.wideResearch.sources);
-    if (references.markdown) {
-      finalContent = appendReferencesSection(finalContent, references.markdown);
-      referencesCount = references.count;
+    const built = await buildWideReferencesMarkdown(state.wideResearch.sources);
+    references = built.refs;
+    if (settings.appendReferences && built.markdown) {
+      finalContent = appendReferencesSection(finalContent, built.markdown);
+      referencesCount = built.count;
     }
   }
 
@@ -444,7 +451,7 @@ async function finalizeJob(supabase: any, job: any, state: JobState, settings: J
     quality,
     postId,
     postUrl,
-    output: { postStatus, postId, postUrl, draftReasons, warnings, publishError, chars, referencesCount },
+    output: { postStatus, postId, postUrl, draftReasons, warnings, publishError, chars, referencesCount, references },
   };
 }
 

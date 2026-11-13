@@ -57,7 +57,7 @@ const defaultSettings: PipelineJobSettings = {
   tone: 'professional',
   qualityMode: 'high',
   customInstructions: '',
-  appendReferences: true,
+  appendReferences: false,
   writingStyle: 'oneshot',
 };
 
@@ -152,6 +152,11 @@ export const PipelineV2Panel: React.FC = () => {
 
   const versions: Array<{ label: string; content: string; chars: number }> = selected?.state?.versions || [];
   const shownContent = versionIndex !== null && versions[versionIndex] ? versions[versionIndex].content : selected?.content || '';
+  // 仕上げの工程が残した出典（本文に載せない設定でも確認できるように）
+  const sourceRefs: Array<{ title: string; url: string }> = [...steps]
+    .reverse()
+    .map((step) => step.output?.references)
+    .find((refs) => Array.isArray(refs) && refs.length > 0) || [];
   const critique = selected?.state?.critique;
   const factCheck = selected?.quality?.fact_check;
   const verdict = selected?.verdict;
@@ -383,6 +388,19 @@ export const PipelineV2Panel: React.FC = () => {
               <article className="prose prose-sm max-w-none border border-gray-200 rounded-lg p-4 max-h-[70vh] overflow-auto">
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>{shownContent}</ReactMarkdown>
               </article>
+            </div>
+          )}
+
+          {sourceRefs.length > 0 && (
+            <div>
+              <h3 className="font-semibold text-gray-900 mb-2 text-sm">調べた出典（本文には載せていない場合も確認用に残しています）</h3>
+              <ul className="list-disc pl-5 text-xs space-y-1">
+                {sourceRefs.map((ref) => (
+                  <li key={ref.url}>
+                    <a href={ref.url} target="_blank" rel="noopener noreferrer" className="text-blue-700 hover:underline break-all">{ref.title || ref.url}</a>
+                  </li>
+                ))}
+              </ul>
             </div>
           )}
 

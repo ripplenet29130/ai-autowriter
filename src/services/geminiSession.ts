@@ -38,10 +38,10 @@ export function getGenerationQualityPrefs(): GenerationQualityPrefs {
     const parsed = raw ? JSON.parse(raw) : {};
     return {
       qualityMode: normalizeQualityMode(parsed?.qualityMode),
-      appendReferences: parsed?.appendReferences !== false,
+      appendReferences: parsed?.appendReferences === true,
     };
   } catch {
-    return { qualityMode: DEFAULT_QUALITY_MODE, appendReferences: true };
+    return { qualityMode: DEFAULT_QUALITY_MODE, appendReferences: false };
   }
 }
 

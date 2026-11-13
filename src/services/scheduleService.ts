@@ -306,7 +306,7 @@ class ScheduleService {
             image_generation_enabled: schedule.image_generation_enabled ?? false,
             images_per_article: schedule.images_per_article ?? 0,
             quality_mode: schedule.quality_mode || 'high',
-            append_references: schedule.append_references ?? true,
+            append_references: schedule.append_references ?? false,
             length_mode: schedule.length_mode === 'fixed' ? 'fixed' : 'auto',
             pipeline_mode: schedule.pipeline_mode === 'v2' ? 'v2' : 'classic',
         };

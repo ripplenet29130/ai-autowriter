@@ -776,7 +776,7 @@ async function executeSchedule(
         tone: resolveWritingTone(schedule.writing_tone),
         qualityMode: normalizeQualityMode(schedule.quality_mode),
         customInstructions: customInstructions.trim(),
-        appendReferences: schedule.append_references !== false,
+        appendReferences: schedule.append_references === true,
         postStatus: schedule.post_status === 'publish' ? 'publish' : 'draft',
       },
     }).select('id').single();
@@ -1698,7 +1698,7 @@ async function executeSchedule(
 
   // 4.8 参考資料（根拠メモの出典）を記事末に付ける。文字数調整・見出し検査の後に付ける
   let referencesCount = 0;
-  if (schedule.append_references !== false && hasUsableFacts(factSheet)) {
+  if (schedule.append_references === true && hasUsableFacts(factSheet)) {
     const referencesMarkdown = buildReferencesMarkdown(factSheet);
     if (referencesMarkdown) {
       fullContent = appendReferencesSection(fullContent, referencesMarkdown);

@@ -132,7 +132,7 @@ export function normalizeJobSettings(raw: any): JobSettings {
     tone: raw?.tone === 'casual' ? 'casual' : 'professional',
     qualityMode: raw?.qualityMode === 'standard' ? 'standard' : 'high',
     customInstructions: String(raw?.customInstructions || '').trim(),
-    appendReferences: raw?.appendReferences !== false,
+    appendReferences: raw?.appendReferences === true,
     postStatus: raw?.postStatus === 'publish' ? 'publish' : 'draft',
   };
 }

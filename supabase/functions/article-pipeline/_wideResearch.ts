@@ -189,15 +189,17 @@ export async function buildWideReferencesMarkdown(
   sources: WideResearch['sources'],
   maxItems = 5,
   fetcher?: (url: string) => Promise<PageTitleResult>,
-): Promise<{ markdown: string; count: number; titled: number }> {
+): Promise<{ markdown: string; count: number; titled: number; refs: Array<{ title: string; url: string }> }> {
+  const empty = { markdown: '', count: 0, titled: 0, refs: [] };
   const candidates = selectWideReferences(sources, maxItems + 3);
-  if (candidates.length === 0) return { markdown: '', count: 0, titled: 0 };
+  if (candidates.length === 0) return empty;
   const refs = await enrichReferenceTitles(candidates, maxItems, fetcher);
-  if (refs.length === 0) return { markdown: '', count: 0, titled: 0 };
+  if (refs.length === 0) return empty;
   return {
     markdown: ['## 参考資料', '', ...refs.map(formatReferenceLine)].join('\n'),
     count: refs.length,
     titled: refs.filter((r) => r.fetchedTitle).length,
+    refs: refs.map((r) => ({ title: r.title, url: r.url })),
   };
 }
 

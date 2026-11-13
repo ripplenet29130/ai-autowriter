@@ -129,7 +129,7 @@ export const Scheduler: React.FC = () => {
     image_generation_enabled: false,
     images_per_article: 0,
     quality_mode: 'high' as 'high' | 'standard',
-    append_references: true,
+    append_references: false,
     length_mode: 'auto' as 'auto' | 'fixed',
     pipeline_mode: 'classic' as 'classic' | 'v2',
   });
@@ -486,7 +486,7 @@ export const Scheduler: React.FC = () => {
       image_generation_enabled: schedule.image_generation_enabled ?? false,
       images_per_article: schedule.images_per_article ?? 0,
       quality_mode: schedule.quality_mode === 'standard' ? 'standard' : 'high',
-      append_references: schedule.append_references ?? true,
+      append_references: schedule.append_references ?? false,
       // 列が無い・値が無い既存スケジュールは文字数指定のまま
       length_mode: schedule.length_mode === 'auto' ? 'auto' : 'fixed',
       pipeline_mode: schedule.pipeline_mode === 'v2' ? 'v2' : 'classic',
@@ -621,7 +621,7 @@ export const Scheduler: React.FC = () => {
       image_generation_enabled: false,
       images_per_article: 0,
       quality_mode: 'high',
-      append_references: true,
+      append_references: false,
       length_mode: 'auto',
       pipeline_mode: 'classic',
     });
@@ -1352,7 +1352,7 @@ export const Scheduler: React.FC = () => {
                 記事末に参考資料を付ける
               </label>
               <p className="mt-2 text-xs leading-relaxed text-gray-500">
-                根拠として使った出典（最大5件）を「参考資料」としてリンク付きで記事の最後に載せます。
+                根拠として使った出典（最大5件）を「参考資料」としてリンク付きで記事の最後に載せます。初期値は「載せない」です（載せない場合も、出典は新方式のジョブ結果で確認できます）。
               </p>
             </div>
 
