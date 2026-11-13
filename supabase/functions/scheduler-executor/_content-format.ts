@@ -3,54 +3,9 @@ import { countGeneratedChars } from '../../../src/shared/articleGenerationCore.t
 import { trimForLog } from './_shared.ts';
 import { convertMarkdownLinksToHtml } from '../../../src/shared/markdownLinks.ts';
 import { renderMarkdownTableStyledHtml } from '../../../src/shared/markdownTable.ts';
+import { splitLongParagraphForReadability } from '../../../src/shared/paragraphSplit.ts';
 
-export function splitLongParagraphForReadability(text: string): string[] {
-  const normalized = String(text || '').replace(/\s+/g, ' ').trim();
-  if (!normalized) return [];
-
-  const sentences = normalized
-    .split(/(?<=[。！？!?])\s*/g)
-    .map((s) => s.trim())
-    .filter(Boolean);
-
-  if (sentences.length <= 1) return [normalized];
-
-  // 2026-11-13 段落が長くて読みにくいとの声。1 段落は 2 文・100 字までを目安に切る（以前は 140 字・最大 200 字）
-  const MAX_PARAGRAPH_CHARS = 100;
-  const chunks: string[] = [];
-  let buffer: string[] = [];
-  let charCount = 0;
-
-  for (const sentence of sentences) {
-    // 次の文を足すと長くなりすぎるときは、先に段落を切る
-    if (buffer.length > 0 && charCount + sentence.length > MAX_PARAGRAPH_CHARS) {
-      chunks.push(buffer.join(''));
-      buffer = [];
-      charCount = 0;
-    }
-    buffer.push(sentence);
-    charCount += sentence.length;
-
-    if (buffer.length >= 2 || charCount >= MAX_PARAGRAPH_CHARS) {
-      chunks.push(buffer.join(''));
-      buffer = [];
-      charCount = 0;
-    }
-  }
-
-  if (buffer.length > 0) {
-    const rest = buffer.join('');
-    // 最後に 1 文だけ残ったときは、短ければ前の段落につなげる（1 文だけの段落を作らない）
-    const prev = chunks[chunks.length - 1];
-    if (buffer.length === 1 && prev && prev.length + rest.length <= MAX_PARAGRAPH_CHARS) {
-      chunks[chunks.length - 1] = prev + rest;
-    } else {
-      chunks.push(rest);
-    }
-  }
-
-  return chunks.length > 0 ? chunks : [normalized];
-}
+export { splitLongParagraphForReadability };
 
 
 // 箇条書きの点・番号と字下げを直接付ける（テーマが list-style を消していても点が出るように）

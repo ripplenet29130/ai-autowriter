@@ -1,5 +1,7 @@
 import { convertMarkdownLinksToHtml } from '../../../src/shared/markdownLinks.ts';
 import { isMarkdownTableLine, renderMarkdownTableGutenberg } from '../../../src/shared/markdownTable.ts';
+import { splitLongParagraphForReadability } from '../../../src/shared/paragraphSplit.ts';
+import { normalizeBulletsForPreview } from '../../../src/shared/previewMarkdown.ts';
 
 /** Convert the review editor's Markdown to native Gutenberg blocks. */
 export function toGutenbergBlocks(content: string): string {
@@ -23,7 +25,9 @@ export function toGutenbergBlocks(content: string): string {
     tableLines = [];
   };
 
-  for (const rawLine of content.replace(/\r\n?/g, '\n').split('\n')) {
+  // 2026-11-13 レビュー画面から投稿した記事は段落が長いまま・「・」の箇条書きが 1 段落のままだった
+  // プレビューと同じく「・」を箇条書きに直してから変換する
+  for (const rawLine of normalizeBulletsForPreview(content).split('\n')) {
     const line = rawLine.trim();
     if (isMarkdownTableLine(line)) {
       flushList();
@@ -55,7 +59,10 @@ export function toGutenbergBlocks(content: string): string {
     if (/^<(?:h[1-6]|p|ul|ol|blockquote|figure|table)\b/i.test(line)) {
       blocks.push(line);
     } else {
-      blocks.push(`<!-- wp:paragraph -->\n<p>${formatInline(line)}</p>\n<!-- /wp:paragraph -->`);
+      // 長い段落は 2 文・100 字くらいで分ける（スケジューラー投稿と同じルール）
+      for (const paragraph of splitLongParagraphForReadability(line)) {
+        blocks.push(`<!-- wp:paragraph -->\n<p>${formatInline(paragraph)}</p>\n<!-- /wp:paragraph -->`);
+      }
     }
   }
 
