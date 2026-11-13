@@ -8,6 +8,7 @@ import {
 import {
   buildAutoModeQualityInstructions,
   buildAutoOutlineRetryInstructions,
+  capOutlineHeadings,
   compactAutoModeInstructions,
   evaluateAutoOutlineQuality,
 } from '../../../src/shared/autoModeQuality.ts';
@@ -495,6 +496,12 @@ async function stepPlan(ctx: StepContext): Promise<StepResult> {
   // 上位モデルの構成案は 1 回 30〜50 秒かかるため、作り直しは時間が十分あるときだけ
   if (!quality.passed && ctx.run.hasTime(65_000)) {
     outline = await makeOutline(buildAutoOutlineRetryInstructions(quality.issues));
+  }
+  // 文字数に対して見出しが多すぎると本文で見出しがまとめられて失敗するため、上限まで減らす
+  const cappedOutline = capOutlineHeadings(outline.sections, lengthPlan.maxHeadings);
+  if (cappedOutline.removed.length > 0) {
+    outline = { ...outline, sections: cappedOutline.sections };
+    addNote(state, `見出しが多すぎたため、${cappedOutline.removed.length}個を他の見出しにまとめました（${cappedOutline.removed.join(' / ').slice(0, 120)}）`);
   }
 
   let sectionFactIds: string[][] | undefined;

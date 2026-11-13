@@ -706,17 +706,27 @@ export async function clearScheduleExecutionState(
 }
 
 
+// 1 回の実行中に決まったタイトル・キーワードと、その実行の履歴の行
+export interface ScheduleRunInfo {
+  title?: string;
+  keyword?: string;
+  historyId?: string | null;
+}
+
 export async function recordScheduleExecutionFailure(
   supabase: any,
   schedule: Schedule,
   wpConfig: WordPressConfig,
   aiConfig: AIConfig,
   error: unknown,
-  triggerType: 'manual' | 'automatic' = 'automatic'
+  triggerType: 'manual' | 'automatic' = 'automatic',
+  runInfo: ScheduleRunInfo = {}
 ): Promise<void> {
   if (isPublishFailureAlreadyRecorded(error)) return;
 
   const reason = formatScheduleFailureReason(error);
+  const runTitle = String(runInfo.title || '').trim();
+  const runKeyword = String(runInfo.keyword || '').trim();
   try {
     const failureHistoryPayload: Record<string, any> = {
       account_id: schedule.account_id || wpConfig.account_id || null,
@@ -724,8 +734,8 @@ export async function recordScheduleExecutionFailure(
       schedule_id: schedule.id,
       wordpress_config_id: wpConfig.id,
       executed_at: new Date().toISOString(),
-      keyword_used: getFirstScheduleKeyword(schedule),
-      article_title: '',
+      keyword_used: runKeyword || getFirstScheduleKeyword(schedule),
+      article_title: runTitle,
       wordpress_post_id: '',
       status: 'failed',
       error_message: reason,
@@ -742,20 +752,38 @@ export async function recordScheduleExecutionFailure(
       },
       estimated_cost_usd: 0,
     };
-    let runningHistoryId: string | null = null;
-    let insertResult = await supabase
-      .from('execution_history')
-      .select('id')
-      .eq('schedule_id', schedule.id)
-      .eq('status', 'running')
-      .order('executed_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    let runningHistoryId: string | null = runInfo.historyId || null;
+    let insertResult: any = { error: null, data: runningHistoryId ? { id: runningHistoryId } : null };
+    if (!runningHistoryId) {
+      insertResult = await supabase
+        .from('execution_history')
+        .select('id')
+        .eq('schedule_id', schedule.id)
+        .eq('status', 'running')
+        .order('executed_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+    }
 
     if (!insertResult.error && insertResult.data?.id) {
       runningHistoryId = insertResult.data.id;
-      // 実行中の行に入っているタイトルは残す（失敗回数をタイトル単位で数えるため）
-      delete failureHistoryPayload.article_title;
+      // この実行の行を失敗にする。途中で別の処理に「失敗」にされていても同じ行を使い、行を増やさない。
+      // タイトルが分からない時は、行に入っているタイトルを残す（失敗回数をタイトル単位で数えるため）
+      if (!runTitle) delete failureHistoryPayload.article_title;
+      if (!runKeyword) delete failureHistoryPayload.keyword_used;
+      // 途中で記録した構成案の情報（H2/H3 の数や見出し）は、失敗の原因を調べるために残す
+      const existing = await supabase
+        .from('execution_history')
+        .select('cost_breakdown')
+        .eq('id', runningHistoryId)
+        .maybeSingle();
+      const previousDebug = existing?.data?.cost_breakdown?.generation_debug;
+      if (!existing?.error && previousDebug && typeof previousDebug === 'object') {
+        failureHistoryPayload.cost_breakdown.generation_debug = {
+          ...previousDebug,
+          ...failureHistoryPayload.cost_breakdown.generation_debug,
+        };
+      }
       insertResult = await supabase
         .from('execution_history')
         .update(failureHistoryPayload)

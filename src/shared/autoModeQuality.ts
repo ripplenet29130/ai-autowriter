@@ -113,6 +113,76 @@ export function evaluateAutoOutlineQuality(
   return { passed: issues.length === 0, issues };
 }
 
+interface CappableSection {
+  title: string;
+  level?: number;
+  isLead?: boolean;
+  description?: string;
+  estimatedWordCount?: number;
+  order?: number;
+}
+
+// 構成案の見出し（導入を除く）が上限を超えたら、プログラムで上限まで減らす。
+// AI に「最大◯個」と頼んでも守られないことがあり、文字数に対して見出しが多すぎると
+// 本文で見出しがまとめて書かれて「見出しが足りない」エラーになるため。
+// 1. 後ろの H3 から順に、親の H2 の説明に論点として移す
+// 2. それでも多ければ、後ろの H2（まとめ以外）を 1 つ前の H2 の説明に移す
+// 消した見出しの話題は説明に残すので、本文では扱われる
+export function capOutlineHeadings<T extends CappableSection>(
+  sections: T[],
+  maxHeadings: number
+): { sections: T[]; removed: string[] } {
+  const result = sections.map((section) => ({ ...section }));
+  const removed: string[] = [];
+  const nonLeadCount = () => result.filter((section) => !section.isLead).length;
+  if (!(maxHeadings > 0) || nonLeadCount() <= maxHeadings) {
+    return { sections: result, removed };
+  }
+
+  const mergeInto = (targetIndex: number, source: T) => {
+    const target = result[targetIndex];
+    const topic = [source.title, source.description].map((part) => String(part || '').trim()).filter(Boolean).join('：');
+    target.description = [String(target.description || '').trim(), `あわせて扱う論点: ${topic}`]
+      .filter(Boolean)
+      .join(' / ');
+    if (Number(source.estimatedWordCount) > 0) {
+      target.estimatedWordCount = (Number(target.estimatedWordCount) || 0) + Number(source.estimatedWordCount);
+    }
+  };
+  const findPreviousH2 = (index: number) => {
+    for (let i = index - 1; i >= 0; i -= 1) {
+      if (!result[i].isLead && result[i].level !== 3) return i;
+    }
+    return -1;
+  };
+
+  // 1. H3 を後ろから減らす
+  for (let i = result.length - 1; i >= 0 && nonLeadCount() > maxHeadings; i -= 1) {
+    const section = result[i];
+    if (section.isLead || section.level !== 3) continue;
+    const parent = findPreviousH2(i);
+    if (parent >= 0) mergeInto(parent, section);
+    removed.push(section.title);
+    result.splice(i, 1);
+  }
+
+  // 2. まとめ以外の H2 を後ろから減らす（最初の H2 とまとめは残す）
+  for (let i = result.length - 1; i >= 0 && nonLeadCount() > maxHeadings; i -= 1) {
+    const section = result[i];
+    if (section.isLead || section.level === 3 || isSummaryTitle(section.title)) continue;
+    const previous = findPreviousH2(i);
+    if (previous < 0) continue;
+    mergeInto(previous, section);
+    removed.push(section.title);
+    result.splice(i, 1);
+  }
+
+  result.forEach((section, index) => {
+    if (typeof section.order === 'number') section.order = index;
+  });
+  return { sections: result, removed };
+}
+
 export function buildAutoOutlineRetryInstructions(issues: string[]): string {
   return [
     '自動モード再生成指示:',

@@ -20,6 +20,7 @@ import {
 import {
   buildAutoModeQualityInstructions,
   buildAutoOutlineRetryInstructions,
+  capOutlineHeadings,
   compactAutoModeInstructions,
   evaluateAutoOutlineQuality,
 } from '../../../src/shared/autoModeQuality.ts';
@@ -74,7 +75,7 @@ import {
 
 import { corsHeaders, parseBoolean, fetchWithTimeout, AiOutputTruncatedError, KeywordExhaustedError, isKeywordExhaustedError, getCurrentJstDate, parseJstDate, isWithinScheduleDateRange, normalizeAiConfig, resolveWritingTone, normalizeWhitespace, trimForLog, getFirstScheduleKeyword, AI_REQUEST_TIMEOUT_MS, SCHEDULE_EXECUTION_LOCK_TTL_SECONDS, type AIConfig, type Schedule, type WordPressConfig, type ScheduleExecutionLock, type ArticleOutline, type OutlineSection, type WritingTone } from './_shared.ts';
 import { identifySchedulerCaller, authorizeSchedulerRequest, type SchedulerCaller } from './_auth.ts';
-import { pauseExhaustedSchedule, acquireScheduleExecutionLock, releaseScheduleExecutionLock, acquireScheduleExecutionLockWithScheduleRow, createExecutionProgressHistory, updateExecutionProgressHistory, shouldExecuteNow, wasExecutedWithinMinutes, countExecutionsForWpConfigWithinMinutes, getLastAutomaticExecutionForCadence, markStaleRunningExecutionsFailed, clearScheduleExecutionState, recordScheduleExecutionFailure, recordForceExecutionSkippedByLock, formatScheduleFailureReason, isPublishFailureAlreadyRecorded, isMissingColumnError, isMissingUpdatedAtColumn } from './_execution-state.ts';
+import { pauseExhaustedSchedule, acquireScheduleExecutionLock, releaseScheduleExecutionLock, acquireScheduleExecutionLockWithScheduleRow, createExecutionProgressHistory, updateExecutionProgressHistory, shouldExecuteNow, wasExecutedWithinMinutes, countExecutionsForWpConfigWithinMinutes, getLastAutomaticExecutionForCadence, markStaleRunningExecutionsFailed, clearScheduleExecutionState, recordScheduleExecutionFailure, recordForceExecutionSkippedByLock, formatScheduleFailureReason, isPublishFailureAlreadyRecorded, isMissingColumnError, isMissingUpdatedAtColumn, type ScheduleRunInfo } from './_execution-state.ts';
 import { callAI, resolveAiModelRate, estimateExecutionCostBreakdown, fetchStyleReferenceSample, buildStyleReferenceInstructions, truncateForStyleReference, generateTitleWithAI } from './_ai.ts';
 import { conductCompetitorResearch, conductCompetitorResearchWithFallback, conductCompetitorResearchViaEdgeFunction, extractRelatedKeywordsFromCompetitorData, extractCompetitorHeadings, fetchRelatedKeywordsViaCustomSearch } from './_research.ts';
 import { formatContentForWordPress, normalizeGeneratedContentForPublishing, extractExcerpt, inferLengthCategory, countNonSummaryHeadings, findHeadingOnlySections, summarizeFactCheckContentChanges } from './_content-format.ts';
@@ -515,6 +516,8 @@ Deno.serve(async (req: Request) => {
                 }),
           };
 
+          // 実行中に決まったタイトル・キーワード・実行履歴の行。失敗した時の記録に使う
+          const runInfo: ScheduleRunInfo = {};
           try {
             await executeSchedule(
               effectiveScheduleSetting,
@@ -531,7 +534,8 @@ Deno.serve(async (req: Request) => {
               // Gemini 以外で生成する場合も、ファクトチェックは同じユーザーの Gemini キーで行う
               accountAiConfigs.find((config) =>
                 String(config.provider || '').toLowerCase() === 'gemini' && String(config.api_key || '').trim()
-              )?.api_key || null
+              )?.api_key || null,
+              runInfo
             );
             stats.executed += 1;
             executedWpConfigIds.add(wpConfig.id);
@@ -556,7 +560,8 @@ Deno.serve(async (req: Request) => {
                 wpConfig,
                 effectiveAiConfig,
                 error,
-                forceExecute ? 'manual' : 'automatic'
+                forceExecute ? 'manual' : 'automatic',
+                runInfo
               );
               await notifyScheduleExecutionFailure(
                 effectiveScheduleSetting,
@@ -640,7 +645,8 @@ async function executeSchedule(
   imageCostUsdPerImage: number,
   schedulerStartTime: number,
   triggerType: 'manual' | 'automatic' = 'automatic',
-  geminiApiKeyFallback: string | null = null
+  geminiApiKeyFallback: string | null = null,
+  runInfo: ScheduleRunInfo = {}
 ) {
   // 1. 鬨ｾ蠅難ｽｻ阮吶・驛｢譎｢・ｽ・｢驛｢譎｢・ｽ・ｼ驛｢譎擾ｽｳ・ｨ遶頑･｢謳上・・ｺ驍ｵ・ｺ繝ｻ・･驍ｵ・ｺ郢晢ｽｻ遯ｶ・ｻ驛｢・ｧ繝ｻ・ｿ驛｢譎｢・ｽ・ｼ驛｢・ｧ繝ｻ・ｲ驛｢譏ｴ繝ｻ郢晢ｽｨ郢晢ｽｻ陋ｹ・ｻ邵ｺ蜀暦ｽｹ譎｢・ｽ・ｼ驛｢譎｢・ｽ・ｯ驛｢譎｢・ｽ・ｼ驛｢譎擾ｽｳ・ｨ遶擾ｽｪ驍ｵ・ｺ雋・･繝ｻ驛｢・ｧ繝ｻ・ｿ驛｢・ｧ繝ｻ・､驛｢譎冗樟・取亢繝ｻ陝ｲ・ｨ繝ｻ螳夲ｽｱ雜｣・ｽ・ｺ髯橸ｽｳ郢晢ｽｻ
   let keyword = '';
@@ -727,8 +733,11 @@ async function executeSchedule(
     progress: 10,
     aiConfig,
   });
+  runInfo.title = fixedTitle || '';
+  runInfo.keyword = keyword;
+  runInfo.historyId = progressHistoryId;
 
-  // 1.5 驛｢譎丞ｹｲ・取ｺｽ・ｹ譎｢・ｽ・ｳ驛｢譎丞ｹｲ郢晢ｽｨ驛｢・ｧ繝ｻ・ｻ驛｢譏ｴ繝ｻ郢晢ｽｨ驍ｵ・ｺ繝ｻ・ｮ髯ｷ・ｿ鬮｢ﾂ繝ｻ・ｾ隴会ｽｦ繝ｻ・ｼ陋ｹ・ｻ遶包｣ｰ驛｢・ｧ陟募ｾ後・郢晢ｽｻ郢晢ｽｻ
+  // 1.5驛｢譎丞ｹｲ・取ｺｽ・ｹ譎｢・ｽ・ｳ驛｢譎丞ｹｲ郢晢ｽｨ驛｢・ｧ繝ｻ・ｻ驛｢譏ｴ繝ｻ郢晢ｽｨ驍ｵ・ｺ繝ｻ・ｮ髯ｷ・ｿ鬮｢ﾂ繝ｻ・ｾ隴会ｽｦ繝ｻ・ｼ陋ｹ・ｻ遶包｣ｰ驛｢・ｧ陟募ｾ後・郢晢ｽｻ郢晢ｽｻ
   let customInstructions = '';
   if (schedule.prompt_set_id) {
     let promptSetQuery = supabase
@@ -970,6 +979,7 @@ async function executeSchedule(
     const competitorTitles = (competitorData?.articles || []).map((a: any) => a.title).filter(Boolean);
     const generatedTitle = await generateTitleWithAI(keyword, relatedKeywords, competitorTitles, aiConfig, competitorData);
     fixedTitle = generatedTitle;
+    runInfo.title = generatedTitle;
     console.log(`AI-generated title: ${fixedTitle}`);
   }
   await updateExecutionProgressHistory(supabase, progressHistoryId, {
@@ -1070,6 +1080,13 @@ async function executeSchedule(
         tone: writingTone,
         callAI: (prompt, maxTokens) => callAI(prompt, aiConfig, maxTokens)
       });
+    }
+
+    // 文字数に対して見出しが多すぎると本文で見出しがまとめられて失敗するため、上限まで減らす
+    const cappedOutline = capOutlineHeadings(outline.sections, lengthPlan.maxHeadings);
+    if (cappedOutline.removed.length > 0) {
+      console.warn(`[outline] Too many headings for ${targetWordCount} chars; merged into other sections: ${cappedOutline.removed.join(' / ')}`);
+      outline = { ...outline, sections: cappedOutline.sections };
     }
 
     await updateExecutionProgressHistory(supabase, progressHistoryId, {
