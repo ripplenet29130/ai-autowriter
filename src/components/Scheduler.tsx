@@ -1,5 +1,5 @@
 ﻿import React, { useState, useEffect, useMemo } from 'react';
-import { AlertCircle, Calendar, Globe, Clock, Tag, Trash2, Edit2, Power, MessageSquare, Zap } from 'lucide-react';
+import { AlertCircle, Calendar, Globe, Clock, Tag, Trash2, Edit2, Power, MessageSquare, Zap, ChevronDown, ChevronRight } from 'lucide-react';
 import { scheduleService } from '../services/scheduleService';
 import { supabaseSchedulerService } from '../services/supabaseSchedulerService';
 import { supabase } from '../services/supabaseClient';
@@ -81,6 +81,11 @@ export const Scheduler: React.FC = () => {
   const [schedules, setSchedules] = useState<ScheduleSetting[]>([]);
   const [usedKeywordsMap, setUsedKeywordsMap] = useState<Record<string, string[]>>({});
   const [usedTitlesMap, setUsedTitlesMap] = useState<Record<string, string[]>>({});
+  // スケジュール一覧のターゲットキーワード／タイトルの開閉（初期は閉じる）
+  // 2026-11-13 一覧が長くなって分かりにくいとの声
+  const [openTargetLists, setOpenTargetLists] = useState<Record<string, boolean>>({});
+  const toggleTargetList = (key: string) =>
+    setOpenTargetLists((prev) => ({ ...prev, [key]: !prev[key] }));
   const [lastExecutionMap, setLastExecutionMap] = useState<Record<string, string | null>>({});
   const [executionHistory, setExecutionHistory] = useState<ExecutionHistoryRow[]>([]);
   const [selectedFailedHistoryIds, setSelectedFailedHistoryIds] = useState<string[]>([]);
@@ -1749,6 +1754,9 @@ export const Scheduler: React.FC = () => {
                 const keywordsList = schedule.keyword ? schedule.keyword.split(',').map(k => k.trim()).filter(k => k) : [];
                 const usedList = schedule.id ? (usedKeywordsMap[schedule.id] || []) : [];
                 const promptSetName = getPromptSetName(schedule.prompt_set_id);
+                const listKey = schedule.id || `index-${index}`;
+                const keywordsOpen = !!openTargetLists[`${listKey}:keywords`];
+                const titlesOpen = !!openTargetLists[`${listKey}:titles`];
                 const nextRunAt = schedule.status ? getNextExecutionDate(schedule) : null;
                 const showActiveHeader = schedule.status && index === 0;
                 const showInactiveHeader = !schedule.status && index === activeSchedules.length;
@@ -1977,10 +1985,16 @@ export const Scheduler: React.FC = () => {
 
                     <div>
                       <div className="flex items-center justify-between mb-2">
-                        <h4 className="text-sm font-bold text-gray-700 flex items-center">
+                        <button
+                          type="button"
+                          onClick={() => toggleTargetList(`${listKey}:keywords`)}
+                          className="text-sm font-bold text-gray-700 flex items-center hover:text-blue-600"
+                          aria-expanded={keywordsOpen}
+                        >
+                          {keywordsOpen ? <ChevronDown className="w-4 h-4 mr-1 text-gray-400" /> : <ChevronRight className="w-4 h-4 mr-1 text-gray-400" />}
                           <Tag className="w-4 h-4 mr-2 text-blue-500" />
                           ターゲットキーワード ({keywordsList.length})
-                        </h4>
+                        </button>
                         <div className="flex items-center gap-2">
                           <span className="text-xs text-gray-500">
                             {usedList.length} / {keywordsList.length} 消化済み
@@ -1997,6 +2011,7 @@ export const Scheduler: React.FC = () => {
                           )}
                         </div>
                       </div>
+                      {keywordsOpen && (
                       <div className="flex flex-wrap gap-2">
                         {keywordsList.map((k, i) => {
                           const isUsed = usedList.includes(k);
@@ -2026,6 +2041,7 @@ export const Scheduler: React.FC = () => {
                           <span className="text-sm text-gray-400 italic">キーワードが設定されていません</span>
                         )}
                       </div>
+                      )}
                     </div>
                     {/* Target Titles (Only if Title Set is selected) */}
                     {(schedule.title_set_id || (schedule as any).title_set_id) && (() => {
@@ -2038,10 +2054,16 @@ export const Scheduler: React.FC = () => {
                       return (
                         <div className="mt-4 pt-4 border-t border-gray-100">
                           <div className="flex items-center justify-between mb-2">
-                            <h4 className="text-sm font-bold text-gray-700 flex items-center">
+                            <button
+                              type="button"
+                              onClick={() => toggleTargetList(`${listKey}:titles`)}
+                              className="text-sm font-bold text-gray-700 flex items-center hover:text-purple-600"
+                              aria-expanded={titlesOpen}
+                            >
+                              {titlesOpen ? <ChevronDown className="w-4 h-4 mr-1 text-gray-400" /> : <ChevronRight className="w-4 h-4 mr-1 text-gray-400" />}
                               <MessageSquare className="w-4 h-4 mr-2 text-purple-500" />
                               ターゲットタイトル ({titleSet.titles.length})
-                            </h4>
+                            </button>
                             <div className="flex items-center gap-2">
                               <span className="text-xs text-gray-500">
                                 {usedTitles.length} / {titleSet.titles.length} 消化済み
@@ -2058,6 +2080,7 @@ export const Scheduler: React.FC = () => {
                               )}
                             </div>
                           </div>
+                          {titlesOpen && (
                           <div className="flex flex-col gap-1">
                             {titleSet.titles.map((title, i) => {
                               const isUsed = usedTitles.includes(title);
@@ -2087,6 +2110,7 @@ export const Scheduler: React.FC = () => {
                               );
                             })}
                           </div>
+                          )}
                         </div>
                       );
                     })()}
