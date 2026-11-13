@@ -54,7 +54,7 @@ const elapsed = (job: PipelineJob) => {
 const defaultSettings: PipelineJobSettings = {
   lengthMode: 'auto',
   targetWordCount: 3000,
-  tone: 'professional',
+  tone: 'casual',
   qualityMode: 'high',
   customInstructions: '',
   appendReferences: false,

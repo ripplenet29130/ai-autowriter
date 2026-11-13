@@ -32,7 +32,7 @@ export function useArticleGeneration() {
 
       const article = await multiStepGenerationService.generateArticleAuto(options.keywords, {
         targetLength: options.length || 'medium',
-        tone: options.tone || 'professional',
+        tone: options.tone || 'casual',
         targetWordCount: options.targetWordCount,
         articleStructureType: options.articleStructureType,
         customInstructions: options.customInstructions,
@@ -50,7 +50,7 @@ export function useArticleGeneration() {
         id: articleWithTopic.id || uuidv4(),
         category: articleWithTopic.category || '',
         status: articleWithTopic.status || 'draft',
-        tone: articleWithTopic.tone || options.tone || 'professional',
+        tone: articleWithTopic.tone || options.tone || 'casual',
         length: articleWithTopic.length || options.length || 'medium',
         articleStructureType: articleWithTopic.articleStructureType || options.articleStructureType || 'standard',
         targetWordCount: articleWithTopic.targetWordCount || options.targetWordCount,

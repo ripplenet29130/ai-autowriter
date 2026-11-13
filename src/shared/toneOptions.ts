@@ -14,7 +14,8 @@ export const sharedToneOptions: Array<{ value: SharedTone; label: string; descri
 ];
 
 export function normalizeSharedTone(tone?: string): SharedTone {
-  return tone === 'casual' ? 'casual' : 'professional';
+  // 2026-11-13 文体が未設定のときはカジュアルを既定にする（保存済みの「プロフェッショナル」はそのまま）
+  return tone === 'professional' || tone === 'technical' || tone === 'da_dearu' ? 'professional' : 'casual';
 }
 
 export function formatSharedTone(tone?: string): string {

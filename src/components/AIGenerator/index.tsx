@@ -34,7 +34,7 @@ export const AIGenerator: React.FC = () => {
 
     const [inputValue, setInputValue] = useState('');
     const [keywords, setKeywords] = useState<string[]>([]);
-    const [tone, setTone] = useState<SharedTone>('professional');
+    const [tone, setTone] = useState<SharedTone>('casual');
     const [length, setLength] = useState<'short' | 'medium' | 'long'>('medium');
     const articleStructureType: ArticleStructureType = 'standard';
     const [generationMode, setGenerationMode] = useState<'auto' | 'interactive'>('interactive');

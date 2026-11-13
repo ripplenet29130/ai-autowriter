@@ -434,7 +434,7 @@ export class MultiStepGenerationService {
                 keywords,
                 trendData,
                 targetLength: options?.targetLength || 'medium',
-                tone: options?.tone || 'professional',
+                tone: options?.tone || 'casual',
                 focusTopics: options?.focusTopics,
                 selectedTitle: options?.selectedTitle, // 縺薙ｌ繧定ｿｽ蜉
                 keywordPreferences: options?.keywordPreferences,
@@ -547,7 +547,7 @@ export class MultiStepGenerationService {
                     section,
                     outline,
                     previousSections: outline.sections.slice(0, i),
-                    tone: options?.tone || 'professional',
+                    tone: options?.tone || 'casual',
                     // ハイブリッド・コンテキスト用の追加情報
                     totalOutline: totalOutlineStr,
                     previousContent: accumulatedContent,
@@ -771,14 +771,14 @@ export class MultiStepGenerationService {
 
         // Step 4: 本文生成（対話モードと同じ経路）
         const article = await this.generateArticleFromPreparedOutline(outline, {
-            tone: options?.tone || 'professional',
+            tone: options?.tone || 'casual',
             targetWordCount,
             customInstructions: effectiveCustomInstructions,
             onProgress: undefined,
         });
         options?.onStepComplete?.(4, article);
 
-        article.tone = options?.tone || 'professional';
+        article.tone = options?.tone || 'casual';
         article.length = options?.targetLength || 'medium';
         article.targetWordCount = targetWordCount;
         article.articleStructureType = options?.articleStructureType || 'standard';
@@ -863,7 +863,7 @@ export class MultiStepGenerationService {
                 })),
             },
             keywords,
-            tone: options?.tone || 'professional',
+            tone: options?.tone || 'casual',
             targetWordCount,
             customInstructions: options?.customInstructions,
             defaultMaxTokens: activeAIConfig.maxTokens || 2000,
@@ -910,7 +910,7 @@ export class MultiStepGenerationService {
         article.content = sharedResult.fullContent;
         article.wordCount = sharedResult.wordCount;
         article.excerpt = this.generateExcerpt(sharedResult.fullContent);
-        article.tone = options?.tone || 'professional';
+        article.tone = options?.tone || 'casual';
         article.targetWordCount = targetWordCount;
         article.length = this.estimateLengthCategory(targetWordCount);
 

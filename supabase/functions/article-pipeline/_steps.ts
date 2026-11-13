@@ -129,7 +129,7 @@ export function normalizeJobSettings(raw: any): JobSettings {
     aiRoles: normalizeAiRoleValues(raw?.aiRoles ?? { writer: raw?.writerAi, factcheck: raw?.checkAi }),
     lengthMode: raw?.lengthMode === 'fixed' ? 'fixed' : 'auto',
     targetWordCount: Number.isFinite(target) && target >= 500 ? Math.min(6000, Math.round(target)) : 2000,
-    tone: raw?.tone === 'casual' ? 'casual' : 'professional',
+    tone: raw?.tone === 'professional' ? 'professional' : 'casual',
     qualityMode: raw?.qualityMode === 'standard' ? 'standard' : 'high',
     customInstructions: String(raw?.customInstructions || '').trim(),
     appendReferences: raw?.appendReferences === true,

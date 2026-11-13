@@ -92,10 +92,8 @@ function normalizeTone(tone?: string): Tone {
   if (tone === 'professional' || tone === 'technical' || tone === 'da_dearu') {
     return 'professional';
   }
-  if (tone === 'casual') {
-    return tone;
-  }
-  return 'professional';
+  // 2026-11-13 文体が未設定のときはカジュアルを既定にする
+  return 'casual';
 }
 
 export function countGeneratedChars(content: string): number {

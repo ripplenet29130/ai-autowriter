@@ -217,7 +217,8 @@ export function resolveWritingTone(value: unknown): WritingTone {
   if (normalized === 'professional' || normalized === 'technical' || normalized === 'da_dearu') {
     return 'professional';
   }
-  return 'professional';
+  // 2026-11-13 文体が未設定のときはカジュアルを既定にする
+  return 'casual';
 }
 
 
