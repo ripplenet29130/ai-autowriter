@@ -4,7 +4,7 @@ import { Article } from '../../types';
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { RegenerateModal, RegenerateOptions } from './RegenerateModal';
-import { normalizeBulletsForPreview } from '../../shared/previewMarkdown';
+import { normalizeMarkdownForPreview } from '../../shared/previewMarkdown';
 import { getSharedToneDescription, normalizeSharedTone, sharedToneOptions, type SharedTone } from '../../shared/toneOptions';
 
 interface ArticleEditorProps {
@@ -166,7 +166,7 @@ export const ArticleEditor: React.FC<ArticleEditorProps> = ({
                     )}
                     <div className="article-prose">
                         <ReactMarkdown remarkPlugins={[remarkGfm]} urlTransform={markdownUrlTransform}>
-                            {normalizeBulletsForPreview(article.content)}
+                            {normalizeMarkdownForPreview(article.content)}
                         </ReactMarkdown>
                     </div>
                 </div>

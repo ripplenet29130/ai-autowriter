@@ -15,7 +15,7 @@ import { FactCheckResult } from '../types/factCheck';
 import { factCheckService } from '../services/factCheckService';
 import { FactCheckResultsDisplay } from './FactCheckResultsDisplay';
 import { ShareDialog } from './ArticleReview/ShareDialog';
-import { normalizeBulletsForPreview } from '../shared/previewMarkdown';
+import { normalizeMarkdownForPreview } from '../shared/previewMarkdown';
 
 const ARTICLES_PAGE_SIZE = 100;
 
@@ -853,7 +853,7 @@ export const ArticlesList: React.FC = () => {
                 ) : (
                   <div className="article-prose">
                     <ReactMarkdown remarkPlugins={[remarkGfm]} urlTransform={markdownUrlTransform}>
-                      {normalizeBulletsForPreview(markedPreviewContent)}
+                      {normalizeMarkdownForPreview(markedPreviewContent)}
                     </ReactMarkdown>
                   </div>
                 )}
