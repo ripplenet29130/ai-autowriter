@@ -45,6 +45,12 @@ export function splitLongParagraphForReadability(text: string): string[] {
 }
 
 
+// 箇条書きの点・番号と字下げを直接付ける（テーマが list-style を消していても点が出るように）
+// 2026-11-13 表の下の箇条書きが点なしで普通の文に見えた
+const LIST_ITEM_STYLE = 'margin:0.4em 0;line-height:1.8;';
+const UL_STYLE = 'list-style:disc outside;padding-left:1.6em;margin:1em 0 1.5em;';
+const OL_STYLE = 'list-style:decimal outside;padding-left:1.8em;margin:1em 0 1.5em;';
+
 export function renderBufferedBlock(lines: string[]): string[] {
   const cleaned = (lines || [])
     .map((line) => String(line || '').trim())
@@ -56,9 +62,9 @@ export function renderBufferedBlock(lines: string[]): string[] {
     const items = cleaned
       .map((line) => line.replace(/^[-*+]\s+/, '').trim())
       .filter(Boolean)
-      .map((item) => `<li>${item}</li>`)
+      .map((item) => `<li style="${LIST_ITEM_STYLE}display:list-item;">${item}</li>`)
       .join('\n');
-    return [`<ul>\n${items}\n</ul>`];
+    return [`<ul style="${UL_STYLE}">\n${items}\n</ul>`];
   }
 
   // Markdown の表（| で始まり、2 行目が区切り行）を HTML の表にする
@@ -70,9 +76,9 @@ export function renderBufferedBlock(lines: string[]): string[] {
     const items = cleaned
       .map((line) => line.replace(/^\d+[.)]\s+/, '').trim())
       .filter(Boolean)
-      .map((item) => `<li>${item}</li>`)
+      .map((item) => `<li style="${LIST_ITEM_STYLE}display:list-item;">${item}</li>`)
       .join('\n');
-    return [`<ol>\n${items}\n</ol>`];
+    return [`<ol style="${OL_STYLE}">\n${items}\n</ol>`];
   }
 
   // 日本語の行どうしは空白なしでつなぐ（英数字どうしのときだけ空白を入れる）
@@ -464,6 +470,31 @@ export function shouldRemoveLeadingTitleLine(line: string, articleTitle: string)
 }
 
 
+const FAQ_HEADING_TEXT = 'よくある疑問';
+const FAQ_H2_PATTERN = /よくある|FAQ|Q\s*&\s*A|Q＆A|質問/i;
+const QUESTION_HEADING_PATTERN = /(か|ですか|ますか|の？|？|\?)$/;
+
+// 記事の後半に質問形の ### が並んでいるのに「## よくある疑問」が無いとき、最初の質問の前に差し込む
+// 2026-11-13 書く AI が FAQ の見出しを作らず、質問の ### を「応急処置」の H2 の下に置いた
+export function insertMissingFaqHeading(lines: string[]): string[] {
+  const headings = lines
+    .map((line, index) => ({ index, level: getHeadingLevel(String(line || '').trim()), text: extractHeadingText(String(line || '')) }))
+    .filter((h) => h.level > 0);
+  if (headings.some((h) => h.level <= 2 && FAQ_H2_PATTERN.test(h.text))) return lines;
+
+  // 最後の「まとめ」より前の見出しを後ろから見て、質問形の ### が続く部分を探す
+  const summaryPos = headings.findIndex((h) => h.level <= 2 && isSummaryHeadingText(h.text));
+  const end = summaryPos === -1 ? headings.length : summaryPos;
+  let start = end;
+  while (start > 0 && headings[start - 1].level >= 3 && QUESTION_HEADING_PATTERN.test(headings[start - 1].text.trim())) {
+    start -= 1;
+  }
+  if (end - start < 2) return lines;
+
+  const insertAt = headings[start].index;
+  return [...lines.slice(0, insertAt), `## ${FAQ_HEADING_TEXT}`, '', ...lines.slice(insertAt)];
+}
+
 export function normalizeGeneratedContentForPublishing(rawContent: string, articleTitle: string): string {
   let text = String(rawContent ?? '')
     .replace(/\r\n/g, '\n')
@@ -509,6 +540,7 @@ export function normalizeGeneratedContentForPublishing(rawContent: string, artic
     lines[i] = `## ${normalizedHeading}`;
   }
 
+  lines = insertMissingFaqHeading(lines);
   lines = normalizeHeadingHierarchy(lines);
   lines = removeDuplicateSummarySections(lines);
 
@@ -529,7 +561,10 @@ export function normalizeGeneratedContentForPublishing(rawContent: string, artic
     const nextIndex = findNextNonEmptyLineIndex(lines, i + 1);
     if (nextIndex === -1) continue;
     const next = String(lines[nextIndex] || '').trim();
-    if (isHeadingLine(next)) continue;
+    // 直後が同じか上の階層の見出しなら中身のない見出しとして消す。
+    // 直後が下の階層（## の下の ###）なら親見出しなので残す
+    // 2026-11-13 「## よくある疑問」の直下に「### 質問」が来ると、## が消えて質問が前の章に入っていた
+    if (isHeadingLine(next) && getHeadingLevel(next) <= getHeadingLevel(trimmed)) continue;
 
     withoutEmptyHeadings.push(rawLine);
   }

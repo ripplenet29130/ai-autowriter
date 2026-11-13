@@ -57,7 +57,18 @@ export function cleanPageTitle(raw: string): string | null {
   if (title.length < 4) return null;
   if (MEANINGLESS_TITLE_PATTERN.test(title)) return null;
   if (/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(title)) return null; // ドメイン名だけ
-  return title.length > 80 ? `${title.slice(0, 78)}…` : title;
+  const trimmed = dropSiteNameSuffix(title);
+  return trimmed.length > 80 ? `${trimmed.slice(0, 78)}…` : trimmed;
+}
+
+// 長いタイトルは最後の「|」「｜」より後ろ（サイト名）を削る。残りが短すぎるときは削らない
+// 2026-11-13 「…直接施工術 | 海老名・神奈川の住宅リフォームなら大信建設へ…」のようにサイト名が長かった
+export function dropSiteNameSuffix(title: string): string {
+  if (title.length <= 40) return title;
+  const parts = title.split(/\s*[|｜]\s*/);
+  if (parts.length < 2) return title;
+  const head = parts.slice(0, -1).join('｜').trim();
+  return head.length >= 8 ? head : title;
 }
 
 function charsetOf(contentType: string | null, head: Uint8Array): string {
